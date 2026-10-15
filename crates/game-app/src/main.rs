@@ -61,7 +61,9 @@ fn main() {
             toy_view::spawn_toy,
             toy_view::paint_screen,
             toy_view::toggle_mode,
+            toy_view::apply_body_dynamics,
             toy_view::animate_parts,
+            toy_view::turbo_lamp,
             publish_state,
         )
             .chain(),
@@ -69,6 +71,8 @@ fn main() {
     .add_systems(FixedUpdate, step_sim);
 
     app.init_resource::<toy_view::ScreenMatHandle>();
+    app.init_resource::<toy_view::BodyRig>();
+    app.init_resource::<toy_view::CrashPulse>();
 
     view::add_view_systems(&mut app);
     app.add_systems(Update, (toy_view::update_screen_mat, publish_state).chain());
@@ -127,10 +131,15 @@ fn step_sim(
     frame.state.reset = false;
 }
 
-fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>, view: Res<toy_view::ViewState>) {
+fn publish_state(
+    sim: Res<Sim>,
+    frame: Res<FrameInput>,
+    view: Res<toy_view::ViewState>,
+    rig: Res<toy_view::BodyRig>,
+) {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -149,6 +158,7 @@ fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>, view: Res<toy_view::View
         frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,
+        rig.0.roll,
         frame.pad_seen,
     );
     #[cfg(target_arch = "wasm32")]

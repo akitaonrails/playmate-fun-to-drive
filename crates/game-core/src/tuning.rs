@@ -32,6 +32,26 @@ pub struct Tuning {
     pub fuel_secs: f32,
     /// Duration of the crash flash / crashed phase.
     pub crash_flash_secs: f32,
+    /// Body dynamics (M11): shared spring stiffness/damping for the rig.
+    pub body_k: f32,
+    pub body_c: f32,
+    /// Roll (radians) at full steer and full speed.
+    pub body_roll_gain: f32,
+    /// Lateral shift (meters, in half-road-width scale) at full steer.
+    pub body_shift_gain: f32,
+    /// Pitch gain from longitudinal acceleration.
+    pub body_pitch_gain: f32,
+    /// Heave wobble amplitude (meters) at full speed and its frequency.
+    pub heave_gain: f32,
+    pub heave_freq: f32,
+    pub heave_k: f32,
+    pub heave_c: f32,
+    /// Crash shake (M12).
+    pub crash_roll_impulse: f32,
+    pub crash_shake_secs: f32,
+    pub crash_shake_gain: f32,
+    /// Roll jitter amplitude (radians) at crash moment.
+    pub crash_shake_roll: f32,
     /// Gamepad analog deadzone.
     pub pad_deadzone: f32,
     /// Keyboard: steering intensity on a short tap (short vs long press,
@@ -59,6 +79,19 @@ impl Default for Tuning {
             collision_forgiveness: 0.25,
             fuel_secs: 75.0,
             crash_flash_secs: 0.9,
+            body_k: 70.0,
+            body_c: 9.5,
+            body_roll_gain: 0.09,
+            body_shift_gain: 0.010,
+            body_pitch_gain: 0.045,
+            heave_gain: 0.0022,
+            heave_freq: 9.0,
+            heave_k: 90.0,
+            heave_c: 10.0,
+            crash_roll_impulse: 1.8,
+            crash_shake_secs: 1.1,
+            crash_shake_gain: 0.020,
+            crash_shake_roll: 0.13,
             pad_deadzone: 0.08,
             kb_tap_intensity: 0.40,
             kb_ramp_secs: 0.8,
@@ -115,6 +148,36 @@ impl Tuning {
         }
         if !(0.2..=3.0).contains(&self.crash_flash_secs) {
             return Err("crash_flash_secs out of [0.2, 3]");
+        }
+        if !(20.0..=200.0).contains(&self.body_k) {
+            return Err("body_k out of [20, 200]");
+        }
+        if !(4.0..=25.0).contains(&self.body_c) {
+            return Err("body_c out of [4, 25]");
+        }
+        if !(0.01..=0.15).contains(&self.body_roll_gain) {
+            return Err("body_roll_gain out of [0.01, 0.15]");
+        }
+        if !(0.001..=0.03).contains(&self.body_shift_gain) {
+            return Err("body_shift_gain out of [0.001, 0.03]");
+        }
+        if !(0.005..=0.12).contains(&self.body_pitch_gain) {
+            return Err("body_pitch_gain out of [0.005, 0.12]");
+        }
+        if !(0.0005..=0.01).contains(&self.heave_gain) {
+            return Err("heave_gain out of [0.0005, 0.01]");
+        }
+        if !(2.0..=25.0).contains(&self.heave_freq) {
+            return Err("heave_freq out of [2, 25]");
+        }
+        if !(1.0..=8.0).contains(&self.crash_roll_impulse) {
+            return Err("crash_roll_impulse out of [1, 8]");
+        }
+        if !(0.02..=0.2).contains(&self.crash_shake_roll) {
+            return Err("crash_shake_roll out of [0.02, 0.2]");
+        }
+        if !(0.2..=2.5).contains(&self.crash_shake_secs) {
+            return Err("crash_shake_secs out of [0.2, 2.5]");
         }
         if !(0.0..=0.3).contains(&self.pad_deadzone) {
             return Err("pad_deadzone out of [0, 0.3]");

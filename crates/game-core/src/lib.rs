@@ -4,12 +4,14 @@
 //! plain `cargo test` (PLAN.md M5+). The presentation layer (game-app) only
 //! consumes the structs and step functions exposed from this crate.
 
+pub mod dynamics;
 pub mod game;
 pub mod input;
 pub mod rng;
 pub mod road;
 pub mod tuning;
 
+pub use dynamics::BodyDynamics;
 pub use game::{EndReason, Game, Phase, StepEvents};
 pub use input::{Gear, InputState, KeyboardSteering};
 pub use rng::Rng;

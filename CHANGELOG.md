@@ -5,6 +5,19 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M11 + M12 — body dynamics & crash flare (done 2026-10-15)
+- game-core `dynamics`: procedural spring-damper rig (docs/dynamics-notes.md)
+  — roll/shift follow steering pseudo-G (antisymmetric, outward), pitch
+  follows longitudinal accel, heave speed wobble; crash = spring impulses +
+  monotonic decaying shake bias with tremble, all deterministic, 7 new unit
+  tests (40 total green).
+- App: rig drives the toy root transform (lean + heave + crash jolt);
+  `roll` published in the state JSON; turbo lamp (amber emissive dot) lit in
+  HIGH gear; gamepad rumble (STRONG_MAX 450 ms) on every crash for all pads.
+- Verified: numeric roll antisymmetry with steer, mirrored-lean eyes PASS,
+  crash flash + settling eyes PASS, turbo lamp eyes PASS. Shake magnitude
+  flagged for the deferred tuning pass (stills undersell motion).
+
 ### M10 — rolling-tube toy look (done 2026-10-15)
 - `Y` cycles the toy_look dial 0 / 0.5 / 1 (flat modern look stays the
   default, REQUEST R6). At 1.0: warm lamp tint + emissive backlit glow on

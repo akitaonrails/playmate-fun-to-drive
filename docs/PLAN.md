@@ -18,8 +18,8 @@ built in from M0. Nothing ships forward with a red test.
 | M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | **done** (eyes QA PASS; proportions fixed) |
 | M9 | Wheel + gear lever animation bound to input | M6, M8 | **done** (eyes QA PASS: wheel mirrors with steer direction) |
 | M10 | Rolling-tube shader effects (flat look stays default; toy-look toggle) | M8 | **done** (dial Y: tint/glow/bands/recess shading; color balance deferred to tuning pass) |
-| M11 | IK-like body dynamics (G-force lean/rotate) | M9 | pending |
-| M12 | Crash flare: whole-toy shake + screen flash + gamepad rumble | M11 | pending |
+| M11 | IK-like body dynamics (G-force lean/rotate) | M9 | **done** (numeric + mirrored-lean QA PASS) |
+| M12 | Crash flare: whole-toy shake + screen flash + gamepad rumble | M11 | **done** (rumble = user manual item) |
 | M13 | Polish: perf pass, fallbacks, packaging, final regression sweep | all | pending |
 
 M7 can start as soon as M3 lands (parallel to M5/M6) since it only needs the
@@ -239,6 +239,14 @@ Fine control/gameplay tweaks happen ONLY after the rest of the plan is done
 - Crash flash alpha 0.85 reads heavy in captures; consider ~0.6.
 - M10 amber tint reads stronger on the bezel than the game image; strengthen
   screen-content warmth/glow (base_color mix + emissive) at the tuning pass.
+- M12 crash shake magnitude: stills undersell the decaying jolt — if it
+  feels weak live, raise crash_shake_roll (0.16 -> ~0.25) and
+  crash_shake_gain (0.02 -> 0.03).
+- Playability (found while scripting QA): first hazard ~7 m in is tight and
+  the keyboard tap floor (0.4 intensity) oversteers — consider hazard start
+  15% -> ~22% of loop and kb_tap_intensity 0.4 -> ~0.3.
+- Verify body-lean direction feels right in playtest (math says outward
+  G-lean; single-sign flip in dynamics.rs if preferred inward).
 
 ## Risks & mitigations
 

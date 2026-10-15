@@ -4,6 +4,8 @@
 
 use bevy::asset::io::embedded::EmbeddedAssetRegistry;
 use bevy::camera::RenderTarget;
+
+use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::world_serialization::WorldAssetRoot;
@@ -34,6 +36,17 @@ pub struct ViewState {
 /// the M10 warm-lamp tint dial).
 #[derive(Resource, Default)]
 pub struct ScreenMatHandle(pub Option<Handle<StandardMaterial>>);
+
+/// Whole-toy spring rig (M11/M12); logic lives in game-core::dynamics.
+#[derive(Resource, Default)]
+pub struct BodyRig(pub game_core::BodyDynamics);
+
+/// Crash pulse captured by the fixed-step sim, consumed by the rig (M12).
+#[derive(Resource, Default)]
+pub struct CrashPulse {
+    pub pending: bool,
+    pub dir: f32,
+}
 
 #[derive(Component)]
 pub struct GameCamera;
@@ -130,14 +143,29 @@ pub fn setup(
     });
 }
 
+/// Turbo lamp on the dash (M12): small emissive dot, lit in HIGH gear.
+#[derive(Resource)]
+pub struct TurboLamp(pub Handle<StandardMaterial>);
+
 pub fn setup_diorama(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let lamp = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.25, 0.05, 0.02),
+        emissive: LinearRgba::new(0.0, 0.0, 0.0, 1.0),
+        ..default()
+    });
+    commands.insert_resource(TurboLamp(lamp.clone()));
     commands
         .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
         .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(meshes.add(Sphere::new(0.0032))),
+                MeshMaterial3d(lamp),
+                Transform::from_translation(Vec3::new(0.062, 0.052, 0.108)),
+            ));
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
@@ -211,12 +239,6 @@ pub fn toggle_mode(
     }
 }
 
-/// Springy under-damped second-order step (shared by wheel & lever).
-fn spring_toward(current: f32, vel: &mut f32, target: f32, k: f32, c: f32, dt: f32) -> f32 {
-    *vel += (k * (target - current) - c * *vel) * dt;
-    current + *vel * dt
-}
-
 /// M9: wheel + gear lever bound to live input. The wheel tracks
 /// `InputState.steer` (full lock ≈ 120°) with mechanical lag; the lever
 /// snaps LOW↔HIGH with a springy overshoot.
@@ -237,7 +259,7 @@ pub fn animate_parts(
         Gear::Low => -0.30,
         Gear::High => 0.30,
     };
-    state.wheel_angle = spring_toward(
+    state.wheel_angle = game_core::dynamics::spring_step(
         state.wheel_angle,
         &mut state.wheel_vel,
         wheel_target,
@@ -245,7 +267,7 @@ pub fn animate_parts(
         13.0,
         dt,
     );
-    state.lever_angle = spring_toward(
+    state.lever_angle = game_core::dynamics::spring_step(
         state.lever_angle,
         &mut state.lever_vel,
         lever_target,
@@ -353,16 +375,72 @@ pub fn update_screen_mat(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn apply_body_dynamics(
+    mut rig: ResMut<BodyRig>,
+    mut pulse: ResMut<CrashPulse>,
+    pads: Query<Entity, With<Gamepad>>,
+    mut rumble: bevy::ecs::message::MessageWriter<GamepadRumbleRequest>,
+    sim: Res<Sim>,
+    frame: Res<crate::FrameInput>,
+    tuning: Res<crate::TuningRes>,
+    time: Res<Time>,
+    mut root: Query<&mut Transform, With<ToyRoot>>,
+) {
+    if pulse.pending {
+        rig.0.crash_impulse(pulse.dir, &tuning.0);
+        pulse.pending = false;
+        // M12: shake the player's hands too (all connected pads)
+        for pad in pads.iter() {
+            rumble.write(GamepadRumbleRequest::Add {
+                duration: std::time::Duration::from_millis(450),
+                intensity: GamepadRumbleIntensity::STRONG_MAX,
+                gamepad: pad,
+            });
+        }
+    }
+    let speed_norm = (sim.0.speed / tuning.0.scroll_speed_high).clamp(0.0, 1.0);
+    rig.0.step(
+        frame.state.steer,
+        speed_norm,
+        sim.0.speed,
+        time.elapsed_secs(),
+        &tuning.0,
+    );
+    let (jx, jz, jroll) = rig.0.shake_offset(time.elapsed_secs(), &tuning.0);
+    if let Ok(mut tf) = root.single_mut() {
+        tf.rotation =
+            Quat::from_rotation_z(rig.0.roll + jroll) * Quat::from_rotation_x(rig.0.pitch);
+        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz);
+    }
+}
+
+/// M12: turbo lamp follows the gear (nods to the Tomy's HIGH-gear light).
+pub fn turbo_lamp(
+    sim: Res<Sim>,
+    lamp: Res<TurboLamp>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if let Some(mut mat) = materials.get_mut(&lamp.0) {
+        let on = matches!(sim.0.gear(), Gear::High);
+        mat.emissive = if on {
+            LinearRgba::new(1.2, 0.35, 0.08, 1.0)
+        } else {
+            LinearRgba::new(0.0, 0.0, 0.0, 1.0)
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn spring_converges_with_slight_overshoot() {
-        let mut angle = 0.0;
-        let mut vel = 0.0;
+        let mut angle: f32 = 0.0;
+        let mut vel: f32 = 0.0;
         for _ in 0..240 {
-            angle = spring_toward(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
+            angle = game_core::dynamics::spring_step(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
         }
         assert!(
             (angle - 1.0).abs() < 1e-3,
@@ -372,11 +450,11 @@ mod tests {
 
     #[test]
     fn spring_is_underdamped_but_stable() {
-        let mut angle = 0.0;
-        let mut vel = 0.0;
+        let mut angle: f32 = 0.0;
+        let mut vel: f32 = 0.0;
         let mut peak: f32 = 0.0;
         for _ in 0..120 {
-            angle = spring_toward(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
+            angle = game_core::dynamics::spring_step(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
             peak = peak.max(angle);
         }
         assert!(peak > 1.02, "wheel spring should visibly overshoot: {peak}");
