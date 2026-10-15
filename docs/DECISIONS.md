@@ -93,6 +93,22 @@ Tomy's trip counter IS the score, so `score = distance (m)`; HIGH gear
 scores faster by covering more ground. The planned `score_rate` multiplier
 was dropped as double-bookkeeping.
 
+## D9 — Ship the glb embedded in the binary (no HTTP asset serving)
+
+**Context**: trunk 0.21 removed public-dir copying; its post-build hooks are
+clobbered by the dist swap; bevy-on-wasm probes `.meta` files that don't
+exist (`AssetMetaCheck::Never` fixes that part); the trunk watcher also
+misses `include_bytes!` inputs.
+
+**Decision**: register `assets/models/toy.glb` via bevy's first-party
+`EmbeddedAssetRegistry` + `include_bytes!` and load
+`embedded://models/toy.glb`. Identical behavior native and wasm, one less
+moving part. Regenerating the model requires touching a watched source file
+(or restarting trunk) — `generate-model.sh` prints that hint.
+
+**Consequences**: +316 KB binary; asset changes need a rebuild (fine for a
+game); dev source of truth stays `assets/models/` with the Blender script.
+
 ## D6 — Gameplay DNA: Playmates silhouette, Tomy rules
 
 **Context**: the family differs (Tomy 1983 has crash/fuel/score rules;

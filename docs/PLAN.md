@@ -13,8 +13,8 @@ built in from M0. Nothing ships forward with a red test.
 | M3 | `tools/astra` instrumentation + ping verified | — | **done** |
 | M4 | Repo bootstrap: git init, stack scaffold (per TECH-STACK.md), `make serve/check/test`, gamepad-on-web spike, screenshot harness | M2 | **done** (physical-pad check pending as manual item) |
 | M5 | Core 2D game loop (flat modern look) | M4 | **done** (all loops verified in-browser) |
-| M6 | Input layer: gamepad analog + keyboard short/long press, HI/LO gear | M5 | **done** (physical-pad check still a user manual item) |
-| M7 | 3D toy shell (astra → Blender headless → glTF), separate wheel/gear parts | M3 | pending |
+| M6 | Input layer: gamepad analog + keyboard short/long press, HI/LO gear | M5 | **done** (gamepad analog confirmed by user 2026-10-15, 80 m run) |
+| M7 | 3D toy shell (astra → Blender headless → glTF), separate wheel/gear parts | M3 | **done** (astra pipeline first-try; eyes QA PASS) |
 | M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | pending |
 | M9 | Wheel + gear lever animation bound to input | M6, M8 | pending |
 | M10 | Rolling-tube shader effects (flat look stays default; toy-look toggle) | M8 | pending |
@@ -225,6 +225,18 @@ hit events; full-loop screenshot sequence QA.
    before any commit; one milestone = one tagged commit series; screenshots
    archived per milestone under `docs/screenshots/M*/` for before/after
    comparison; `CHANGELOG.md` updated per milestone.
+
+## Deferred tuning pass (user directive 2026-10-15)
+
+Fine control/gameplay tweaks happen ONLY after the rest of the plan is done
+(one dedicated tuning session before/at M13). Queue:
+
+- Car sprite reads too big and/or hitbox too punishing (user feedback after
+  first playtest; candidates: car size 120x56 -> ~100x48,
+  `car_half_width` 0.17 -> ~0.14, `collision_forgiveness` 0.25 -> ~0.40).
+- On-screen gamepad indicator ("analog OK") was dropped with the M4 spike
+  HUD; state JSON still has `pad`. Re-add a small HUD hint.
+- Crash flash alpha 0.85 reads heavy in captures; consider ~0.6.
 
 ## Risks & mitigations
 

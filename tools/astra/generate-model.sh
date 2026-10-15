@@ -56,3 +56,10 @@ if [[ $run_blender -eq 1 ]] && command -v "$BLENDER" >/dev/null 2>&1; then
 fi
 
 [[ -s "$glb" ]] && printf 'OK %s\n' "$glb" || { printf 'MISSING %s\n' "$glb" >&2; exit 1; }
+
+cat <<'HINT'
+NOTE: the app embeds the glb via include_bytes. If `trunk serve` is running,
+its watcher will NOT notice the new file — touch crates/game-app/src/main.rs
+or restart the server to force a wasm rebuild.
+HINT
+

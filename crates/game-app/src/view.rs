@@ -66,7 +66,7 @@ fn flat_view_colors() -> ViewColors {
 
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(flat_view_colors());
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     commands.spawn((
         Sprite::from_color(Color::srgb(0.10, 0.13, 0.17), Vec2::new(960.0, 600.0)),

@@ -1,0 +1,1442 @@
+{
+  "asset": "toy.glb",
+  "bounds_world": {
+    "max": [
+      0.125,
+      0.125,
+      0.1991046816110611
+    ],
+    "min": [
+      -0.125,
+      -0.125,
+      0.0
+    ]
+  },
+  "coordinates": {
+    "gltf_rest_transform": "glTF: X right, Y up, Z toward player",
+    "rest_transform": "Blender: X right, Y away from player, Z up"
+  },
+  "count_notes": "Mesh counts are after modifiers; glTF vertices include normal/material splits.",
+  "markers": [
+    {
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            -0.04899999871850014
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.14000000059604645,
+          -0.04899999871850014
+        ]
+      },
+      "name": "SCREEN_MARKER",
+      "parent": "ScreenFrame",
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.04899999871850014
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.04899999871850014,
+          0.14000000059604645
+        ]
+      }
+    }
+  ],
+  "params": {
+    "bevel_segments": 3,
+    "body_bevel": 0.012,
+    "body_center": [
+      0.0,
+      0.007,
+      0.027
+    ],
+    "body_size": [
+      0.25,
+      0.236,
+      0.054
+    ],
+    "bumper_center": [
+      0.0,
+      -0.12,
+      0.025
+    ],
+    "bumper_size": [
+      0.23,
+      0.01,
+      0.02
+    ],
+    "column_length": 0.064,
+    "column_radius": 0.008,
+    "column_tilt_deg": 25.0,
+    "console_center": [
+      0.0,
+      -0.004,
+      0.06
+    ],
+    "console_size": [
+      0.18,
+      0.072,
+      0.045
+    ],
+    "cylinder_segments": 32,
+    "dash_center": [
+      0.0,
+      0.016,
+      0.082
+    ],
+    "dash_pocket_back_clearance": 0.001,
+    "dash_pocket_front_clearance": 0.1,
+    "dash_rotation_x_deg": 55.0,
+    "dash_size": [
+      0.17,
+      0.038,
+      0.008
+    ],
+    "detail_bevel": 0.001,
+    "fender_centers": [
+      [
+        -0.102,
+        0.009,
+        0.044
+      ],
+      [
+        0.102,
+        0.009,
+        0.044
+      ]
+    ],
+    "fender_size": [
+      0.044,
+      0.2,
+      0.045
+    ],
+    "frame_bevel": 0.004,
+    "frame_size": [
+      0.18,
+      0.12,
+      0.012
+    ],
+    "gauge_centers_x": [
+      -0.051,
+      -0.013,
+      0.025
+    ],
+    "gauge_radii": [
+      0.013,
+      0.011,
+      0.007
+    ],
+    "gauge_recess_depth": 0.003,
+    "hood_scoop_center": [
+      0.0,
+      -0.076,
+      0.057
+    ],
+    "hood_scoop_size": [
+      0.102,
+      0.056,
+      0.029
+    ],
+    "key_grip_size": [
+      0.017,
+      0.008,
+      0.004
+    ],
+    "key_length": 0.01,
+    "key_radius": 0.004,
+    "key_slot": [
+      -0.098,
+      -0.042,
+      0.067
+    ],
+    "knob_rings": 12,
+    "knob_segments": 24,
+    "lamp_centers": [
+      [
+        -0.091,
+        -0.091,
+        0.078
+      ],
+      [
+        0.091,
+        -0.091,
+        0.078
+      ]
+    ],
+    "lamp_lens_size": [
+      0.032,
+      0.003,
+      0.019
+    ],
+    "lamp_size": [
+      0.042,
+      0.032,
+      0.03
+    ],
+    "lever_base": [
+      0.098,
+      -0.033,
+      0.0665
+    ],
+    "lever_knob_radius": 0.008,
+    "lever_length": 0.05,
+    "lever_radius": 0.0027,
+    "lever_socket_depth": 0.005,
+    "lever_socket_radius": 0.009,
+    "lever_travel_deg": 20.0,
+    "materials": {
+      "MatBodyRed": {
+        "color": [
+          0.8,
+          0.08,
+          0.06
+        ],
+        "metallic": 0.0,
+        "roughness": 0.45
+      },
+      "MatChrome": {
+        "color": [
+          0.75,
+          0.75,
+          0.78
+        ],
+        "metallic": 0.9,
+        "roughness": 0.25
+      },
+      "MatDashBlack": {
+        "color": [
+          0.06,
+          0.06,
+          0.06
+        ],
+        "metallic": 0.0,
+        "roughness": 0.6
+      },
+      "MatLampPlastic": {
+        "color": [
+          0.85,
+          0.84,
+          0.78
+        ],
+        "metallic": 0.0,
+        "roughness": 0.5
+      },
+      "MatScreenDark": {
+        "color": [
+          0.045,
+          0.055,
+          0.07
+        ],
+        "metallic": 0.0,
+        "roughness": 0.35
+      },
+      "MatTireBlack": {
+        "color": [
+          0.025,
+          0.025,
+          0.025
+        ],
+        "metallic": 0.0,
+        "roughness": 0.8
+      }
+    },
+    "rear_hump_center": [
+      0.0,
+      0.085,
+      0.072
+    ],
+    "rear_hump_size": [
+      0.206,
+      0.072,
+      0.07
+    ],
+    "screen_back_depth": 0.008,
+    "screen_center": [
+      0.0,
+      0.049,
+      0.14
+    ],
+    "screen_size": [
+      0.16,
+      0.1
+    ],
+    "screen_tilt_deg": 12.0,
+    "triangle_budget": 25000,
+    "turbo_lamp_center_x": 0.066,
+    "turbo_lamp_radius": 0.0025,
+    "wheel_center": [
+      0.0,
+      -0.048,
+      0.133
+    ],
+    "wheel_hub_depth": 0.012,
+    "wheel_hub_radius": 0.013,
+    "wheel_major_segments": 64,
+    "wheel_minor_segments": 12,
+    "wheel_radius": 0.055,
+    "wheel_spoke_angles_deg": [
+      30.0,
+      150.0,
+      270.0
+    ],
+    "wheel_spoke_depth": 0.006,
+    "wheel_spoke_width": 0.008,
+    "wheel_tube_radius": 0.005
+  },
+  "parts": [
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "gltf_triangle_count": 1256,
+      "gltf_vertex_count": 2220,
+      "material_names": [
+        "MatBodyRed"
+      ],
+      "mesh_count": 1,
+      "name": "Body",
+      "pivot_description": "Base center at ground level; fixed, Blender world origin.",
+      "pivot_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "polygon_count": 514,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "triangle_count": 1256,
+      "vertex_count": 630
+    },
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            -0.04899999871850014
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.14000000059604645,
+          -0.04899999871850014
+        ]
+      },
+      "gltf_triangle_count": 768,
+      "gltf_vertex_count": 1584,
+      "material_names": [
+        "MatDashBlack"
+      ],
+      "mesh_count": 1,
+      "name": "ScreenFrame",
+      "pivot_description": "Screen recess center; local XY is screen plane, +Z faces player.",
+      "pivot_world": [
+        0.0,
+        0.04899999871850014,
+        0.14000000059604645
+      ],
+      "polygon_count": 412,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.04899999871850014
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.04899999871850014,
+          0.14000000059604645
+        ]
+      },
+      "triangle_count": 768,
+      "vertex_count": 384
+    },
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            -0.04899999871850014
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.14000000059604645,
+          -0.04899999871850014
+        ]
+      },
+      "gltf_triangle_count": 2,
+      "gltf_vertex_count": 4,
+      "material_names": [
+        "MatScreenDark"
+      ],
+      "mesh_count": 1,
+      "name": "Screen",
+      "pivot_description": "Same origin and rotation as ScreenFrame; centered 0.16 x 0.10 m quad.",
+      "pivot_world": [
+        0.0,
+        0.04899999871850014,
+        0.14000000059604645
+      ],
+      "polygon_count": 1,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.2079116553068161,
+            -0.9781476259231567,
+            0.04899999871850014
+          ],
+          [
+            0.0,
+            0.9781476259231567,
+            0.2079116553068161,
+            0.14000000059604645
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.6293203830718994,
+          0.0,
+          0.0,
+          0.7771459817886353
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.04899999871850014,
+          0.14000000059604645
+        ]
+      },
+      "triangle_count": 2,
+      "vertex_count": 4
+    },
+    {
+      "gltf_primitive_count": 3,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.9063077569007874,
+            -0.4226182699203491,
+            0.13300000131130219
+          ],
+          [
+            0.0,
+            0.4226182699203491,
+            0.9063077569007874,
+            0.04800000041723251
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.2164396345615387,
+          0.0,
+          0.0,
+          0.976296067237854
+        ],
+        "scale": [
+          1.0,
+          0.9999999403953552,
+          0.9999999403953552
+        ],
+        "translation": [
+          0.0,
+          0.13300000131130219,
+          0.04800000041723251
+        ]
+      },
+      "gltf_triangle_count": 2608,
+      "gltf_vertex_count": 2624,
+      "material_names": [
+        "MatChrome",
+        "MatDashBlack",
+        "MatTireBlack"
+      ],
+      "mesh_count": 1,
+      "name": "SteeringWheel",
+      "pivot_description": "Steering column top; local Z is column axis, tilted 25 degrees toward -Y.",
+      "pivot_world": [
+        0.0,
+        -0.04800000041723251,
+        0.13300000131130219
+      ],
+      "polygon_count": 1288,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.9063077569007874,
+            -0.4226182699203491,
+            -0.04800000041723251
+          ],
+          [
+            0.0,
+            0.4226182699203491,
+            0.9063077569007874,
+            0.13300000131130219
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.2164396345615387,
+          0.0,
+          0.0,
+          0.976296067237854
+        ],
+        "scale": [
+          1.0,
+          0.9999999403953552,
+          0.9999999403953552
+        ],
+        "translation": [
+          0.0,
+          -0.04800000041723251,
+          0.13300000131130219
+        ]
+      },
+      "triangle_count": 2608,
+      "vertex_count": 1312
+    },
+    {
+      "gltf_primitive_count": 2,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.09799999743700027
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.06650000065565109
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.032999999821186066
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.09799999743700027,
+          0.06650000065565109,
+          0.032999999821186066
+        ]
+      },
+      "gltf_triangle_count": 1160,
+      "gltf_vertex_count": 1098,
+      "material_names": [
+        "MatBodyRed",
+        "MatDashBlack"
+      ],
+      "mesh_count": 1,
+      "name": "GearLever",
+      "pivot_description": "Lever base on dashboard; tilt about local X by +/-20 degrees for LOW/HIGH.",
+      "pivot_world": [
+        0.09799999743700027,
+        -0.032999999821186066,
+        0.06650000065565109
+      ],
+      "polygon_count": 548,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.09799999743700027
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.032999999821186066
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.06650000065565109
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.09799999743700027,
+          -0.032999999821186066,
+          0.06650000065565109
+        ]
+      },
+      "triangle_count": 1160,
+      "vertex_count": 586
+    },
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.09799999743700027
+          ],
+          [
+            0.0,
+            0.5735764503479004,
+            -0.8191520571708679,
+            0.06700000166893005
+          ],
+          [
+            0.0,
+            0.8191520571708679,
+            0.5735764503479004,
+            0.041999999433755875
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.4617486000061035,
+          0.0,
+          0.0,
+          0.8870108127593994
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -0.09799999743700027,
+          0.06700000166893005,
+          0.041999999433755875
+        ]
+      },
+      "gltf_triangle_count": 312,
+      "gltf_vertex_count": 512,
+      "material_names": [
+        "MatChrome"
+      ],
+      "mesh_count": 1,
+      "name": "IgnitionKey",
+      "pivot_description": "Key slot center; local Z is key insertion/rotation axis.",
+      "pivot_world": [
+        -0.09799999743700027,
+        -0.041999999433755875,
+        0.06700000166893005
+      ],
+      "polygon_count": 132,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.09799999743700027
+          ],
+          [
+            0.0,
+            0.5735764503479004,
+            -0.8191520571708679,
+            -0.041999999433755875
+          ],
+          [
+            0.0,
+            0.8191520571708679,
+            0.5735764503479004,
+            0.06700000166893005
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.4617486000061035,
+          0.0,
+          0.0,
+          0.8870108127593994
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -0.09799999743700027,
+          -0.041999999433755875,
+          0.06700000166893005
+        ]
+      },
+      "triangle_count": 312,
+      "vertex_count": 160
+    },
+    {
+      "gltf_primitive_count": 2,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.09099999815225601
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.07800000160932541
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.09099999815225601
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -0.09099999815225601,
+          0.07800000160932541,
+          0.09099999815225601
+        ]
+      },
+      "gltf_triangle_count": 376,
+      "gltf_vertex_count": 768,
+      "material_names": [
+        "MatDashBlack",
+        "MatLampPlastic"
+      ],
+      "mesh_count": 1,
+      "name": "HeadlightLeft",
+      "pivot_description": "Left raised lamp block center (player's left, negative X).",
+      "pivot_world": [
+        -0.09099999815225601,
+        -0.09099999815225601,
+        0.07800000160932541
+      ],
+      "polygon_count": 196,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.09099999815225601
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.09099999815225601
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.07800000160932541
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -0.09099999815225601,
+          -0.09099999815225601,
+          0.07800000160932541
+        ]
+      },
+      "triangle_count": 376,
+      "vertex_count": 192
+    },
+    {
+      "gltf_primitive_count": 2,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.09099999815225601
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.07800000160932541
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.09099999815225601
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.09099999815225601,
+          0.07800000160932541,
+          0.09099999815225601
+        ]
+      },
+      "gltf_triangle_count": 376,
+      "gltf_vertex_count": 768,
+      "material_names": [
+        "MatDashBlack",
+        "MatLampPlastic"
+      ],
+      "mesh_count": 1,
+      "name": "HeadlightRight",
+      "pivot_description": "Right raised lamp block center (player's right, positive X).",
+      "pivot_world": [
+        0.09099999815225601,
+        -0.09099999815225601,
+        0.07800000160932541
+      ],
+      "polygon_count": 196,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.09099999815225601
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.09099999815225601
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.07800000160932541
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.09099999815225601,
+          -0.09099999815225601,
+          0.07800000160932541
+        ]
+      },
+      "triangle_count": 376,
+      "vertex_count": 192
+    },
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.02500000037252903
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.11999999731779099
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.02500000037252903,
+          0.11999999731779099
+        ]
+      },
+      "gltf_triangle_count": 188,
+      "gltf_vertex_count": 384,
+      "material_names": [
+        "MatChrome"
+      ],
+      "mesh_count": 1,
+      "name": "Bumper",
+      "pivot_description": "Base front, centered on bumper bar.",
+      "pivot_world": [
+        0.0,
+        -0.11999999731779099,
+        0.02500000037252903
+      ],
+      "polygon_count": 98,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.11999999731779099
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.02500000037252903
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          -0.11999999731779099,
+          0.02500000037252903
+        ]
+      },
+      "triangle_count": 188,
+      "vertex_count": 96
+    },
+    {
+      "gltf_primitive_count": 1,
+      "gltf_rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5735764503479004,
+            -0.8191520571708679,
+            0.0820000022649765
+          ],
+          [
+            0.0,
+            0.8191520571708679,
+            0.5735764503479004,
+            -0.01600000075995922
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.4617486000061035,
+          0.0,
+          0.0,
+          0.8870108127593994
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.0820000022649765,
+          -0.01600000075995922
+        ]
+      },
+      "gltf_triangle_count": 714,
+      "gltf_vertex_count": 906,
+      "material_names": [
+        "MatDashBlack"
+      ],
+      "mesh_count": 1,
+      "name": "DashPanel",
+      "pivot_description": "Dashboard face center, on the front surface of the instrument panel.",
+      "pivot_world": [
+        0.0,
+        0.01600000075995922,
+        0.0820000022649765
+      ],
+      "polygon_count": 234,
+      "rest_transform": {
+        "matrix_row_major": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5735764503479004,
+            -0.8191520571708679,
+            0.01600000075995922
+          ],
+          [
+            0.0,
+            0.8191520571708679,
+            0.5735764503479004,
+            0.0820000022649765
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_quaternion_xyzw": [
+          0.4617486000061035,
+          0.0,
+          0.0,
+          0.8870108127593994
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.01600000075995922,
+          0.0820000022649765
+        ]
+      },
+      "triangle_count": 714,
+      "vertex_count": 357
+    }
+  ],
+  "schema_version": 1,
+  "totals": {
+    "gltf_triangle_count": 7760,
+    "gltf_vertex_count": 10868,
+    "mesh_count": 10,
+    "polygon_count": 3619,
+    "triangle_count": 7760,
+    "vertex_count": 3913
+  },
+  "units": "meters"
+}

@@ -5,8 +5,10 @@
 //! publishes state for the Playwright harness.
 
 mod bridge;
+mod toy_view;
 mod view;
 
+use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use game_core::{Game, InputState, KeyboardSteering, Tuning};
 
@@ -26,20 +28,42 @@ struct FrameInput {
 fn main() {
     let tuning = Tuning::default();
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Fun to Drive".into(),
-            resolution: bevy::window::WindowResolution::new(960, 600),
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                // wasm: don't probe for .meta files next to assets (they don't exist
+                // in the trunk dist; probing fails asset loads)
+                meta_check: AssetMetaCheck::Never,
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Fun to Drive".into(),
+                    resolution: bevy::window::WindowResolution::new(960, 600),
+                    ..default()
+                }),
+                ..default()
+            }),
+    )
     .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
     .insert_resource(TuningRes(tuning))
     .insert_resource(Sim(Game::new(20261015, &tuning)))
     .init_resource::<FrameInput>()
-    .add_systems(Startup, view::setup)
-    .add_systems(Update, (gather_input, publish_state).chain())
+    .add_systems(
+        Startup,
+        (view::setup, toy_view::setup, toy_view::setup_diorama),
+    )
+    .add_systems(
+        Update,
+        (
+            gather_input,
+            toy_view::spawn_toy,
+            toy_view::toggle_mode,
+            toy_view::wiggle_parts,
+            publish_state,
+        )
+            .chain(),
+    )
     .add_systems(FixedUpdate, step_sim);
 
     view::add_view_systems(&mut app);
@@ -98,10 +122,10 @@ fn step_sim(
     frame.state.reset = false;
 }
 
-fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>) {
+fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>, view: Res<toy_view::ViewState>) {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -115,6 +139,7 @@ fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>) {
             game_core::Gear::Low => "low",
             game_core::Gear::High => "high",
         },
+        view.mode == toy_view::ViewMode::Toy,
         frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,

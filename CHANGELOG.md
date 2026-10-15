@@ -5,6 +5,20 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M7 — 3D toy shell (done 2026-10-15)
+- astra (`gpt-6-astra`) authored a deterministic, parametric Blender 5.2
+  script (`assets/blender/toy.py`) on the first pass: 10 named parts
+  (body, screen frame + screen, steering wheel, gear lever, ignition key,
+  pop-up headlights, bumper, dash panel) + SCREEN_MARKER, 7.8k triangles,
+  glb + parts manifest committed.
+- game-app: 3D "toy view" (T toggles) — desk diorama, camera sitting in
+  front of the toy, sinusoidal wheel wiggle + gear-following lever tilt
+  proving separated pivots; verified via eyes QA (wheel angle deltas seen).
+- Screen quad given a dark "unlit CRT" material (eyes-caught default-gray).
+- Asset plumbing: glb embedded via `EmbeddedAssetRegistry`/`include_bytes`
+  (D9) after trunk 0.21 public-dir/hook dead ends; `AssetMetaCheck::Never`
+  for wasm meta probes.
+
 ### M6 — input layer (done 2026-10-15)
 - `game-core::KeyboardSteering`: short tap = light nudge (0.40), sustained
   hold ramps to full over 0.8 s, release decays fast — unit-tested shape;

@@ -1,0 +1,193 @@
+//! M7: the 3D toy view (PLAN.md) — loads the astra/Blender-generated shell
+//! (`assets/models/toy.glb`), renders it on a desk, and wiggles the separated
+//! wheel/gear parts to prove pivots. T toggles game/toy view.
+
+use bevy::asset::io::embedded::EmbeddedAssetRegistry;
+use bevy::prelude::*;
+use bevy::world_serialization::WorldAssetRoot;
+use game_core::Gear;
+
+use crate::Sim;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    #[default]
+    Game,
+    Toy,
+}
+
+#[derive(Resource, Default)]
+pub struct ViewState {
+    pub mode: ViewMode,
+}
+
+#[derive(Component)]
+pub struct GameCamera;
+
+#[derive(Component)]
+pub struct ToyCamera;
+
+/// Parent of the whole 3D diorama (desk + toy scene); hidden in game mode.
+#[derive(Component)]
+pub struct ToyRoot;
+
+/// Captured rest rotation of a glTF part; wiggles are applied in local space
+/// on top of it every frame (no compounding).
+#[derive(Component)]
+pub struct RestRotation(Quat);
+
+/// Handle to the toy glb; consumed by `spawn_toy` once loaded.
+#[derive(Resource)]
+pub struct ToyGltf(pub Handle<Gltf>);
+
+/// Embed the generated glb into the binary (works identically native + wasm;
+/// no HTTP serving / trunk hooks needed). Dev source of truth stays
+/// `assets/models/toy.glb` via include_bytes.
+pub fn setup(
+    mut commands: Commands,
+    registry: Res<EmbeddedAssetRegistry>,
+    assets: Res<AssetServer>,
+) {
+    commands.init_resource::<ViewState>();
+    registry.insert_asset(
+        std::path::PathBuf::from("models/toy.glb"),
+        std::path::Path::new("models/toy.glb"),
+        include_bytes!("../../../assets/models/toy.glb"),
+    );
+    commands.insert_resource(ToyGltf(assets.load("embedded://models/toy.glb")));
+
+    // sit in front of the toy; its front faces +Z in the exported glTF
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            is_active: false,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.24, 0.44).looking_at(Vec3::new(0.0, 0.09, 0.0), Vec3::Y),
+        ToyCamera,
+    ));
+
+    commands.spawn((
+        Transform::from_xyz(1.5, 2.2, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight {
+            illuminance: 14_000.0,
+            ..default()
+        },
+    ));
+    commands.spawn(AmbientLight {
+        color: Color::srgb(0.95, 0.93, 0.9),
+        brightness: 130.0,
+        ..default()
+    });
+}
+
+pub fn setup_diorama(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands
+        .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.24, 0.22, 0.20),
+                    perceptual_roughness: 0.9,
+                    ..default()
+                })),
+                Transform::from_scale(Vec3::splat(1.2)),
+            ));
+        });
+}
+
+pub fn toggle_mode(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<ViewState>,
+    mut game_cam: Query<&mut Camera, (With<GameCamera>, Without<ToyCamera>)>,
+    mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
+    mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
+) {
+    if keys.just_pressed(KeyCode::KeyT) {
+        state.mode = match state.mode {
+            ViewMode::Game => ViewMode::Toy,
+            ViewMode::Toy => ViewMode::Game,
+        };
+    }
+    let toy = state.mode == ViewMode::Toy;
+    if let Ok(mut cam) = game_cam.single_mut() {
+        cam.is_active = !toy;
+    }
+    if let Ok(mut cam) = toy_cam.single_mut() {
+        cam.is_active = toy;
+    }
+    if let Ok(mut vis) = toy_root.single_mut() {
+        *vis = if toy {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// M7 exit criterion: separated parts visibly animate around their pivots.
+/// The wheel sweeps sinusoidally; the gear lever tilts with the game's gear.
+pub fn wiggle_parts(
+    state: Res<ViewState>,
+    sim: Res<Sim>,
+    time: Res<Time>,
+    mut commands: Commands,
+    mut parts: Query<(Entity, &Name, &mut Transform, Option<&RestRotation>), Without<ToyRoot>>,
+) {
+    if state.mode != ViewMode::Toy {
+        return;
+    }
+    let t = time.elapsed_secs();
+    for (entity, name, mut tf, rest) in parts.iter_mut() {
+        let Some(rest) = rest else {
+            commands.entity(entity).insert(RestRotation(tf.rotation));
+            continue;
+        };
+        let base = rest.0;
+        match name.as_str() {
+            n if n.starts_with("SteeringWheel") => {
+                let angle = (t * 1.4).sin() * 0.5;
+                tf.rotation = base * Quat::from_rotation_z(angle);
+            }
+            n if n.starts_with("GearLever") => {
+                let tilt = match sim.0.gear() {
+                    Gear::Low => -0.30,
+                    Gear::High => 0.30,
+                };
+                tf.rotation = base * Quat::from_rotation_x(tilt);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Spawns the toy scene under `ToyRoot` once the glb finishes loading.
+/// (Direct labeled loads like `toy.glb#Scene0` trip the asset meta-lens on
+/// wasm — loading the Gltf asset and cloning its scene handle works.)
+pub fn spawn_toy(
+    mut commands: Commands,
+    handle: Option<Res<ToyGltf>>,
+    gltfs: Res<Assets<Gltf>>,
+    root: Query<Entity, With<ToyRoot>>,
+) {
+    let Some(handle) = handle else { return };
+    let Some(gltf) = gltfs.get(&handle.0) else {
+        return;
+    };
+    let Some(scene) = gltf.scenes.first() else {
+        return;
+    };
+    if let Ok(root) = root.single() {
+        commands.spawn((
+            WorldAssetRoot(scene.clone()),
+            Transform::IDENTITY,
+            ChildOf(root),
+        ));
+    }
+    commands.remove_resource::<ToyGltf>();
+}
