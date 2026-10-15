@@ -1,148 +1,122 @@
-//! M4 bootstrap scene (PLAN.md): blank-playable canvas + gamepad-on-web spike.
+//! Fun to Drive — M5 app wiring: fixed-step simulation + input + view.
 //!
-//! Deliberately throwaway scaffolding that proves the whole loop:
-//! wasm build -> trunk serve -> input (keyboard + gamepad analog) -> render
-//! -> Playwright screenshot. Replaced by the real game in M5.
+//! Deterministic game logic lives in game-core; this crate only gathers
+//! input, steps the sim on the fixed schedule, renders, and (on wasm)
+//! publishes state for the Playwright harness.
+
+mod bridge;
+mod view;
 
 use bevy::prelude::*;
+use game_core::{Game, InputState, Tuning};
 
-fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Fun to Drive — dev".into(),
-                resolution: bevy::window::WindowResolution::new(960, 600),
-                ..default()
-            }),
-            ..default()
-        }))
-        .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
-        .add_systems(Startup, setup)
-        .add_systems(Update, (steer_car, scroll_stripes, update_hud))
-        .run();
-}
+#[derive(Resource)]
+struct Sim(pub Game);
 
-#[derive(Component)]
-struct Car;
-
-#[derive(Component)]
-struct Stripe;
-
-#[derive(Component)]
-struct Hud;
+#[derive(Resource)]
+struct TuningRes(pub Tuning);
 
 #[derive(Resource, Default)]
-struct SpikeState {
-    steer: f32,
+struct FrameInput {
+    state: InputState,
     pad_seen: bool,
-    gear: game_core::Gear,
 }
 
-fn setup(mut commands: Commands) {
-    commands.insert_resource(SpikeState::default());
-    commands.spawn(Camera2d);
-
-    // placeholder "car": fixed bottom-center, like the toy's decal
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.85, 0.12, 0.10), Vec2::new(120.0, 56.0)),
-        Transform::from_xyz(0.0, -190.0, 0.0),
-        Car,
-    ));
-
-    // placeholder "road stripes": scrolling rows for the M4 screenshot check
-    for i in 0..6 {
-        commands.spawn((
-            Sprite::from_color(Color::srgb(0.30, 0.34, 0.40), Vec2::new(560.0, 14.0)),
-            Transform::from_xyz(0.0, -250.0 + i as f32 * 100.0, -1.0),
-            Stripe,
-        ));
-    }
-
-    commands.spawn((
-        Text::new("booting…"),
-        TextFont {
-            font_size: FontSize::Px(18.0),
+fn main() {
+    let tuning = Tuning::default();
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Fun to Drive".into(),
+            resolution: bevy::window::WindowResolution::new(960, 600),
             ..default()
-        },
-        TextColor(Color::srgb(0.9, 0.9, 0.85)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
-        Hud,
-    ));
+        }),
+        ..default()
+    }))
+    .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
+    .insert_resource(TuningRes(tuning))
+    .insert_resource(Sim(Game::new(20261015, &tuning)))
+    .init_resource::<FrameInput>()
+    .add_systems(Startup, view::setup)
+    .add_systems(Update, (gather_input, publish_state).chain())
+    .add_systems(FixedUpdate, step_sim);
+
+    view::add_view_systems(&mut app);
+    app.run();
 }
 
-/// M4 spike: keyboard + gamepad analog -> one steer value (game-core does the math).
-fn steer_car(
+/// M5 interim input: keyboard-first, gamepad passthrough (formal layer = M6).
+fn gather_input(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
-    mut car: Query<&mut Transform, (With<Car>, Without<Hud>)>,
-    mut state: ResMut<SpikeState>,
-    time: Res<Time>,
+    mut frame: ResMut<FrameInput>,
+    tuning: Res<TuningRes>,
 ) {
-    let tuning = game_core::Tuning::default();
-
-    let mut raw = 0.0;
+    let mut steer = 0.0f32;
     if keys.pressed(KeyCode::ArrowLeft) {
-        raw -= 1.0;
+        steer -= 1.0;
     }
     if keys.pressed(KeyCode::ArrowRight) {
-        raw += 1.0;
+        steer += 1.0;
     }
 
     for pad in &pads {
-        let raw_axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
-        let x = game_core::input::apply_deadzone(raw_axis, tuning.pad_deadzone);
+        let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
+        let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
         if x != 0.0 {
-            raw = x;
-            state.pad_seen = true;
+            steer = x;
+            frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::South) || pad.just_pressed(GamepadButton::RightTrigger2)
         {
-            state.gear = state.gear.toggle();
+            frame.state.gear_up = true;
+            frame.pad_seen = true;
         }
     }
+
+    frame.state.steer = steer.clamp(-1.0, 1.0);
     if keys.just_pressed(KeyCode::KeyG) {
-        state.gear = state.gear.toggle();
+        frame.state.gear_up = true;
     }
-
-    state.steer = raw;
-    if let Ok(mut tf) = car.single_mut() {
-        tf.translation.x = raw * tuning.steer_max * 330.0;
-    }
-    let _ = time.delta();
-}
-
-fn scroll_stripes(mut stripes: Query<&mut Transform, With<Stripe>>, time: Res<Time>) {
-    let tuning = game_core::Tuning::default();
-    let speed = 260.0
-        * match game_core::Gear::Low {
-            game_core::Gear::Low => tuning.scroll_speed_low,
-            game_core::Gear::High => tuning.scroll_speed_high,
-        };
-    for mut tf in &mut stripes {
-        tf.translation.y -= speed * time.delta_secs();
-        if tf.translation.y < -260.0 {
-            tf.translation.y += 600.0;
-        }
+    if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
+        frame.state.reset = true;
     }
 }
 
-fn update_hud(state: Res<SpikeState>, mut hud: Query<&mut Text, With<Hud>>) {
-    if let Ok(mut text) = hud.single_mut() {
-        **text = format!(
-            "fun-to-drive dev | game-core v{} | steer {:+.2} | gear {:?} | gamepad: {}",
-            game_core::version(),
-            state.steer,
-            state.gear,
-            if state.pad_seen {
-                "analog OK"
-            } else {
-                "press/tilt to test"
-            },
-        );
-    }
+fn step_sim(
+    mut sim: ResMut<Sim>,
+    mut frame: ResMut<FrameInput>,
+    tuning: Res<TuningRes>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_secs();
+    let _ = sim.0.step(&frame.state, dt, &tuning.0);
+    // edge-triggered flags are consumed by exactly one fixed step
+    frame.state.gear_up = false;
+    frame.state.reset = false;
+}
+
+fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>) {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+    let payload = format!(
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
+        match sim.0.phase {
+            game_core::Phase::Ready => "ready",
+            game_core::Phase::Running => "running",
+            game_core::Phase::Crashed { .. } => "crashed",
+            game_core::Phase::GameOver { .. } => "gameover",
+        },
+        sim.0.distance,
+        sim.0.speed,
+        sim.0.fuel,
+        match sim.0.gear() {
+            game_core::Gear::Low => "low",
+            game_core::Gear::High => "high",
+        },
+        sim.0.road_x,
+        sim.0.off_road,
+        frame.pad_seen,
+    );
+    #[cfg(target_arch = "wasm32")]
+    bridge::publish_state(&payload);
 }

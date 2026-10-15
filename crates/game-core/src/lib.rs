@@ -4,10 +4,16 @@
 //! plain `cargo test` (PLAN.md M5+). The presentation layer (game-app) only
 //! consumes the structs and step functions exposed from this crate.
 
+pub mod game;
 pub mod input;
+pub mod rng;
+pub mod road;
 pub mod tuning;
 
+pub use game::{EndReason, Game, Phase, StepEvents};
 pub use input::{Gear, InputState};
+pub use rng::Rng;
+pub use road::{Hazard, HazardKind, RoadLoop};
 pub use tuning::Tuning;
 
 /// Crate version stamp (used by the app's HUD and smoke tests).

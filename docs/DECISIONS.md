@@ -73,6 +73,26 @@ written down per milestone (kept in PLAN.md checklists).
 is an original design in the *category* of the toy; no trademarked logos or
 copied decal art in shipped assets.
 
+## D7 — Car static, road moves (toy-authentic steering model)
+
+**Context**: PLAN M5 originally sketched "car lateral position from steering"
+(classic racer). The toy (and the user's request text: "static car image with
+a rolling background") works differently: the car is a fixed decal; the
+printed drum scrolls AND shifts laterally.
+
+**Decision**: game models `road_x` (road center offset at the car row, in
+half-road-widths). Steering shifts the road opposite the steer direction;
+the printed curve drifts the road toward its amplitude; crash when |road_x|
+exceeds the limit (off-road, with grace) or an oncoming hazard crosses the
+car band. Verified live: deterministic crash at the same meterage for the
+same seed+input (regression-friendly).
+
+## D8 — Score = mileage (toy-authentic)
+
+Tomy's trip counter IS the score, so `score = distance (m)`; HIGH gear
+scores faster by covering more ground. The planned `score_rate` multiplier
+was dropped as double-bookkeeping.
+
 ## D6 — Gameplay DNA: Playmates silhouette, Tomy rules
 
 **Context**: the family differs (Tomy 1983 has crash/fuel/score rules;

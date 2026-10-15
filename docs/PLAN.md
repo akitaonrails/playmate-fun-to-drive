@@ -12,7 +12,7 @@ built in from M0. Nothing ships forward with a red test.
 | M2 | Docs: charter + this plan + decisions | M1 | **done 2026-10-15** |
 | M3 | `tools/astra` instrumentation + ping verified | — | **done** |
 | M4 | Repo bootstrap: git init, stack scaffold (per TECH-STACK.md), `make serve/check/test`, gamepad-on-web spike, screenshot harness | M2 | **done** (physical-pad check pending as manual item) |
-| M5 | Core 2D game loop (flat modern look) | M4 | pending |
+| M5 | Core 2D game loop (flat modern look) | M4 | **done** (all loops verified in-browser) |
 | M6 | Input layer: gamepad analog + keyboard short/long press, HI/LO gear | M5 | pending |
 | M7 | 3D toy shell (astra → Blender headless → glTF), separate wheel/gear parts | M3 | pending |
 | M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | pending |

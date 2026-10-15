@@ -16,8 +16,10 @@
   <body>
     <div id="loading">building wasm… (first build takes a while)</div>
     <script>
-      // harness marker: cleared once Bevy paints its first frames
+      // harness markers: readiness + per-frame game state from wasm
       window.__FTD_READY__ = false;
+      window.__FTD_STATE__ = null;
+      window.__ftdPublishState = (s) => { try { window.__FTD_STATE__ = JSON.parse(s); } catch (e) {} };
       const look = () => {
         const c = document.querySelector('canvas');
         if (c && c.width > 0) { window.__FTD_READY__ = true; return; }

@@ -5,6 +5,20 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M5 — core 2D game loop (done 2026-10-15)
+- `game-core`: seeded RNG, generated road drum (curve harmonics + hazards,
+  seamless loop), full game state machine (ready/running/crashed/gameover),
+  road-shift steering model (D7), off-road grace, swept hazard collision,
+  fuel, mileage score (D8) — 28 unit tests green.
+- `game-app`: real game view (road rows/edge marks/dashes, pooled hazards,
+  car decal, HUD score/gear/fuel, crash flash), fixed-timestep sim, wasm
+  state bridge (`window.__FTD_STATE__`).
+- Verified live in headless chromium: start -> run -> off-road crash ->
+  game-over with frozen score; restart (R) + HIGH gear (G) with faster
+  speed/score; hazard-hit crash; deterministic replays (same seed+input =
+  same meterage). eyes.sh caught two real bugs (missing Camera2d, default
+  white road rows) — both fixed and re-verified.
+
 ### M4 — repo bootstrap (done 2026-10-15)
 - Rust workspace: `crates/game-core` (pure logic + unit tests) and
   `crates/game-app` (Bevy 0.20 app, native + wasm32 via trunk 0.21).

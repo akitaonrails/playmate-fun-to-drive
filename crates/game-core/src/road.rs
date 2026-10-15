@@ -1,0 +1,155 @@
+//! The road drum: a fixed, repeating loop with a printed centerline curve and
+//! hazard placements — generated once from a seed, like the toy's printed
+//! drum (the Playmates loop repeated every ~2 s; ours is a few seconds).
+
+use crate::rng::Rng;
+
+pub const CURVE_SAMPLES: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HazardKind {
+    Oncoming,
+    Roadside,
+}
+
+/// All lateral values are normalized: 1.0 = half road width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hazard {
+    pub kind: HazardKind,
+    /// Lateral center relative to the road centerline, in half-widths.
+    pub x: f32,
+    /// Position along the loop, meters in [0, length).
+    pub s: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoadLoop {
+    pub length: f32,
+    pub hazards: Vec<Hazard>,
+    /// Sampled centerline curve, periodic, normalized to max |1.0|.
+    curve: Vec<f32>,
+}
+
+impl RoadLoop {
+    pub fn generate(rng: &mut Rng) -> Self {
+        let length = rng.range(48.0, 72.0);
+
+        // Integer-period harmonics => seamless wrap at the loop joint.
+        let mut phases = [0.0f32; 3];
+        let mut amps = [0.0f32; 3];
+        for i in 0..3 {
+            phases[i] = rng.next_f32() * std::f32::consts::TAU;
+            amps[i] = rng.range(0.3, 1.0) / (i as f32 + 1.0);
+        }
+
+        let mut curve = Vec::with_capacity(CURVE_SAMPLES);
+        let mut peak: f32 = 1.0e-6;
+        for n in 0..CURVE_SAMPLES {
+            let t = n as f32 / CURVE_SAMPLES as f32;
+            let mut v = 0.0;
+            for i in 0..3 {
+                v += amps[i] * (std::f32::consts::TAU * (i as f32 + 1.0) * t + phases[i]).sin();
+            }
+            peak = peak.max(v.abs());
+            curve.push(v);
+        }
+        for v in &mut curve {
+            *v /= peak;
+        }
+
+        let count = rng.range(7.0, 11.0).round() as usize;
+        let lanes = [-0.62f32, 0.0, 0.62];
+        let mut hazards = Vec::with_capacity(count);
+        for k in 0..count {
+            let s = (k as f32 + rng.range(0.25, 0.75)) / count as f32 * length;
+            let lane = lanes[(rng.next_u64() % lanes.len() as u64) as usize];
+            let x = (lane + rng.range(-0.05, 0.05)).clamp(-0.9, 0.9);
+            let kind = if rng.next_f32() < 0.75 {
+                HazardKind::Oncoming
+            } else {
+                HazardKind::Roadside
+            };
+            hazards.push(Hazard { kind, x, s });
+        }
+
+        RoadLoop {
+            length,
+            hazards,
+            curve,
+        }
+    }
+
+    /// Flat loop with explicit hazards: deterministic course for tests and
+    /// simple scenarios (attract mode etc.).
+    pub fn straight(length: f32, hazards: Vec<Hazard>) -> Self {
+        RoadLoop {
+            length,
+            hazards,
+            curve: vec![0.0; CURVE_SAMPLES],
+        }
+    }
+
+    /// Centerline offset at loop position `s` (meters), wrapping smoothly.
+    pub fn curve_at(&self, s: f32) -> f32 {
+        let n = self.curve.len() as f32;
+        let pos = (s.rem_euclid(self.length) / self.length) * n;
+        let i = (pos.floor() as usize) % self.curve.len();
+        let j = (i + 1) % self.curve.len();
+        let f = pos - pos.floor();
+        self.curve[i] * (1.0 - f) + self.curve[j] * f
+    }
+
+    pub fn max_abs_curve(&self) -> f32 {
+        self.curve.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn loop_from(seed: u64) -> RoadLoop {
+        RoadLoop::generate(&mut Rng::new(seed))
+    }
+
+    #[test]
+    fn deterministic_from_seed() {
+        let a = loop_from(99);
+        let b = loop_from(99);
+        assert_eq!(a.length, b.length);
+        assert_eq!(a.hazards, b.hazards);
+    }
+
+    #[test]
+    fn curve_is_periodic_at_joint() {
+        let r = loop_from(1234);
+        let eps = 0.02;
+        assert!((r.curve_at(0.0) - r.curve_at(r.length)).abs() < eps);
+        assert!((r.curve_at(-0.5) - r.curve_at(r.length - 0.5)).abs() < eps);
+    }
+
+    #[test]
+    fn curve_bounded_and_alive() {
+        for seed in [1u64, 2, 5, 8] {
+            let r = loop_from(seed);
+            assert!(r.max_abs_curve() <= 1.0 + 1e-4);
+            assert!(r.max_abs_curve() > 0.9);
+            assert!(r.curve.iter().any(|v| *v != r.curve[0]));
+        }
+    }
+
+    #[test]
+    fn hazards_on_loop_and_spaced() {
+        let r = loop_from(77);
+        assert!((7..=11).contains(&r.hazards.len()));
+        for h in &r.hazards {
+            assert!(h.s >= 0.0 && h.s < r.length);
+            assert!(h.x.abs() <= 0.9);
+        }
+        // roughly even spacing (each within its own slice of the loop)
+        let slot = r.length / r.hazards.len() as f32;
+        for (k, h) in r.hazards.iter().enumerate() {
+            assert!(h.s >= k as f32 * slot && h.s < (k + 1) as f32 * slot + slot);
+        }
+    }
+}

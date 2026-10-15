@@ -9,4 +9,8 @@ license.workspace = true
 game-core = { workspace = true }
 bevy = "0.20"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
 # LTO in workspace release profile trims wasm size.
