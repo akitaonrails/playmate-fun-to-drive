@@ -21,12 +21,19 @@ pub enum ViewMode {
 #[derive(Resource, Default)]
 pub struct ViewState {
     pub mode: ViewMode,
+    /// M10 dial: 0 = flat modern look, 1 = full rolling-tube illusion.
+    pub toy_look: f32,
     /// M9 spring states for the moving parts (angle in radians).
     pub wheel_angle: f32,
     pub wheel_vel: f32,
     pub lever_angle: f32,
     pub lever_vel: f32,
 }
+
+/// Handle of the StandardMaterial on the toy screen (M8 pipeline, kept for
+/// the M10 warm-lamp tint dial).
+#[derive(Resource, Default)]
+pub struct ScreenMatHandle(pub Option<Handle<StandardMaterial>>);
 
 #[derive(Component)]
 pub struct GameCamera;
@@ -88,12 +95,14 @@ pub fn setup(
     );
     image.texture_descriptor.usage |=
         TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
-    commands.insert_resource(GameImage(images.add(image)));
+    let game_image = images.add(image);
+    commands.insert_resource(GameImage(game_image));
     registry.insert_asset(
         std::path::PathBuf::from("models/toy.glb"),
         std::path::Path::new("models/toy.glb"),
         include_bytes!("../../../assets/models/toy.glb"),
     );
+
     commands.insert_resource(ToyGltf(assets.load("embedded://models/toy.glb")));
 
     // sit in front of the toy; its front faces +Z in the exported glTF
@@ -289,13 +298,14 @@ pub fn spawn_toy(
     commands.remove_resource::<ToyGltf>();
 }
 
-/// M8: put the live game texture on the toy's screen quad (unlit so it reads
-/// like a backlit CRT regardless of scene lighting).
+/// M8/M10: put the live game texture on the toy's screen quad via the
+/// rolling-tube material (toy_look dial in `update_screen_mat`).
 #[allow(clippy::type_complexity)]
 pub fn paint_screen(
     mut commands: Commands,
     game_image: Res<GameImage>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut mat_handle: ResMut<ScreenMatHandle>,
     screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
 ) {
     for (entity, name) in screens.iter() {
@@ -305,12 +315,41 @@ pub fn paint_screen(
                 unlit: true,
                 ..default()
             });
+            mat_handle.0 = Some(mat.clone());
             commands
                 .entity(entity)
                 .insert(MeshMaterial3d(mat))
                 .insert(ScreenPainted);
             return; // one screen per toy
         }
+    }
+}
+
+/// M10: drive the screen shader uniforms; `Y` cycles the toy_look dial
+/// (0.0 -> 0.5 -> 1.0 -> 0.0) for manual comparison.
+pub fn update_screen_mat(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut view: ResMut<ViewState>,
+    mat_handle: Res<ScreenMatHandle>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if keys.just_pressed(KeyCode::KeyY) {
+        view.toy_look = match view.toy_look {
+            x if x < 0.25 => 0.5,
+            x if x < 0.75 => 1.0,
+            _ => 0.0,
+        };
+    }
+    let Some(handle) = mat_handle.0.as_ref() else {
+        return;
+    };
+    if let Some(mut mat) = materials.get_mut(handle) {
+        // rolling-tube approximation on the proven StandardMaterial path:
+        // warm lamp tint + emissive backlit glow scale with the dial (band
+        // overlays live in the 2D drum view; see view.rs)
+        let look = view.toy_look;
+        mat.base_color = Color::srgb(1.0, 1.0, 1.0).mix(&Color::srgb(0.92, 0.85, 0.70), look * 0.6);
+        mat.emissive = LinearRgba::new(look * 0.18, look * 0.16, look * 0.12, 1.0);
     }
 }
 

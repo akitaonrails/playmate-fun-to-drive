@@ -28,6 +28,7 @@ struct FrameInput {
 fn main() {
     let tuning = Tuning::default();
     let mut app = App::new();
+
     app.add_plugins(
         DefaultPlugins
             .set(AssetPlugin {
@@ -67,7 +68,10 @@ fn main() {
     )
     .add_systems(FixedUpdate, step_sim);
 
+    app.init_resource::<toy_view::ScreenMatHandle>();
+
     view::add_view_systems(&mut app);
+    app.add_systems(Update, (toy_view::update_screen_mat, publish_state).chain());
     app.run();
 }
 
@@ -126,7 +130,7 @@ fn step_sim(
 fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>, view: Res<toy_view::ViewState>) {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -141,6 +145,7 @@ fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>, view: Res<toy_view::View
             game_core::Gear::High => "high",
         },
         view.mode == toy_view::ViewMode::Toy,
+        view.toy_look,
         frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,

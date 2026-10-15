@@ -5,6 +5,18 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M10 — rolling-tube toy look (done 2026-10-15)
+- `Y` cycles the toy_look dial 0 / 0.5 / 1 (flat modern look stays the
+  default, REQUEST R6). At 1.0: warm lamp tint + emissive backlit glow on
+  the screen material, drum bands scrolling with the drum (2D overlays,
+  physically "printed on the drum"), recess shading at screen edges.
+- Custom WGSL/WESL material route attempted and parked: bevy 0.20 custom
+  materials hit three walls (WESL entry-point processing, asset-server-only
+  `#import` parsing, GpuImage/fallback binding) — documented in DECISIONS
+  D10 for a later retry; the StandardMaterial path is proven and used.
+- A/B verified via eyes QA (bands, edge shading, warmth visible; exact amber
+  balance queued in the deferred tuning pass).
+
 ### M9 — wheel + gear lever bound to input (done 2026-10-15)
 - Steering wheel tracks live `InputState.steer` (~120° full lock) through an
   under-damped spring (mechanical lag feel); gear lever snaps LOW/HIGH with

@@ -109,6 +109,24 @@ moving part. Regenerating the model requires touching a watched source file
 **Consequences**: +316 KB binary; asset changes need a rebuild (fine for a
 game); dev source of truth stays `assets/models/` with the Blender script.
 
+## D10 — M10 effects on the StandardMaterial path (custom WGSL parked)
+
+**Context**: PLAN M10 sketched drum curvature/lamp/grain as a custom shader.
+Bevy 0.20 custom materials hit: (1) WESL files need the WESL processor
+(plain `#import` in a from_wgsl leaf → "no entry point" pipelines); (2)
+shaders must be loaded via the asset server (loader parses imports; direct
+`Assets::add` leaves an invalid leaf); (3) even then our texture binding hit
+the magenta GpuImage fallback. Each fixed in turn; the last remained
+undiagnosed when the timebox hit.
+
+**Decision**: ship M10 on the proven StandardMaterial + 2D-overlay path
+(warm tint, emissive glow, drum bands, recess shading behind the `Y` dial).
+Retry the custom shader (curvature warp, grain, flicker) when bevy 0.20
+custom-material examples/docs mature — or via a post-process pass.
+
+**Consequences**: no UV curvature warp yet (listed in deferred tuning);
+everything else is dial-controlled and testable.
+
 ## D6 — Gameplay DNA: Playmates silhouette, Tomy rules
 
 **Context**: the family differs (Tomy 1983 has crash/fuel/score rules;

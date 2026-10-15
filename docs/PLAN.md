@@ -17,7 +17,7 @@ built in from M0. Nothing ships forward with a red test.
 | M7 | 3D toy shell (astra → Blender headless → glTF), separate wheel/gear parts | M3 | **done** (astra pipeline first-try; eyes QA PASS) |
 | M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | **done** (eyes QA PASS; proportions fixed) |
 | M9 | Wheel + gear lever animation bound to input | M6, M8 | **done** (eyes QA PASS: wheel mirrors with steer direction) |
-| M10 | Rolling-tube shader effects (flat look stays default; toy-look toggle) | M8 | pending |
+| M10 | Rolling-tube shader effects (flat look stays default; toy-look toggle) | M8 | **done** (dial Y: tint/glow/bands/recess shading; color balance deferred to tuning pass) |
 | M11 | IK-like body dynamics (G-force lean/rotate) | M9 | pending |
 | M12 | Crash flare: whole-toy shake + screen flash + gamepad rumble | M11 | pending |
 | M13 | Polish: perf pass, fallbacks, packaging, final regression sweep | all | pending |
@@ -237,6 +237,8 @@ Fine control/gameplay tweaks happen ONLY after the rest of the plan is done
 - On-screen gamepad indicator ("analog OK") was dropped with the M4 spike
   HUD; state JSON still has `pad`. Re-add a small HUD hint.
 - Crash flash alpha 0.85 reads heavy in captures; consider ~0.6.
+- M10 amber tint reads stronger on the bezel than the game image; strengthen
+  screen-content warmth/glow (base_color mix + emissive) at the tuning pass.
 
 ## Risks & mitigations
 

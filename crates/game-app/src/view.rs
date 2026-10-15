@@ -45,6 +45,13 @@ pub struct GearText;
 #[derive(Component)]
 pub struct StatusText;
 
+/// M10 rolling-tube overlays: bands printed on the drum + recess shading.
+#[derive(Component)]
+struct DrumBand;
+
+#[derive(Component)]
+struct RecessShade;
+
 #[derive(Resource, Default)]
 struct ViewColors {
     asphalt: Color,
@@ -184,6 +191,31 @@ pub fn setup(mut commands: Commands) {
         },
         StatusText,
     ));
+
+    // M10: drum bands (printed on the drum, so they live in the 2D view and
+    // scroll with it) and screen-recess shading; alpha driven by toy_look
+    for i in 0..5 {
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                custom_size: Some(Vec2::new(960.0, 8.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, -300.0 + i as f32 * 120.0, 1.2),
+            DrumBand,
+        ));
+    }
+    for (y, h) in [(290.0, 46.0), (252.0, 26.0), (-290.0, 46.0), (-252.0, 26.0)] {
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                custom_size: Some(Vec2::new(960.0, h)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, y, 1.3),
+            RecessShade,
+        ));
+    }
 
     // crash flash overlay
     commands.spawn((
@@ -343,9 +375,46 @@ fn sync_hud(
     }
 }
 
+/// M10: scroll the drum bands with the drum and set overlay alpha by dial.
+fn sync_drum_overlays(
+    sim: Res<crate::Sim>,
+    view: Res<crate::toy_view::ViewState>,
+    time: Res<Time>,
+    mut bands: Query<&mut Transform, With<DrumBand>>,
+    mut shades: Query<&mut Sprite, (With<RecessShade>, Without<DrumBand>)>,
+    mut band_sprites: Query<&mut Sprite, (With<DrumBand>, Without<RecessShade>)>,
+) {
+    let look = view.toy_look;
+    let px_per_s = sim.0.speed / M_PER_PX;
+    for (i, mut tf) in bands.iter_mut().enumerate() {
+        tf.translation.y -= px_per_s * time.delta_secs();
+        if tf.translation.y < -310.0 {
+            tf.translation.y += 600.0;
+        }
+        let _ = i;
+    }
+    for mut sp in band_sprites.iter_mut() {
+        sp.color = Color::srgba(0.0, 0.0, 0.0, look * 0.10);
+    }
+    let big = look > 0.0; // shades: outer strips darker than inner
+    for (i, mut sp) in shades.iter_mut().enumerate() {
+        let outer = i % 2 == 0;
+        let a = if outer { look * 0.30 } else { look * 0.14 };
+        sp.color = Color::srgba(0.0, 0.0, 0.0, a);
+        let _ = big;
+    }
+}
+
 pub fn add_view_systems(app: &mut App) {
     app.add_systems(
         Update,
-        (sync_roads, sync_hazards, sync_flash, sync_hud).chain(),
+        (
+            sync_roads,
+            sync_hazards,
+            sync_flash,
+            sync_drum_overlays,
+            sync_hud,
+        )
+            .chain(),
     );
 }
