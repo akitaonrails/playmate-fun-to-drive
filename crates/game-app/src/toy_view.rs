@@ -21,6 +21,11 @@ pub enum ViewMode {
 #[derive(Resource, Default)]
 pub struct ViewState {
     pub mode: ViewMode,
+    /// M9 spring states for the moving parts (angle in radians).
+    pub wheel_angle: f32,
+    pub wheel_vel: f32,
+    pub lever_angle: f32,
+    pub lever_vel: f32,
 }
 
 #[derive(Component)]
@@ -197,11 +202,19 @@ pub fn toggle_mode(
     }
 }
 
-/// M7 exit criterion: separated parts visibly animate around their pivots.
-/// The wheel sweeps sinusoidally; the gear lever tilts with the game's gear.
-pub fn wiggle_parts(
-    state: Res<ViewState>,
+/// Springy under-damped second-order step (shared by wheel & lever).
+fn spring_toward(current: f32, vel: &mut f32, target: f32, k: f32, c: f32, dt: f32) -> f32 {
+    *vel += (k * (target - current) - c * *vel) * dt;
+    current + *vel * dt
+}
+
+/// M9: wheel + gear lever bound to live input. The wheel tracks
+/// `InputState.steer` (full lock ≈ 120°) with mechanical lag; the lever
+/// snaps LOW↔HIGH with a springy overshoot.
+pub fn animate_parts(
+    mut state: ResMut<ViewState>,
     sim: Res<Sim>,
+    frame: Res<crate::FrameInput>,
     time: Res<Time>,
     mut commands: Commands,
     mut parts: Query<(Entity, &Name, &mut Transform, Option<&RestRotation>), Without<ToyRoot>>,
@@ -209,7 +222,29 @@ pub fn wiggle_parts(
     if state.mode != ViewMode::Toy {
         return;
     }
-    let t = time.elapsed_secs();
+    let dt = time.delta_secs().min(0.05);
+    let wheel_target = frame.state.steer * 2.1; // ~120 deg full lock
+    let lever_target = match sim.0.gear() {
+        Gear::Low => -0.30,
+        Gear::High => 0.30,
+    };
+    state.wheel_angle = spring_toward(
+        state.wheel_angle,
+        &mut state.wheel_vel,
+        wheel_target,
+        90.0,
+        13.0,
+        dt,
+    );
+    state.lever_angle = spring_toward(
+        state.lever_angle,
+        &mut state.lever_vel,
+        lever_target,
+        140.0,
+        11.0,
+        dt,
+    );
+
     for (entity, name, mut tf, rest) in parts.iter_mut() {
         let Some(rest) = rest else {
             commands.entity(entity).insert(RestRotation(tf.rotation));
@@ -218,15 +253,10 @@ pub fn wiggle_parts(
         let base = rest.0;
         match name.as_str() {
             n if n.starts_with("SteeringWheel") => {
-                let angle = (t * 1.4).sin() * 0.5;
-                tf.rotation = base * Quat::from_rotation_z(angle);
+                tf.rotation = base * Quat::from_rotation_z(state.wheel_angle);
             }
             n if n.starts_with("GearLever") => {
-                let tilt = match sim.0.gear() {
-                    Gear::Low => -0.30,
-                    Gear::High => 0.30,
-                };
-                tf.rotation = base * Quat::from_rotation_x(tilt);
+                tf.rotation = base * Quat::from_rotation_x(state.lever_angle);
             }
             _ => {}
         }
@@ -287,6 +317,32 @@ pub fn paint_screen(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spring_converges_with_slight_overshoot() {
+        let mut angle = 0.0;
+        let mut vel = 0.0;
+        for _ in 0..240 {
+            angle = spring_toward(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
+        }
+        assert!(
+            (angle - 1.0).abs() < 1e-3,
+            "should settle at target: {angle}"
+        );
+    }
+
+    #[test]
+    fn spring_is_underdamped_but_stable() {
+        let mut angle = 0.0;
+        let mut vel = 0.0;
+        let mut peak: f32 = 0.0;
+        for _ in 0..120 {
+            angle = spring_toward(angle, &mut vel, 1.0, 90.0, 13.0, 1.0 / 60.0);
+            peak = peak.max(angle);
+        }
+        assert!(peak > 1.02, "wheel spring should visibly overshoot: {peak}");
+        assert!(peak < 1.6, "overshoot must stay bounded: {peak}");
+    }
 
     /// M8 exit criterion: the game canvas and the toy screen quad must share
     /// aspect so the render-to-texture mapping needs no letterboxing.

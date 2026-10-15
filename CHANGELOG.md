@@ -5,6 +5,13 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M9 — wheel + gear lever bound to input (done 2026-10-15)
+- Steering wheel tracks live `InputState.steer` (~120° full lock) through an
+  under-damped spring (mechanical lag feel); gear lever snaps LOW/HIGH with
+  springy overshoot. Replaces the M7 proof-of-pivot sinusoid.
+- Verified live: wheel visibly mirrors between held-left and held-right toy
+  view captures; spring behavior unit-tested (converges, bounded overshoot).
+
 ### M8 — game on the toy screen (done 2026-10-15)
 - 2D game renders into an offscreen 960x600 image; the toy's Screen quad
   carries it as an unlit texture (reads like a backlit CRT). Game stays

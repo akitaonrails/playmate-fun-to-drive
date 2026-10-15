@@ -20,8 +20,8 @@ struct TuningRes(pub Tuning);
 
 #[derive(Resource, Default)]
 struct FrameInput {
-    state: InputState,
-    pad_seen: bool,
+    pub(crate) state: InputState,
+    pub(crate) pad_seen: bool,
     kb: KeyboardSteering,
 }
 
@@ -60,7 +60,7 @@ fn main() {
             toy_view::spawn_toy,
             toy_view::paint_screen,
             toy_view::toggle_mode,
-            toy_view::wiggle_parts,
+            toy_view::animate_parts,
             publish_state,
         )
             .chain(),
