@@ -1,0 +1,12 @@
+[package]
+name = "game-app"
+description = "Fun-to-Drive web game (Bevy): presentation layer, native + wasm32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+game-core = { workspace = true }
+bevy = "0.20"
+
+# LTO in workspace release profile trims wasm size.

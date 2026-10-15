@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fun to Drive — dev</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d0e13; }
+      canvas { display: block; }
+      #loading {
+        position: fixed; inset: 0; display: flex; align-items: center;
+        justify-content: center; color: #9aa3b2; font-family: monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">building wasm… (first build takes a while)</div>
+    <script>
+      // harness marker: cleared once Bevy paints its first frames
+      window.__FTD_READY__ = false;
+      const look = () => {
+        const c = document.querySelector('canvas');
+        if (c && c.width > 0) { window.__FTD_READY__ = true; return; }
+        requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+      setTimeout(() => { const l = document.getElementById('loading'); if (l) l.remove(); }, 1500);
+    </script>
+    <link data-trunk rel="rust" href="Cargo.toml" data-bin="game-app" data-type="main" />
+  </body>
+</html>

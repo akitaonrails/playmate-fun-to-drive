@@ -1,0 +1,8 @@
+[package]
+name = "game-core"
+description = "Pure, deterministic game logic for Fun-to-Drive (no I/O, no window, fully unit-testable)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
