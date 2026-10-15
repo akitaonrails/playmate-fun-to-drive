@@ -134,7 +134,7 @@ fn scroll_stripes(mut stripes: Query<&mut Transform, With<Stripe>>, time: Res<Ti
 fn update_hud(state: Res<SpikeState>, mut hud: Query<&mut Text, With<Hud>>) {
     if let Ok(mut text) = hud.single_mut() {
         **text = format!(
-            "fun-to-drive dev · game-core v{} · steer {:+.2} · gear {:?} · gamepad: {}",
+            "fun-to-drive dev | game-core v{} | steer {:+.2} | gear {:?} | gamepad: {}",
             game_core::version(),
             state.steer,
             state.gear,
