@@ -3,7 +3,9 @@
 //! wheel/gear parts to prove pivots. T toggles game/toy view.
 
 use bevy::asset::io::embedded::EmbeddedAssetRegistry;
+use bevy::camera::RenderTarget;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::world_serialization::WorldAssetRoot;
 use game_core::Gear;
 
@@ -36,6 +38,23 @@ pub struct ToyRoot;
 #[derive(Component)]
 pub struct RestRotation(Quat);
 
+/// Offscreen target the 2D game renders into while in toy mode (M8).
+pub const GAME_W: u32 = 960;
+pub const GAME_H: u32 = 600;
+// toy screen quad size (must match assets/blender/toy.py PARAMS screen_size);
+// aspect-checked against the game canvas in the test below
+#[cfg_attr(not(test), expect(dead_code))]
+pub const SCREEN_W: f32 = 0.16;
+#[cfg_attr(not(test), expect(dead_code))]
+pub const SCREEN_H: f32 = 0.10;
+
+#[derive(Resource)]
+pub struct GameImage(pub Handle<Image>);
+
+/// Marker: the toy screen mesh already carries the game texture material.
+#[derive(Component)]
+pub struct ScreenPainted;
+
 /// Handle to the toy glb; consumed by `spawn_toy` once loaded.
 #[derive(Resource)]
 pub struct ToyGltf(pub Handle<Gltf>);
@@ -47,8 +66,24 @@ pub fn setup(
     mut commands: Commands,
     registry: Res<EmbeddedAssetRegistry>,
     assets: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     commands.init_resource::<ViewState>();
+    let size = Extent3d {
+        width: GAME_W,
+        height: GAME_H,
+        ..default()
+    };
+    let mut image = Image::new_fill(
+        size,
+        TextureDimension::D2,
+        &[12, 14, 18, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::all(),
+    );
+    image.texture_descriptor.usage |=
+        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
+    commands.insert_resource(GameImage(images.add(image)));
     registry.insert_asset(
         std::path::PathBuf::from("models/toy.glb"),
         std::path::Path::new("models/toy.glb"),
@@ -63,7 +98,7 @@ pub fn setup(
             is_active: false,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.24, 0.44).looking_at(Vec3::new(0.0, 0.09, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 0.31, 0.42).looking_at(Vec3::new(0.0, 0.105, 0.0), Vec3::Y),
         ToyCamera,
     ));
 
@@ -101,12 +136,26 @@ pub fn setup_diorama(
         });
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn toggle_mode(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<ViewState>,
-    mut game_cam: Query<&mut Camera, (With<GameCamera>, Without<ToyCamera>)>,
+    game_image: Res<GameImage>,
+    mut game_cam: Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
     mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
     mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
+    mut hud_texts: Query<
+        &mut Visibility,
+        (
+            Or<(
+                With<crate::view::ScoreText>,
+                With<crate::view::GearText>,
+                With<crate::view::StatusText>,
+            )>,
+            Without<ToyRoot>,
+        ),
+    >,
 ) {
     if keys.just_pressed(KeyCode::KeyT) {
         state.mode = match state.mode {
@@ -115,8 +164,17 @@ pub fn toggle_mode(
         };
     }
     let toy = state.mode == ViewMode::Toy;
-    if let Ok(mut cam) = game_cam.single_mut() {
-        cam.is_active = !toy;
+    if let Ok((entity, mut cam)) = game_cam.single_mut() {
+        cam.is_active = true; // always renders: window in game mode, texture in toy mode
+        let target = if toy {
+            RenderTarget::Image(bevy::camera::ImageRenderTarget {
+                handle: game_image.0.clone(),
+                scale_factor: 1.0,
+            })
+        } else {
+            RenderTarget::Window(bevy::window::WindowRef::default())
+        };
+        commands.entity(entity).insert(target);
     }
     if let Ok(mut cam) = toy_cam.single_mut() {
         cam.is_active = toy;
@@ -126,6 +184,15 @@ pub fn toggle_mode(
             Visibility::Visible
         } else {
             Visibility::Hidden
+        };
+    }
+    // window-space HUD text only in game mode; in toy mode the game texture
+    // on the toy screen carries the world sprites (road, car, fuel bar)
+    for mut vis in hud_texts.iter_mut() {
+        *vis = if toy {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
         };
     }
 }
@@ -190,4 +257,43 @@ pub fn spawn_toy(
         ));
     }
     commands.remove_resource::<ToyGltf>();
+}
+
+/// M8: put the live game texture on the toy's screen quad (unlit so it reads
+/// like a backlit CRT regardless of scene lighting).
+#[allow(clippy::type_complexity)]
+pub fn paint_screen(
+    mut commands: Commands,
+    game_image: Res<GameImage>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
+) {
+    for (entity, name) in screens.iter() {
+        if name.as_str().starts_with("Screen") && name.as_str() != "ScreenFrame" {
+            let mat = materials.add(StandardMaterial {
+                base_color_texture: Some(game_image.0.clone()),
+                unlit: true,
+                ..default()
+            });
+            commands
+                .entity(entity)
+                .insert(MeshMaterial3d(mat))
+                .insert(ScreenPainted);
+            return; // one screen per toy
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M8 exit criterion: the game canvas and the toy screen quad must share
+    /// aspect so the render-to-texture mapping needs no letterboxing.
+    #[test]
+    fn game_and_screen_aspects_match() {
+        let game = GAME_W as f32 / GAME_H as f32;
+        let screen = SCREEN_W / SCREEN_H;
+        assert!((game - screen).abs() < 1e-3, "{game} vs {screen}");
+    }
 }

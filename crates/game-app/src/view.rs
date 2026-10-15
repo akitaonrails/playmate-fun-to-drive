@@ -37,13 +37,13 @@ struct FlashOverlay;
 struct FuelBarFill;
 
 #[derive(Component)]
-struct ScoreText;
+pub struct ScoreText;
 
 #[derive(Component)]
-struct GearText;
+pub struct GearText;
 
 #[derive(Component)]
-struct StatusText;
+pub struct StatusText;
 
 #[derive(Resource, Default)]
 struct ViewColors {

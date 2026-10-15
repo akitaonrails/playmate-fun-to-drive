@@ -30,16 +30,16 @@ PARAMS = {
     "console_size": (0.180, 0.072, 0.045),
     "console_center": (0.0, -0.004, 0.060),
     "screen_size": (0.160, 0.100),
-    "screen_center": (0.0, 0.049, 0.140),
+    "screen_center": (0.0, 0.049, 0.170),
     "screen_tilt_deg": 12.0,  # From vertical; face normal points toward -Y/up.
     "frame_size": (0.180, 0.120, 0.012),
     "frame_bevel": 0.004,
     "screen_back_depth": 0.008,
-    "wheel_radius": 0.055,  # Outer radius, including tube.
+    "wheel_radius": 0.048,  # Outer radius, including tube.
     "wheel_tube_radius": 0.005,
     "wheel_major_segments": 64,
     "wheel_minor_segments": 12,
-    "wheel_center": (0.0, -0.048, 0.133),
+    "wheel_center": (0.0, -0.048, 0.105),
     "column_tilt_deg": 25.0,
     "column_length": 0.064,
     "column_radius": 0.008,

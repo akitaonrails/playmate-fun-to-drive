@@ -58,6 +58,7 @@ fn main() {
         (
             gather_input,
             toy_view::spawn_toy,
+            toy_view::paint_screen,
             toy_view::toggle_mode,
             toy_view::wiggle_parts,
             publish_state,

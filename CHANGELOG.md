@@ -5,6 +5,17 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M8 — game on the toy screen (done 2026-10-15)
+- 2D game renders into an offscreen 960x600 image; the toy's Screen quad
+  carries it as an unlit texture (reads like a backlit CRT). Game stays
+  playable in toy view; aspect matched by construction (unit test).
+- Toy proportions corrected to the real toy (screen raised, wheel lowered)
+  so the player car is visible over the wheel rim from the front camera.
+- Window-space HUD text hidden in toy mode (world sprites — road/car/fuel
+  bar — render inside the texture); eyes QA PASS on all checks.
+- Bevy 0.20 notes: RenderTarget is a component now (Camera.target field is
+  gone); Image::new_fill takes RenderAssetUsages (usage bits OR'd after).
+
 ### M7 — 3D toy shell (done 2026-10-15)
 - astra (`gpt-6-astra`) authored a deterministic, parametric Blender 5.2
   script (`assets/blender/toy.py`) on the first pass: 10 named parts

@@ -15,7 +15,7 @@ built in from M0. Nothing ships forward with a red test.
 | M5 | Core 2D game loop (flat modern look) | M4 | **done** (all loops verified in-browser) |
 | M6 | Input layer: gamepad analog + keyboard short/long press, HI/LO gear | M5 | **done** (gamepad analog confirmed by user 2026-10-15, 80 m run) |
 | M7 | 3D toy shell (astra → Blender headless → glTF), separate wheel/gear parts | M3 | **done** (astra pipeline first-try; eyes QA PASS) |
-| M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | pending |
+| M8 | Game → toy screen mapping (render-to-texture) | M5, M7 | **done** (eyes QA PASS; proportions fixed) |
 | M9 | Wheel + gear lever animation bound to input | M6, M8 | pending |
 | M10 | Rolling-tube shader effects (flat look stays default; toy-look toggle) | M8 | pending |
 | M11 | IK-like body dynamics (G-force lean/rotate) | M9 | pending |
