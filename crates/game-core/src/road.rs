@@ -53,6 +53,17 @@ impl RoadLoop {
             peak = peak.max(v.abs());
             curve.push(v);
         }
+        // warm-up/warm-down: amplitude fades in over the first 20% of the
+        // loop and out over the last 10%, so runs start gentle and the loop
+        // joint stays smooth (a cold full-amplitude first curve is unfair).
+        // Peak is re-normalized AFTER the fade so max |curve| stays 1.0.
+        let n = CURVE_SAMPLES as f32;
+        for (i, v) in curve.iter_mut().enumerate() {
+            let i = i as f32;
+            let fade = (i / (0.20 * n)).min((n - i) / (0.10 * n)).clamp(0.0, 1.0);
+            *v *= fade;
+        }
+        let peak = curve.iter().fold(1.0e-6f32, |m, v| m.max(v.abs()));
         for v in &mut curve {
             *v /= peak;
         }
@@ -61,7 +72,9 @@ impl RoadLoop {
         let lanes = [-0.62f32, 0.0, 0.62];
         let mut hazards = Vec::with_capacity(count);
         for k in 0..count {
-            let s = (k as f32 + rng.range(0.25, 0.75)) / count as f32 * length;
+            // first hazard no earlier than 15% into the loop (fair start)
+            let t = 0.15 + 0.85 * (k as f32 + rng.range(0.25, 0.75)) / count as f32;
+            let s = t * length;
             let lane = lanes[(rng.next_u64() % lanes.len() as u64) as usize];
             let x = (lane + rng.range(-0.05, 0.05)).clamp(-0.9, 0.9);
             let kind = if rng.next_f32() < 0.75 {
@@ -129,6 +142,25 @@ mod tests {
     }
 
     #[test]
+    fn loop_starts_gentle_and_joins_smoothly() {
+        let r = loop_from(1234);
+        let peak = r.max_abs_curve();
+        let early: Vec<f32> = r
+            .curve
+            .iter()
+            .take((CURVE_SAMPLES as f32 * 0.15) as usize)
+            .map(|v| v.abs())
+            .collect();
+        let early_max = early.iter().cloned().fold(0.0f32, f32::max);
+        assert!(
+            early_max < 0.65 * peak,
+            "first 15% should be gentler: {early_max} vs peak {peak}"
+        );
+        assert!(r.curve.first().unwrap().abs() < 1e-4);
+        // joint smoothness itself is covered by curve_is_periodic_at_joint
+    }
+
+    #[test]
     fn curve_bounded_and_alive() {
         for seed in [1u64, 2, 5, 8] {
             let r = loop_from(seed);
@@ -146,10 +178,15 @@ mod tests {
             assert!(h.s >= 0.0 && h.s < r.length);
             assert!(h.x.abs() <= 0.9);
         }
-        // roughly even spacing (each within its own slice of the loop)
-        let slot = r.length / r.hazards.len() as f32;
+        // roughly even spacing in the playable window [15%, 100%) of the loop
+        let span = r.length * 0.85;
+        let slot = span / r.hazards.len() as f32;
+        for h in &r.hazards {
+            assert!(h.s >= r.length * 0.15 - 1e-4);
+        }
         for (k, h) in r.hazards.iter().enumerate() {
-            assert!(h.s >= k as f32 * slot && h.s < (k + 1) as f32 * slot + slot);
+            let rel = h.s - r.length * 0.15;
+            assert!(rel >= k as f32 * slot - 1e-4 && rel < (k + 1) as f32 * slot + slot);
         }
     }
 }

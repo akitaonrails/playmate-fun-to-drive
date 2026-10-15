@@ -11,7 +11,7 @@ pub mod road;
 pub mod tuning;
 
 pub use game::{EndReason, Game, Phase, StepEvents};
-pub use input::{Gear, InputState};
+pub use input::{Gear, InputState, KeyboardSteering};
 pub use rng::Rng;
 pub use road::{Hazard, HazardKind, RoadLoop};
 pub use tuning::Tuning;

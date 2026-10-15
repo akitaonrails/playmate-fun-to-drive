@@ -5,6 +5,18 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M6 — input layer (done 2026-10-15)
+- `game-core::KeyboardSteering`: short tap = light nudge (0.40), sustained
+  hold ramps to full over 0.8 s, release decays fast — unit-tested shape;
+  gamepad analog (with deadzone) overrides the keyboard value.
+- Fairness fixes driven by live scenarios: road loop now eases in (curve
+  amplitude fade-in/-out, hazards placed from 15% of the loop) — verified:
+  six 120 ms taps keep the car alive past 77 m; holds still reach full steer
+  and can crash.
+- Harness: state timeline snapshots are awaited (label/value desync fixed),
+  `--quickkeys` tap mode for screenshot-free input scripts; `steer` added to
+  the published state JSON.
+
 ### M5 — core 2D game loop (done 2026-10-15)
 - `game-core`: seeded RNG, generated road drum (curve harmonics + hazards,
   seamless loop), full game state machine (ready/running/crashed/gameover),

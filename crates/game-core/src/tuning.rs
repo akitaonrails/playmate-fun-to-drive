@@ -34,6 +34,13 @@ pub struct Tuning {
     pub crash_flash_secs: f32,
     /// Gamepad analog deadzone.
     pub pad_deadzone: f32,
+    /// Keyboard: steering intensity on a short tap (short vs long press,
+    /// REQUEST R0/R8).
+    pub kb_tap_intensity: f32,
+    /// Keyboard: seconds of hold to ramp from tap intensity to full steer.
+    pub kb_ramp_secs: f32,
+    /// Keyboard: release decay rate (higher = snappier centering).
+    pub kb_release_decay: f32,
 }
 
 impl Default for Tuning {
@@ -53,6 +60,9 @@ impl Default for Tuning {
             fuel_secs: 75.0,
             crash_flash_secs: 0.9,
             pad_deadzone: 0.08,
+            kb_tap_intensity: 0.40,
+            kb_ramp_secs: 0.8,
+            kb_release_decay: 9.0,
         }
     }
 }
@@ -108,6 +118,15 @@ impl Tuning {
         }
         if !(0.0..=0.3).contains(&self.pad_deadzone) {
             return Err("pad_deadzone out of [0, 0.3]");
+        }
+        if !(0.15..=0.8).contains(&self.kb_tap_intensity) {
+            return Err("kb_tap_intensity out of [0.15, 0.8]");
+        }
+        if !(0.2..=2.0).contains(&self.kb_ramp_secs) {
+            return Err("kb_ramp_secs out of [0.2, 2.0]");
+        }
+        if !(3.0..=20.0).contains(&self.kb_release_decay) {
+            return Err("kb_release_decay out of [3, 20]");
         }
         Ok(())
     }

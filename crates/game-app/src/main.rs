@@ -8,7 +8,7 @@ mod bridge;
 mod view;
 
 use bevy::prelude::*;
-use game_core::{Game, InputState, Tuning};
+use game_core::{Game, InputState, KeyboardSteering, Tuning};
 
 #[derive(Resource)]
 struct Sim(pub Game);
@@ -20,6 +20,7 @@ struct TuningRes(pub Tuning);
 struct FrameInput {
     state: InputState,
     pad_seen: bool,
+    kb: KeyboardSteering,
 }
 
 fn main() {
@@ -51,20 +52,21 @@ fn gather_input(
     pads: Query<&Gamepad>,
     mut frame: ResMut<FrameInput>,
     tuning: Res<TuningRes>,
+    time: Res<Time>,
 ) {
-    let mut steer = 0.0f32;
-    if keys.pressed(KeyCode::ArrowLeft) {
-        steer -= 1.0;
-    }
-    if keys.pressed(KeyCode::ArrowRight) {
-        steer += 1.0;
-    }
+    // keyboard short/long-press shaping (M6, logic tested in game-core)
+    let mut steer = frame.kb.update(
+        keys.pressed(KeyCode::ArrowLeft),
+        keys.pressed(KeyCode::ArrowRight),
+        time.delta_secs(),
+        &tuning.0,
+    );
 
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
         let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
         if x != 0.0 {
-            steer = x;
+            steer = x; // analog stick overrides the keyboard shape
             frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::South) || pad.just_pressed(GamepadButton::RightTrigger2)
@@ -99,7 +101,7 @@ fn step_sim(
 fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>) {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -113,6 +115,7 @@ fn publish_state(sim: Res<Sim>, frame: Res<FrameInput>) {
             game_core::Gear::Low => "low",
             game_core::Gear::High => "high",
         },
+        frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,
         frame.pad_seen,
