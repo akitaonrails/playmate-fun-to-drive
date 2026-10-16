@@ -283,7 +283,9 @@ pub fn animate_parts(
         return;
     }
     let dt = time.delta_secs().min(0.05);
-    let wheel_target = frame.state.steer * 2.1; // ~120 deg full lock
+    // invert so turning LEFT rotates the wheel counter-clockwise as the
+    // player sees it (positive local-Z rotation is CCW from the player side)
+    let wheel_target = -frame.state.steer * 2.1; // ~120 deg full lock
     let lever_target = match sim.0.gear() {
         Gear::Low => -0.30,
         Gear::High => 0.30,

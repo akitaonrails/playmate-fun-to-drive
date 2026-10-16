@@ -20,7 +20,7 @@
       #loading .hint { font-size: 12px; color: #5d6675; }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
-  <link rel="modulepreload" href="/game-app-be25279528409a61.js" crossorigin="anonymous" integrity="sha384-LxwDeg+JBjUmZoOhK2hmhnVZj5PZ4tgpjgPAZrU1aizhkROFrTJwcFBzdpFccgx4"><link rel="preload" href="/game-app-be25279528409a61_bg.wasm" crossorigin="anonymous" integrity="sha384-vf0w1NiUelB7FS4NFg8VrUQZolj4GAl9xx26Qerve/CL32i9BdfRbE9p9r0EhZCk" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/game-app-5341693c53e9866d.js" crossorigin="anonymous" integrity="sha384-LxwDeg+JBjUmZoOhK2hmhnVZj5PZ4tgpjgPAZrU1aizhkROFrTJwcFBzdpFccgx4"><link rel="preload" href="/game-app-5341693c53e9866d_bg.wasm" crossorigin="anonymous" integrity="sha384-rfgmhpDKnYV/7k6aUj5L2tp0xmbL8d/t6F9PF14y/8rx2G4ACjWQ518Wf8UfsLk0" as="fetch" type="application/wasm"></head>
   <body>
     <div id="loading">
       <div class="wheel"></div>
@@ -46,8 +46,8 @@
     </script>
     
 <script type="module">
-import init, * as bindings from '/game-app-be25279528409a61.js';
-const wasm = await init({ module_or_path: '/game-app-be25279528409a61_bg.wasm' });
+import init, * as bindings from '/game-app-5341693c53e9866d.js';
+const wasm = await init({ module_or_path: '/game-app-5341693c53e9866d_bg.wasm' });
 
 
 window.wasmBindings = bindings;

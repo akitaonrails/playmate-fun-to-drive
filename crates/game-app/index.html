@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fun to Drive</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #0d0e13; }
-      canvas { display: block; }
+      html, body { margin: 0; width: 100%; height: 100%; background: #0d0e13; }
+      /* winit writes inline width/height on the canvas; !important wins and
+         stretches the render to fill the browser window */
+      canvas { display: block; width: 100vw !important; height: 100vh !important; }
       #loading {
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: #9aa3b2;

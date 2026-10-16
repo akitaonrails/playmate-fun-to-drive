@@ -5,6 +5,19 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.1.0 fix 3 — wheel direction, screen occlusion, fullscreen canvas (2026-10-16)
+
+- Wheel direction inverted (user report): left steer now rotates the toy
+  wheel counter-clockwise as the player sees it — verified unambiguously
+  via a mirrored capture pair (top spoke at 10 o'clock on left, 1-2
+  o'clock on right).
+- The enlarged black cockpit band covered the lower screen — band lowered
+  and slimmed; road + car fully visible again (eyes QA PASS).
+- Canvas now fills the browser window: winit writes inline 960x600 styles
+  on the canvas, so CSS `!important` 100vw/100vh stretches the render
+  (internal resolution/logic stay 960x600); `fit_canvas_to_parent` also
+  enabled. Verified filling 1280x800 edge to edge.
+
 ### v0.1.0 fix 2 — faithful toy model + wheel axis (2026-10-15)
 
 - User report: the steering wheel turned about the wrong axis (felt like Y
