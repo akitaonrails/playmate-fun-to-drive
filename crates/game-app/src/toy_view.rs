@@ -30,6 +30,9 @@ pub struct ViewState {
     pub wheel_vel: f32,
     pub lever_angle: f32,
     pub lever_vel: f32,
+    /// M13: ignition key twist when the game runs.
+    pub key_angle: f32,
+    pub key_vel: f32,
 }
 
 /// Handle of the StandardMaterial on the toy screen (M8 pipeline, kept for
@@ -288,6 +291,21 @@ pub fn animate_parts(
             }
             n if n.starts_with("GearLever") => {
                 tf.rotation = base * Quat::from_rotation_x(state.lever_angle);
+            }
+            n if n.starts_with("IgnitionKey") => {
+                let target = match sim.0.phase {
+                    game_core::Phase::Ready => 0.0,
+                    _ => 0.85,
+                };
+                state.key_angle = game_core::dynamics::spring_step(
+                    state.key_angle,
+                    &mut state.key_vel,
+                    target,
+                    140.0,
+                    11.0,
+                    dt,
+                );
+                tf.rotation = base * Quat::from_rotation_x(state.key_angle);
             }
             _ => {}
         }

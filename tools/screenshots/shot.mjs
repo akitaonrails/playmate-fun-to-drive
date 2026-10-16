@@ -21,6 +21,7 @@ const outDir = resolve(arg('out', '../../docs/screenshots/M5'));
 const frames = parseInt(arg('frames', '2'), 10);
 const keysArg = arg('keys', '');
 const quick = args.includes('--quickkeys');
+const wantFps = args.includes('--fps');
 const waitMs = parseInt(arg('wait', '0'), 10);
 
 mkdirSync(outDir, { recursive: true });
@@ -59,6 +60,30 @@ if (keysArg) {
     if (quick) await page.waitForTimeout(180); // release gap between taps
     await page.waitForTimeout(120);
   }
+}
+if (wantFps) {
+  // sample rAF deltas for ~2s (software-GL numbers are pessimistic)
+  const fps = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const dt = [];
+        let last = performance.now();
+        const t0 = last;
+        const tick = (t) => {
+          if (t - t0 > 2000) {
+            dt.sort((a, b) => a - b);
+            const median = dt[Math.floor(dt.length / 2)];
+            resolve({ frames: dt.length, medianMs: +median.toFixed(2), avgFps: +(1000 / median).toFixed(1) });
+            return;
+          }
+          dt.push(t - last);
+          last = t;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  console.error(JSON.stringify({ fps }));
 }
 if (waitMs) await page.waitForTimeout(waitMs);
 await snap('end');

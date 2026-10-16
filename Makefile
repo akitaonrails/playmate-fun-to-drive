@@ -1,6 +1,6 @@
 SERVE_PORT ?= 8080
 
-.PHONY: serve check test build-native build-wasm shots ci clean
+.PHONY: serve check test build-native build-wasm build-wasm-webgpu package shots ci clean
 
 serve: ## build + serve with auto-reload, open in browser
 	cd crates/game-app && trunk serve --port $(SERVE_PORT) --open
@@ -18,7 +18,18 @@ build-native: ## native release binary
 	cargo build --release -p game-app
 
 build-wasm: ## wasm release bundle via trunk
+	tools/setup-wasm-opt.sh
 	cd crates/game-app && trunk build --release
+
+build-wasm-webgpu: ## WebGPU-capable wasm bundle (falls back to WebGL2)
+	tools/setup-wasm-opt.sh
+	cd crates/game-app && trunk build --release --features webgpu --dist dist-webgpu
+
+package: build-wasm ## shippable zip of the release wasm build
+	rm -rf release && mkdir -p release
+	cp -r crates/game-app/dist release/fun-to-drive-web
+	cd release && zip -qr fun-to-drive-web.zip fun-to-drive-web
+	@echo "release/fun-to-drive-web.zip ready"
 
 shots: ## Playwright screenshots against a running server (make serve)
 	cd tools/screenshots && node shot.mjs --url http://localhost:$(SERVE_PORT)

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fun to Drive</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d0e13; }
+      canvas { display: block; }
+      #loading {
+        position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; color: #9aa3b2;
+        font-family: monospace; gap: 14px; transition: opacity .5s;
+      }
+      #loading .wheel {
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid #2a2f3a; border-top-color: #c94f3d;
+        animation: spin 0.9s linear infinite;
+      }
+      #loading .hint { font-size: 12px; color: #5d6675; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  <link rel="modulepreload" href="/game-app-fecafbe296845cd9.js" crossorigin="anonymous" integrity="sha384-gJ6lkS2g3aPjJNSAVc9nktSbv9VYW8e5uzixivTUbjsvFZE/8akEgXg8QrXUwxWU"><link rel="preload" href="/game-app-fecafbe296845cd9_bg.wasm" crossorigin="anonymous" integrity="sha384-i+eZ08zbdpZBSiUk7DKBpyEh7C+z9Hq8Szzf/neiULSOlhyLb/Qg+4IpSj+M1LW7" as="fetch" type="application/wasm"></head>
+  <body>
+    <div id="loading">
+      <div class="wheel"></div>
+      <div id="loading-text">spinning up the drum...</div>
+      <div class="hint">first load compiles ~140 MB of wasm — later loads are cached</div>
+      <div class="hint">controls: ARROWS steer &nbsp;|&nbsp; G gear &nbsp;|&nbsp; R restart &nbsp;|&nbsp; T toy view &nbsp;|&nbsp; Y tube look</div>
+    </div>
+    <script>
+      // harness markers: readiness + per-frame game state from wasm
+      window.__FTD_READY__ = false;
+      window.__FTD_STATE__ = null;
+      window.__ftdPublishState = (s) => { try { window.__FTD_STATE__ = JSON.parse(s); } catch (e) {} };
+      const look = () => {
+        const c = document.querySelector('canvas');
+        if (c && c.width > 0) { window.__FTD_READY__ = true; return; }
+        requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+      setTimeout(() => {
+        const l = document.getElementById('loading');
+        if (l) { l.style.opacity = '0'; setTimeout(() => l.remove(), 600); }
+      }, 1200);
+    </script>
+    
+<script type="module">
+import init, * as bindings from '/game-app-fecafbe296845cd9.js';
+const wasm = await init({ module_or_path: '/game-app-fecafbe296845cd9_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  </body>
+</html>

@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# WebGPU-capable wasm build (still falls back to WebGL2 where unavailable):
+# trunk build --release --features webgpu
+webgpu = ["bevy/webgpu"]
+
 [dependencies]
 game-core = { workspace = true }
 bevy = "0.20"

@@ -1,0 +1,5 @@
+# binaryen (any release trunk ships) rejects our bulk-memory ops with
+# bare -O; tools/setup-wasm-opt.sh installs a flag-appending wrapper for
+# this version in the trunk cache. make build-wasm runs it first.
+[tools]
+wasm_opt = "version_131"

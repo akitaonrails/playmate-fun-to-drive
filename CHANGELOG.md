@@ -5,6 +5,19 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### M13 — polish & packaging (done 2026-10-15)
+- Release pipeline: wasm-opt fixed via `tools/setup-wasm-opt.sh` (binaryen
+  needs `--all-features` for our bulk-memory/sat-float output) — release
+  wasm 136.7 MB -> **25.0 MB**; `make package` -> `release/fun-to-drive-web.zip`.
+- WebGPU-capable build path: `make build-wasm-webgpu` (bevy `webgpu`
+  feature; falls back to WebGL2).
+- Ignition key on the toy twists when the game runs (spring, M13 flourish);
+  styled loading screen with controls hint; root README with controls/dev
+  docs; `--fps` rAF sampler in the harness.
+- Release build smoke-verified end to end in headless chromium (boot, run,
+  crash, toy view, dynamics). Software-GL fps 7.5 median there = pessimistic
+  floor; hardware GPUs expected far higher (perf notes in README/PLAN).
+
 ### M11 + M12 — body dynamics & crash flare (done 2026-10-15)
 - game-core `dynamics`: procedural spring-damper rig (docs/dynamics-notes.md)
   — roll/shift follow steering pseudo-G (antisymmetric, outward), pitch
