@@ -1,34 +1,57 @@
-//! Fun to Drive — M5: the real game view (flat modern look).
+//! Fun to Drive — the 2D drum view, OutRun-inspired (PLAN: user tweak 2).
 //!
-//! Renders the game-core simulation: the car is a fixed decal at bottom
-//! center; the road drum scrolls and shifts under it (research/toy-mechanics).
+//! Classic 16-bit racer look: gradient sky with sun and clouds, sea strip at
+//! the horizon, sandy shoulder, scrolling grass stripes, red/white rumble
+//! edges, lane dashes, palm trees, and composite car sprites — all drawn
+//! with flat sprites so it renders identically into the toy's screen.
 
-use crate::{Sim, TuningRes};
 use bevy::prelude::*;
 use game_core::{EndReason, Gear, Phase};
+
+use crate::{Sim, TuningRes};
 
 pub const M_PER_PX: f32 = 0.08;
 pub const HALF_ROAD_PX: f32 = 190.0;
 pub const CAR_Y: f32 = -215.0;
+pub const HORIZON_Y: f32 = 120.0;
 const ROW_H: f32 = 26.0;
-const ROW_COUNT: usize = 22;
-const BOTTOM_Y: f32 = -262.0;
+const ROW_COUNT: usize = 14;
+const TOP_ROW_Y: f32 = HORIZON_Y - ROW_H * 0.5;
 const VIEW_TOP: f32 = 322.0;
+const PALM_POOL: usize = 10;
 const HAZARD_POOL: usize = 16;
 const FUEL_X_LEFT: f32 = 240.0;
 const FUEL_Y: f32 = 270.0;
 
 #[derive(Component)]
+struct SkyBand;
+
+#[derive(Component)]
+struct SeaStrip;
+
+#[derive(Component)]
+struct GrassBase;
+
+#[derive(Component)]
 struct RoadRow;
 
 #[derive(Component)]
-struct EdgeMark;
+struct EdgeRumble;
 
 #[derive(Component)]
 struct CenterDash;
 
 #[derive(Component)]
-struct HazardSprite;
+struct GrassRow;
+
+#[derive(Component)]
+struct HazardPart;
+
+#[derive(Component)]
+struct PalmPart;
+
+#[derive(Component)]
+struct CarPart;
 
 #[derive(Component)]
 struct FlashOverlay;
@@ -53,86 +76,205 @@ struct DrumBand;
 struct RecessShade;
 
 #[derive(Resource, Default)]
-struct ViewColors {
-    asphalt: Color,
-    edge: Color,
+struct Palette {
+    asphalt_a: Color,
+    asphalt_b: Color,
+    grass_a: Color,
+    grass_b: Color,
+    rumble_red: Color,
+    rumble_white: Color,
     dash: Color,
-    oncoming: Color,
-    roadside: Color,
 }
 
-fn flat_view_colors() -> ViewColors {
-    ViewColors {
-        asphalt: Color::srgb(0.23, 0.25, 0.30),
-        edge: Color::srgb(0.85, 0.86, 0.88),
-        dash: Color::srgb(0.75, 0.77, 0.80),
-        oncoming: Color::srgb(0.92, 0.90, 0.82),
-        roadside: Color::srgb(0.95, 0.55, 0.15),
+fn palette() -> Palette {
+    Palette {
+        asphalt_a: Color::srgb(0.34, 0.35, 0.40),
+        asphalt_b: Color::srgb(0.30, 0.31, 0.36),
+        grass_a: Color::srgb(0.16, 0.55, 0.28),
+        grass_b: Color::srgb(0.13, 0.47, 0.24),
+        rumble_red: Color::srgb(0.85, 0.15, 0.12),
+        rumble_white: Color::srgb(0.95, 0.95, 0.92),
+        dash: Color::srgb(0.95, 0.95, 0.90),
     }
 }
 
+fn sky_colors() -> [(Color, f32); 6] {
+    [
+        (Color::srgb(0.17, 0.27, 0.70), 60.0),
+        (Color::srgb(0.25, 0.40, 0.92), 50.0),
+        (Color::srgb(0.40, 0.60, 1.00), 44.0),
+        (Color::srgb(0.64, 0.84, 1.00), 40.0),
+        (Color::srgb(0.90, 0.97, 1.00), 38.0),
+        (Color::srgb(0.97, 0.99, 1.00), 36.0),
+    ]
+}
+
 pub fn setup(mut commands: Commands) {
-    commands.insert_resource(flat_view_colors());
+    commands.insert_resource(palette());
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
+    // ---- sky gradient bands (static), sun, clouds, sea, sand ----
+    let mut y = VIEW_TOP;
+    for (color, h) in sky_colors() {
+        let h = h.max(y - HORIZON_Y).min(h);
+        commands.spawn((
+            Sprite::from_color(color, Vec2::new(960.0, h + 1.0)),
+            Transform::from_xyz(0.0, y - h * 0.5, -5.0),
+            SkyBand,
+        ));
+        y -= h;
+        if y <= HORIZON_Y + 1.0 {
+            break;
+        }
+    }
+    // sun (OutRun striped sun) + clouds
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.10, 0.13, 0.17), Vec2::new(960.0, 600.0)),
-        Transform::from_xyz(0.0, 0.0, -3.0),
+        Sprite::from_color(Color::srgb(1.0, 0.85, 0.35), Vec2::new(64.0, 56.0)),
+        Transform::from_xyz(-250.0, HORIZON_Y + 78.0, -4.9),
+        SkyBand,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(1.0, 0.62, 0.25), Vec2::new(88.0, 14.0)),
+        Transform::from_xyz(-250.0, HORIZON_Y + 62.0, -4.8),
+        SkyBand,
+    ));
+    for (cx, cy, w) in [
+        (-60.0, 205.0, 90.0),
+        (170.0, 240.0, 120.0),
+        (330.0, 190.0, 70.0),
+    ] {
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.95, 0.96, 1.0, 0.85), Vec2::new(w, 12.0)),
+            Transform::from_xyz(cx, cy, -4.8),
+            SkyBand,
+        ));
+    }
+    // sea + sand at the horizon
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.04, 0.52, 0.68), Vec2::new(960.0, 22.0)),
+        Transform::from_xyz(0.0, HORIZON_Y - 11.0, -4.7),
+        SeaStrip,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.94, 0.86, 0.58), Vec2::new(960.0, 13.0)),
+        Transform::from_xyz(0.0, HORIZON_Y - 28.0, -4.6),
+        SeaStrip,
+    ));
+    // static distant grass fills down to the first striped row
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.15, 0.52, 0.27), Vec2::new(960.0, 40.0)),
+        Transform::from_xyz(0.0, HORIZON_Y - 48.0, -4.5),
+        GrassBase,
     ));
 
-    let asphalt = flat_view_colors().asphalt;
+    // ---- scrolling world rows: grass stripe + road + rumble + dashes ----
     for i in 0..ROW_COUNT {
-        let y = BOTTOM_Y + i as f32 * ROW_H + ROW_H * 0.5;
+        let y = TOP_ROW_Y - i as f32 * ROW_H;
         commands.spawn((
             Sprite {
-                color: asphalt,
                 custom_size: Some(Vec2::new(HALF_ROAD_PX * 2.0, ROW_H + 1.0)),
                 ..default()
             },
-            Transform::from_xyz(0.0, y, -2.0),
+            Transform::from_xyz(0.0, y, -4.0),
             RoadRow,
+        ));
+        commands.spawn((
+            Sprite {
+                custom_size: Some(Vec2::new(960.0, ROW_H + 1.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, y, -4.4),
+            GrassRow,
         ));
         for side in [-1.0f32, 1.0] {
             commands.spawn((
                 Sprite {
-                    custom_size: Some(Vec2::new(8.0, ROW_H - 8.0)),
+                    custom_size: Some(Vec2::new(14.0, ROW_H - 6.0)),
                     ..default()
                 },
-                Transform::from_xyz(side * (HALF_ROAD_PX - 4.0), y, -1.5),
-                EdgeMark,
+                Transform::from_xyz(0.0, y, -3.9),
+                EdgeRumble,
+            ));
+            let _ = side;
+        }
+        for lane in [-0.4f32, 0.4] {
+            commands.spawn((
+                Sprite {
+                    custom_size: Some(Vec2::new(7.0, ROW_H - 10.0)),
+                    ..default()
+                },
+                Transform::from_xyz(lane * HALF_ROAD_PX, y, -3.8),
+                CenterDash,
             ));
         }
-        commands.spawn((
-            Sprite {
-                custom_size: Some(Vec2::new(6.0, ROW_H - 10.0)),
-                ..default()
-            },
-            Transform::from_xyz(0.0, y, -1.4),
-            CenterDash,
-        ));
     }
 
-    for _ in 0..HAZARD_POOL {
+    // ---- palms (pooled, ride the loop) ----
+    for _ in 0..PALM_POOL {
+        // trunk + fronds
         commands.spawn((
-            Sprite {
-                custom_size: Some(Vec2::new(64.0, 40.0)),
-                ..default()
-            },
-            Transform::from_xyz(0.0, CAR_Y, -1.0),
+            Sprite::from_color(Color::srgb(0.42, 0.28, 0.14), Vec2::new(9.0, 46.0)),
+            Transform::from_xyz(0.0, CAR_Y, -3.0),
             Visibility::Hidden,
-            HazardSprite,
+            PalmPart,
+        ));
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.10, 0.52, 0.20), Vec2::new(52.0, 14.0)),
+            Transform::from_xyz(0.0, CAR_Y, -2.9),
+            Visibility::Hidden,
+            PalmPart,
+        ));
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.13, 0.60, 0.24), Vec2::new(30.0, 10.0)),
+            Transform::from_xyz(0.0, CAR_Y, -2.9),
+            Visibility::Hidden,
+            PalmPart,
         ));
     }
 
-    // the fixed car "decal": body + windshield hint
+    // ---- hazards (pooled composite sprites) ----
+    for _ in 0..HAZARD_POOL {
+        for _ in 0..4 {
+            commands.spawn((
+                Sprite {
+                    custom_size: Some(Vec2::new(56.0, 24.0)),
+                    ..default()
+                },
+                Transform::from_xyz(0.0, CAR_Y, -2.5),
+                Visibility::Hidden,
+                HazardPart,
+            ));
+        }
+    }
+
+    // ---- the fixed player car "decal" (composite) ----
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.85, 0.12, 0.10), Vec2::new(120.0, 56.0)),
-        Transform::from_xyz(0.0, CAR_Y, 0.5),
+        Sprite::from_color(Color::srgb(0.86, 0.10, 0.08), Vec2::new(92.0, 30.0)),
+        Transform::from_xyz(0.0, CAR_Y - 4.0, 0.5),
+        CarPart,
     ));
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.10, 0.12, 0.16), Vec2::new(56.0, 22.0)),
-        Transform::from_xyz(0.0, CAR_Y + 6.0, 0.6),
+        Sprite::from_color(Color::srgb(0.90, 0.16, 0.10), Vec2::new(78.0, 12.0)),
+        Transform::from_xyz(0.0, CAR_Y + 10.0, 0.5),
+        CarPart,
     ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.12, 0.16, 0.28), Vec2::new(40.0, 14.0)),
+        Transform::from_xyz(0.0, CAR_Y + 2.0, 0.6),
+        CarPart,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.05, 0.05, 0.06), Vec2::new(96.0, 8.0)),
+        Transform::from_xyz(0.0, CAR_Y + 17.0, 0.4),
+        CarPart,
+    ));
+    for wx in [-36.0f32, 36.0] {
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.07, 0.07, 0.08), Vec2::new(18.0, 14.0)),
+            Transform::from_xyz(wx, CAR_Y - 14.0, 0.45),
+            CarPart,
+        ));
+    }
 
     // fuel bar (top right)
     commands.spawn((
@@ -152,7 +294,7 @@ pub fn setup(mut commands: Commands) {
             font_size: FontSize::Px(30.0),
             ..default()
         },
-        TextColor(Color::srgb(0.95, 0.95, 0.9)),
+        TextColor(Color::srgb(0.98, 0.98, 0.92)),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(14.0),
@@ -167,7 +309,7 @@ pub fn setup(mut commands: Commands) {
             font_size: FontSize::Px(20.0),
             ..default()
         },
-        TextColor(Color::srgb(0.7, 0.8, 0.9)),
+        TextColor(Color::srgb(0.75, 0.92, 0.98)),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(54.0),
@@ -192,8 +334,18 @@ pub fn setup(mut commands: Commands) {
         StatusText,
     ));
 
-    // M10: drum bands (printed on the drum, so they live in the 2D view and
-    // scroll with it) and screen-recess shading; alpha driven by toy_look
+    // crash flash overlay
+    commands.spawn((
+        Sprite {
+            color: Color::srgba(1.0, 1.0, 1.0, 0.0),
+            custom_size: Some(Vec2::new(960.0, 600.0)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, 2.0),
+        FlashOverlay,
+    ));
+
+    // M10 drum bands + recess shading (alpha driven by toy_look)
     for i in 0..5 {
         commands.spawn((
             Sprite {
@@ -216,77 +368,93 @@ pub fn setup(mut commands: Commands) {
             RecessShade,
         ));
     }
-
-    // crash flash overlay
-    commands.spawn((
-        Sprite {
-            color: Color::srgba(1.0, 1.0, 1.0, 0.0),
-            custom_size: Some(Vec2::new(960.0, 600.0)),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, 2.0),
-        FlashOverlay,
-    ));
 }
 
 fn row_y(i: usize) -> f32 {
-    BOTTOM_Y + i as f32 * ROW_H + ROW_H * 0.5
+    TOP_ROW_Y - i as f32 * ROW_H
 }
 
 fn row_ahead(i: usize) -> f32 {
-    (row_y(i) - CAR_Y) * M_PER_PX
+    (CAR_Y - row_y(i)) * M_PER_PX
 }
 
 #[allow(clippy::type_complexity)]
 fn sync_roads(
     sim: Res<Sim>,
-    colors: Res<ViewColors>,
-    mut rows: Query<&mut Transform, (With<RoadRow>, Without<EdgeMark>, Without<CenterDash>)>,
-    mut edges: Query<
+    colors: Res<Palette>,
+    mut rows: Query<
         (&mut Transform, &mut Sprite),
-        (With<EdgeMark>, Without<RoadRow>, Without<CenterDash>),
+        (With<RoadRow>, Without<EdgeRumble>, Without<CenterDash>),
+    >,
+    mut rumble: Query<
+        (&mut Transform, &mut Sprite),
+        (With<EdgeRumble>, Without<CenterDash>, Without<RoadRow>),
     >,
     mut dashes: Query<
         (&mut Transform, &mut Sprite),
-        (With<CenterDash>, Without<EdgeMark>, Without<RoadRow>),
+        (With<CenterDash>, Without<EdgeRumble>, Without<RoadRow>),
+    >,
+    mut grass: Query<
+        (&mut Transform, &mut Sprite),
+        (
+            With<GrassRow>,
+            Without<RoadRow>,
+            Without<EdgeRumble>,
+            Without<CenterDash>,
+        ),
     >,
 ) {
-    // rows: x follows the drum
     let xs: Vec<f32> = (0..ROW_COUNT)
         .map(|i| sim.0.road_offset_at(row_ahead(i)) * HALF_ROAD_PX)
         .collect();
 
-    for (i, mut tf) in rows.iter_mut().enumerate() {
+    for (i, (mut tf, mut sp)) in rows.iter_mut().enumerate() {
         if let Some(x) = xs.get(i) {
             tf.translation.x = *x;
         }
+        let s_abs = sim.0.distance + row_ahead(i);
+        let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        sp.color = if on {
+            colors.asphalt_a
+        } else {
+            colors.asphalt_b
+        };
     }
-    for (idx, (mut tf, mut sp)) in edges.iter_mut().enumerate() {
+    for (i, (mut tf, mut sp)) in grass.iter_mut().enumerate() {
+        let y = row_y(i);
+        tf.translation = Vec3::new(0.0, y, -4.4);
+        let s_abs = sim.0.distance + row_ahead(i);
+        let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        sp.color = if on { colors.grass_a } else { colors.grass_b };
+    }
+    for (idx, (mut tf, mut sp)) in rumble.iter_mut().enumerate() {
         let row = idx / 2;
         let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
         let Some(x) = xs.get(row) else { continue };
-        tf.translation.x = x + side * (HALF_ROAD_PX - 4.0);
+        tf.translation.x = x + side * (HALF_ROAD_PX - 7.0);
         let s_abs = sim.0.distance + row_ahead(row);
-        let phase = (s_abs / 7.0 + 0.25 * side).floor();
-        sp.color = if (phase as i64).rem_euclid(2) == 0 {
-            colors.edge
+        let red = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        sp.color = if red {
+            colors.rumble_red
         } else {
-            colors.asphalt
+            colors.rumble_white
         };
     }
     for (i, (mut tf, mut sp)) in dashes.iter_mut().enumerate() {
-        let Some(x) = xs.get(i) else { continue };
-        tf.translation.x = *x;
-        let s_abs = sim.0.distance + row_ahead(i);
+        let row = i / 2;
+        let lane: f32 = if i % 2 == 0 { -0.4 } else { 0.4 };
+        let Some(x) = xs.get(row) else { continue };
+        tf.translation.x = x + lane * HALF_ROAD_PX;
+        let s_abs = sim.0.distance + row_ahead(row);
         let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
-        sp.color = if on { colors.dash } else { colors.asphalt };
+        sp.color = if on { colors.dash } else { colors.asphalt_a };
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn sync_hazards(
     sim: Res<Sim>,
-    colors: Res<ViewColors>,
-    mut pool: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<HazardSprite>>,
+    mut pool: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<HazardPart>>,
 ) {
     let lp = sim.0.loop_pos();
     let visible: Vec<(f32, f32, game_core::HazardKind)> = sim
@@ -297,7 +465,7 @@ fn sync_hazards(
         .filter_map(|h| {
             let ahead = (h.s - lp).rem_euclid(sim.0.road.length);
             let y = CAR_Y + ahead / M_PER_PX;
-            if y < CAR_Y - 40.0 || y > VIEW_TOP {
+            if y < CAR_Y - 60.0 || y > HORIZON_Y - 16.0 {
                 return None;
             }
             let x = (sim.0.road_offset_at(ahead) + h.x) * HALF_ROAD_PX;
@@ -305,23 +473,99 @@ fn sync_hazards(
         })
         .collect();
 
-    for (i, (mut tf, mut sp, mut vis)) in pool.iter_mut().enumerate() {
-        if let Some(&(x, y, kind)) = visible.get(i) {
-            tf.translation = Vec3::new(x, y, -1.0);
-            match kind {
-                game_core::HazardKind::Oncoming => {
-                    sp.color = colors.oncoming;
-                    sp.custom_size = Some(Vec2::new(64.0, 40.0));
-                }
-                game_core::HazardKind::Roadside => {
-                    sp.color = colors.roadside;
-                    sp.custom_size = Some(Vec2::new(40.0, 40.0));
-                }
-            }
+    let mut parts = pool.iter_mut();
+    let mut place = |body: Color, accent: Color, dark: Color, w: f32, x: f32, y: f32| {
+        // 4 parts per hazard: body, window, bumper-lights, shadow strip
+        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y, -2.5);
+            sp.color = body;
+            sp.custom_size = Some(Vec2::new(w, 24.0));
             *vis = Visibility::Visible;
-        } else {
-            *vis = Visibility::Hidden;
         }
+        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y + 3.0, -2.4);
+            sp.color = dark;
+            sp.custom_size = Some(Vec2::new(w * 0.5, 10.0));
+            *vis = Visibility::Visible;
+        }
+        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y - 10.0, -2.4);
+            sp.color = accent;
+            sp.custom_size = Some(Vec2::new(w * 0.9, 5.0));
+            *vis = Visibility::Visible;
+        }
+        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y - 13.0, -2.6);
+            sp.color = Color::srgb(0.06, 0.06, 0.07);
+            sp.custom_size = Some(Vec2::new(w * 0.95, 6.0));
+            *vis = Visibility::Visible;
+        }
+    };
+
+    for &(x, y, kind) in visible.iter() {
+        match kind {
+            game_core::HazardKind::Oncoming => place(
+                Color::srgb(0.93, 0.91, 0.85),
+                Color::srgb(1.0, 0.9, 0.4),
+                Color::srgb(0.15, 0.22, 0.35),
+                56.0,
+                x,
+                y,
+            ),
+            game_core::HazardKind::Roadside => place(
+                Color::srgb(0.95, 0.45, 0.10),
+                Color::srgb(0.95, 0.95, 0.9),
+                Color::srgb(0.95, 0.95, 0.9),
+                30.0,
+                x,
+                y,
+            ),
+        }
+    }
+    for (_, _, mut vis) in parts.by_ref() {
+        *vis = Visibility::Hidden;
+    }
+}
+
+/// Palms ride the loop on both grass shoulders.
+#[allow(clippy::type_complexity)]
+fn sync_palms(
+    sim: Res<Sim>,
+    mut pool: Query<(&mut Transform, &mut Visibility), (With<PalmPart>, Without<HazardPart>)>,
+) {
+    let lp = sim.0.loop_pos();
+    let l = sim.0.road.length;
+    let mut spots: Vec<(f32, f32)> = Vec::new(); // (x, y)
+    for k in 0..5u32 {
+        for side in [-1.0f32, 1.0] {
+            let s = (k as f32 + 0.5) / 5.0 * l;
+            let ahead = (s - lp).rem_euclid(l);
+            let y = CAR_Y + ahead / M_PER_PX;
+            if y < CAR_Y - 60.0 || y > HORIZON_Y - 10.0 {
+                continue;
+            }
+            let x = (sim.0.road_offset_at(ahead) + side * 1.5) * HALF_ROAD_PX;
+            spots.push((x, y));
+        }
+    }
+    let mut parts = pool.iter_mut();
+    for &(x, y) in spots.iter() {
+        // trunk / wide fronds / cross fronds
+        if let Some((mut tf, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y, -3.0);
+            *vis = Visibility::Visible;
+        }
+        if let Some((mut tf, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y + 26.0, -2.9);
+            *vis = Visibility::Visible;
+        }
+        if let Some((mut tf, mut vis)) = parts.next() {
+            tf.translation = Vec3::new(x, y + 20.0, -2.9);
+            *vis = Visibility::Visible;
+        }
+    }
+    for (_, mut vis) in parts.by_ref() {
+        *vis = Visibility::Hidden;
     }
 }
 
@@ -336,7 +580,15 @@ fn sync_hud(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     view: Res<crate::toy_view::ViewState>,
-    mut fuel: Query<(&mut Transform, &mut Sprite), With<FuelBarFill>>,
+    mut fuel: Query<
+        (&mut Transform, &mut Sprite),
+        (
+            With<FuelBarFill>,
+            Without<RoadRow>,
+            Without<FlashOverlay>,
+            Without<HazardPart>,
+        ),
+    >,
     mut score: Query<&mut Text, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
     mut gear: Query<&mut Text, (With<GearText>, Without<StatusText>)>,
     mut status: Query<&mut Text, With<StatusText>>,
@@ -365,8 +617,6 @@ fn sync_hud(
     }
     if let Ok(mut text) = status.single_mut() {
         **text = if view.mode == crate::toy_view::ViewMode::Toy {
-            // persistent hint over the toy view (the toy screen itself has
-            // no text UI, so this line is the only place to learn controls)
             match &sim.0.phase {
                 Phase::Ready => {
                     "ARROWS drive | G gear | R restart | T flat view | Y toy look".to_string()
@@ -395,32 +645,30 @@ fn sync_hud(
 }
 
 /// M10: scroll the drum bands with the drum and set overlay alpha by dial.
+#[allow(clippy::type_complexity)]
 fn sync_drum_overlays(
-    sim: Res<crate::Sim>,
+    sim: Res<Sim>,
     view: Res<crate::toy_view::ViewState>,
     time: Res<Time>,
-    mut bands: Query<&mut Transform, With<DrumBand>>,
-    mut shades: Query<&mut Sprite, (With<RecessShade>, Without<DrumBand>)>,
-    mut band_sprites: Query<&mut Sprite, (With<DrumBand>, Without<RecessShade>)>,
+    mut bands: Query<
+        (&mut Transform, &mut Sprite),
+        (With<DrumBand>, Without<RecessShade>, Without<PalmPart>),
+    >,
+    mut shades: Query<&mut Sprite, (With<RecessShade>, Without<DrumBand>, Without<PalmPart>)>,
 ) {
     let look = view.toy_look;
     let px_per_s = sim.0.speed / M_PER_PX;
-    for (i, mut tf) in bands.iter_mut().enumerate() {
+    for (mut tf, mut sp) in bands.iter_mut() {
         tf.translation.y -= px_per_s * time.delta_secs();
         if tf.translation.y < -310.0 {
             tf.translation.y += 600.0;
         }
-        let _ = i;
-    }
-    for mut sp in band_sprites.iter_mut() {
         sp.color = Color::srgba(0.0, 0.0, 0.0, look * 0.10);
     }
-    let big = look > 0.0; // shades: outer strips darker than inner
     for (i, mut sp) in shades.iter_mut().enumerate() {
         let outer = i % 2 == 0;
         let a = if outer { look * 0.30 } else { look * 0.14 };
         sp.color = Color::srgba(0.0, 0.0, 0.0, a);
-        let _ = big;
     }
 }
 
@@ -429,6 +677,7 @@ pub fn add_view_systems(app: &mut App) {
         Update,
         (
             sync_roads,
+            sync_palms,
             sync_hazards,
             sync_flash,
             sync_drum_overlays,

@@ -68,12 +68,12 @@ impl RoadLoop {
             *v /= peak;
         }
 
-        let count = rng.range(7.0, 11.0).round() as usize;
-        let lanes = [-0.62f32, 0.0, 0.62];
+        let count = rng.range(6.0, 9.0).round() as usize;
+        let lanes = [-0.72f32, 0.0, 0.72];
         let mut hazards = Vec::with_capacity(count);
         for k in 0..count {
-            // first hazard no earlier than 15% into the loop (fair start)
-            let t = 0.15 + 0.85 * (k as f32 + rng.range(0.25, 0.75)) / count as f32;
+            // first hazard no earlier than 22% into the loop (fair start)
+            let t = 0.22 + 0.78 * (k as f32 + rng.range(0.25, 0.75)) / count as f32;
             let s = t * length;
             let lane = lanes[(rng.next_u64() % lanes.len() as u64) as usize];
             let x = (lane + rng.range(-0.05, 0.05)).clamp(-0.9, 0.9);
@@ -173,19 +173,19 @@ mod tests {
     #[test]
     fn hazards_on_loop_and_spaced() {
         let r = loop_from(77);
-        assert!((7..=11).contains(&r.hazards.len()));
+        assert!((6..=9).contains(&r.hazards.len()));
         for h in &r.hazards {
             assert!(h.s >= 0.0 && h.s < r.length);
             assert!(h.x.abs() <= 0.9);
         }
-        // roughly even spacing in the playable window [15%, 100%) of the loop
-        let span = r.length * 0.85;
+        // roughly even spacing in the playable window [22%, 100%) of the loop
+        let span = r.length * 0.78;
         let slot = span / r.hazards.len() as f32;
         for h in &r.hazards {
-            assert!(h.s >= r.length * 0.15 - 1e-4);
+            assert!(h.s >= r.length * 0.22 - 1e-4);
         }
         for (k, h) in r.hazards.iter().enumerate() {
-            let rel = h.s - r.length * 0.15;
+            let rel = h.s - r.length * 0.22;
             assert!(rel >= k as f32 * slot - 1e-4 && rel < (k + 1) as f32 * slot + slot);
         }
     }

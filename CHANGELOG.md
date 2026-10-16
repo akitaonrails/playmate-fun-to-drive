@@ -5,6 +5,27 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.2.0-dev — OutRun restyle, lighting, playability (2026-10-16)
+
+- 2D game restyled classic-16-bit: gradient sky + striped sun + clouds,
+  teal sea & sand at the horizon, scrolling grass stripes, alternating
+  asphalt shades, red/white rumble edges, lane dashes, palm trees,
+  composite car sprites (cabin/wheels/spoiler; oncoming cars with windows).
+- Playability (user-directed tuning pass, first slice): smaller collision
+  footprints (car 0.13, hazard 0.14 half-widths), forgiveness 0.35, lanes
+  widened to ±0.72, fewer hazards (6-9) starting at 22% of the loop,
+  steer authority 2.0, gentler drift/grace, softer keyboard tap (0.35).
+- Model: screen enlarged to 0.19 x 0.11875 (playability over realism, per
+  user) with aspect-exact mapping; pop-up lamp pods moved to the player
+  side and chunkier (previous edits silently no-opped on regenerated
+  params — lesson: assert replaces).
+- 3D scene: shadow-casting key light + warm desk-lamp fill + cool rim
+  light, darker desk, backdrop wall; screen is now a true emitter
+  (emissive_texture = game image, toy camera tonemapping off) — backlit
+  CRT look from boot (toy_look defaults to 0.5).
+- Framing: camera reframed after geometric analysis (near-side wheel was
+  outside the half-FOV); wheel fully in frame with balanced margins.
+
 ### v0.1.0 fix 3 — wheel direction, screen occlusion, fullscreen canvas (2026-10-16)
 
 - Wheel direction inverted (user report): left steer now rotates the toy

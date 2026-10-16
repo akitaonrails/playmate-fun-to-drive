@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fun to Drive</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #0d0e13; }
-      canvas { display: block; }
+      html, body { margin: 0; width: 100%; height: 100%; background: #0d0e13; }
+      /* winit writes inline width/height on the canvas; !important wins and
+         stretches the render to fill the browser window */
+      canvas { display: block; width: 100vw !important; height: 100vh !important; }
       #loading {
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: #9aa3b2;
@@ -20,7 +22,7 @@
       #loading .hint { font-size: 12px; color: #5d6675; }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
-  <link rel="modulepreload" href="/game-app-5341693c53e9866d.js" crossorigin="anonymous" integrity="sha384-LxwDeg+JBjUmZoOhK2hmhnVZj5PZ4tgpjgPAZrU1aizhkROFrTJwcFBzdpFccgx4"><link rel="preload" href="/game-app-5341693c53e9866d_bg.wasm" crossorigin="anonymous" integrity="sha384-rfgmhpDKnYV/7k6aUj5L2tp0xmbL8d/t6F9PF14y/8rx2G4ACjWQ518Wf8UfsLk0" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/game-app-3b1d965408961945.js" crossorigin="anonymous" integrity="sha384-LxwDeg+JBjUmZoOhK2hmhnVZj5PZ4tgpjgPAZrU1aizhkROFrTJwcFBzdpFccgx4"><link rel="preload" href="/game-app-3b1d965408961945_bg.wasm" crossorigin="anonymous" integrity="sha384-TN5BasN7SPvwtWrjh+cUHyHnrbAWbchoAsFfjNlR5yb0zYy+OS203UArgZ67Im6o" as="fetch" type="application/wasm"></head>
   <body>
     <div id="loading">
       <div class="wheel"></div>
@@ -46,8 +48,8 @@
     </script>
     
 <script type="module">
-import init, * as bindings from '/game-app-5341693c53e9866d.js';
-const wasm = await init({ module_or_path: '/game-app-5341693c53e9866d_bg.wasm' });
+import init, * as bindings from '/game-app-3b1d965408961945.js';
+const wasm = await init({ module_or_path: '/game-app-3b1d965408961945_bg.wasm' });
 
 
 window.wasmBindings = bindings;

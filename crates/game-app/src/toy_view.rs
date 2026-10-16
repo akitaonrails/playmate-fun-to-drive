@@ -20,7 +20,7 @@ pub enum ViewMode {
     Toy,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ViewState {
     pub mode: ViewMode,
     /// M10 dial: 0 = flat modern look, 1 = full rolling-tube illusion.
@@ -33,6 +33,22 @@ pub struct ViewState {
     /// M13: ignition key twist when the game runs.
     pub key_angle: f32,
     pub key_vel: f32,
+}
+
+impl Default for ViewState {
+    fn default() -> Self {
+        Self {
+            mode: ViewMode::default(),
+            // the toy reads best with the rolling-tube look ON from boot
+            toy_look: 0.5,
+            wheel_angle: 0.0,
+            wheel_vel: 0.0,
+            lever_angle: 0.0,
+            lever_vel: 0.0,
+            key_angle: 0.0,
+            key_vel: 0.0,
+        }
+    }
 }
 
 /// Handle of the StandardMaterial on the toy screen (M8 pipeline, kept for
@@ -72,9 +88,9 @@ pub const GAME_H: u32 = 600;
 // toy screen quad size (must match assets/blender/toy.py PARAMS screen_size);
 // aspect-checked against the game canvas in the test below
 #[cfg_attr(not(test), expect(dead_code))]
-pub const SCREEN_W: f32 = 0.152;
+pub const SCREEN_W: f32 = 0.190;
 #[cfg_attr(not(test), expect(dead_code))]
-pub const SCREEN_H: f32 = 0.095;
+pub const SCREEN_H: f32 = 0.11875;
 
 #[derive(Resource)]
 pub struct GameImage(pub Handle<Image>);
@@ -128,20 +144,44 @@ pub fn setup(
             is_active: false,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.31, 0.42).looking_at(Vec3::new(0.0, 0.105, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 0.28, 0.44).looking_at(Vec3::new(0.0, 0.09, 0.04), Vec3::Y),
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
         ToyCamera,
     ));
 
+    // key light with shadows (contrast/AO feel)
     commands.spawn((
-        Transform::from_xyz(1.5, 2.2, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(1.1, 1.8, 1.4).looking_at(Vec3::ZERO, Vec3::Y),
         DirectionalLight {
-            illuminance: 14_000.0,
+            illuminance: 9_000.0,
+            shadow_maps_enabled: true,
             ..default()
         },
+        bevy::light::CascadeShadowConfig::default(),
+    ));
+    // warm desk-lamp fill from the player's side
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(1.0, 0.88, 0.72),
+            intensity: 6.0,
+            range: 2.5,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.55, 0.55),
+    ));
+    // cool rim light from behind for edge contrast on the plastic
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.55, 0.7, 1.0),
+            intensity: 4.0,
+            range: 2.0,
+            ..default()
+        },
+        Transform::from_xyz(-0.5, 0.4, -0.6),
     ));
     commands.spawn(AmbientLight {
-        color: Color::srgb(0.95, 0.93, 0.9),
-        brightness: 130.0,
+        color: Color::srgb(0.55, 0.58, 0.66),
+        brightness: 50.0,
         ..default()
     });
 }
@@ -172,11 +212,21 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.24, 0.22, 0.20),
-                    perceptual_roughness: 0.9,
+                    base_color: Color::srgb(0.16, 0.14, 0.12),
+                    perceptual_roughness: 0.65,
                     ..default()
                 })),
-                Transform::from_scale(Vec3::splat(1.2)),
+                Transform::from_scale(Vec3::splat(1.4)),
+            ));
+            // backdrop wall so the void behind the toy reads like a room
+            parent.spawn((
+                Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.10, 0.09, 0.085),
+                    perceptual_roughness: 1.0,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0, 0.25, -0.55),
             ));
         });
 }
@@ -380,7 +430,11 @@ pub fn paint_screen(
         if name.as_str().starts_with("Screen") && name.as_str() != "ScreenFrame" {
             let mat = materials.add(StandardMaterial {
                 base_color_texture: Some(game_image.0.clone()),
-                unlit: true,
+                // the game image itself is the light source: backlit drum
+                emissive_texture: Some(game_image.0.clone()),
+                emissive: LinearRgba::new(0.9, 0.8, 0.62, 1.0),
+                // NOT unlit: unlit skips the emissive pass, which is the
+                // whole backlight — the screen must be a lit emitter
                 ..default()
             });
             mat_handle.0 = Some(mat.clone());
