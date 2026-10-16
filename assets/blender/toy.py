@@ -14,63 +14,75 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Euler, Matrix, Vector
+from mathutils import Euler, Matrix, Quaternion, Vector
 
 
 PARAMS = {
-    "body_size": (0.250, 0.236, 0.054),
-    "body_center": (0.0, 0.007, 0.027),
-    "body_bevel": 0.012,
-    "fender_size": (0.044, 0.200, 0.045),
-    "fender_centers": ((-0.102, 0.009, 0.044), (0.102, 0.009, 0.044)),
-    "rear_hump_size": (0.206, 0.072, 0.070),
-    "rear_hump_center": (0.0, 0.085, 0.072),
-    "hood_scoop_size": (0.102, 0.056, 0.029),
-    "hood_scoop_center": (0.0, -0.076, 0.057),
-    "console_size": (0.180, 0.072, 0.045),
-    "console_center": (0.0, -0.004, 0.060),
-    "screen_size": (0.160, 0.100),
-    "screen_center": (0.0, 0.049, 0.170),
-    "screen_tilt_deg": 12.0,  # From vertical; face normal points toward -Y/up.
-    "frame_size": (0.180, 0.120, 0.012),
+    "body_size": (0.250, 0.220, 0.040),
+    "nose_height": 0.016,
+    "body_bevel": 0.008,
+    "hood_size": (0.216, 0.108, 0.045),
+    "hood_center": (0.0, 0.054, 0.042),
+    "hood_rise": 0.042,
+    "fender_size": (0.036, 0.190, 0.060),
+    "fender_centers": ((-0.106, 0.010, 0.040), (0.106, 0.010, 0.040)),
+    "rear_hump_size": (0.202, 0.046, 0.043),
+    "rear_hump_center": (0.0, 0.026, 0.0685),
+    "spoiler_size": (0.214, 0.009, 0.008),
+    "spoiler_center": (0.0, 0.047, 0.090),
+    "console_size": (0.213, 0.088, 0.025),
+    "console_center": (0.0, -0.064, 0.0525),
+    "dash_top_size": (0.228, 0.057, 0.015),
+    "dash_top_center": (0.0, -0.023, 0.073),
+    "windshield_size": (0.20, 0.06, 0.052),
+    "windshield_center": (0.0, 0.003, 0.096),
+    "side_vent_size": (0.002, 0.026, 0.013),
+    "side_vent_centers": ((-0.124, -0.025, 0.037), (0.124, -0.025, 0.037)),
+    "side_vent_rake_deg": 15.0,
+    "screen_size": (0.152, 0.095),
+    "screen_center": (0.0, 0.003, 0.143),
+    "screen_tilt_deg": 12.0,
+    "frame_size": (0.173, 0.116, 0.018),
     "frame_bevel": 0.004,
-    "screen_back_depth": 0.008,
-    "wheel_radius": 0.048,  # Outer radius, including tube.
-    "wheel_tube_radius": 0.005,
+    "screen_back_depth": 0.006,
+    # ~5 cm radius gives the broad wheel seen in the reference photographs.
+    "wheel_radius": 0.050,
+    "wheel_tube_radius": 0.0055,
     "wheel_major_segments": 64,
     "wheel_minor_segments": 12,
-    "wheel_center": (0.0, -0.048, 0.105),
-    "column_tilt_deg": 25.0,
-    "column_length": 0.064,
-    "column_radius": 0.008,
-    "wheel_hub_radius": 0.013,
-    "wheel_hub_depth": 0.012,
+    "wheel_center": (0.0, -0.136, 0.066),
+    "wheel_tilt_from_vertical_deg": 25.0,
+    "column_length": 0.090,
+    "column_radius": 0.007,
+    "wheel_hub_radius": 0.014,
+    "wheel_hub_depth": 0.010,
     "wheel_spoke_width": 0.008,
-    "wheel_spoke_depth": 0.006,
+    "wheel_spoke_depth": 0.005,
     "wheel_spoke_angles_deg": (30.0, 150.0, 270.0),
-    "lever_base": (0.098, -0.033, 0.0665),
-    "lever_length": 0.050,  # Base to tip of knob.
+    "lever_base": (0.100, -0.074, 0.067),
+    "lever_length": 0.045,
     "lever_radius": 0.0027,
     "lever_knob_radius": 0.008,
     "lever_travel_deg": 20.0,
     "lever_socket_radius": 0.009,
-    "lever_socket_depth": 0.005,
-    "key_slot": (-0.098, -0.042, 0.067),
-    "key_radius": 0.004,
+    "lever_socket_depth": 0.004,
+    "key_slot": (-0.098, -0.092, 0.070),
+    "key_radius": 0.003,
     "key_length": 0.010,
-    "key_grip_size": (0.017, 0.008, 0.004),
-    "lamp_centers": ((-0.091, -0.091, 0.078), (0.091, -0.091, 0.078)),
-    "lamp_size": (0.042, 0.032, 0.030),
-    "lamp_lens_size": (0.032, 0.003, 0.019),
-    "bumper_center": (0.0, -0.120, 0.025),
-    "bumper_size": (0.230, 0.010, 0.020),
-    "dash_center": (0.0, 0.016, 0.082),
+    "key_grip_size": (0.004, 0.016, 0.007),
+    "lamp_centers": ((-0.069, 0.083, 0.045), (0.069, 0.083, 0.045)),
+    "lamp_size": (0.043, 0.026, 0.022),
+    "lamp_lens_size": (0.033, 0.002, 0.014),
+    "lamp_rake_deg": -12.0,
+    "bumper_center": (0.0, 0.1135, 0.013),
+    "bumper_size": (0.228, 0.014, 0.022),
+    "running_light_size": (0.021, 0.002, 0.006),
+    "running_light_spacing": 0.074,
+    "dash_center": (0.0, -0.045, 0.082),
     "dash_rotation_x_deg": 55.0,
-    "dash_size": (0.170, 0.038, 0.008),
-    "dash_pocket_front_clearance": 0.100,
-    "dash_pocket_back_clearance": 0.001,
+    "dash_size": (0.174, 0.034, 0.007),
     "gauge_centers_x": (-0.051, -0.013, 0.025),
-    "gauge_radii": (0.013, 0.011, 0.007),
+    "gauge_radii": (0.012, 0.010, 0.007),
     "gauge_recess_depth": 0.003,
     "turbo_lamp_center_x": 0.066,
     "turbo_lamp_radius": 0.0025,
@@ -79,31 +91,29 @@ PARAMS = {
     "knob_rings": 12,
     "bevel_segments": 3,
     "detail_bevel": 0.001,
-    "triangle_budget": 25000,
+    "triangle_budget": 60000,
     "materials": {
-        "MatBodyRed": {"color": (0.80, 0.08, 0.06), "roughness": 0.45, "metallic": 0.0},
-        "MatDashBlack": {"color": (0.06, 0.06, 0.06), "roughness": 0.60, "metallic": 0.0},
-        "MatChrome": {"color": (0.75, 0.75, 0.78), "roughness": 0.25, "metallic": 0.9},
+        "MatBodyRed": {"color": (0.82, 0.07, 0.06), "roughness": 0.35, "metallic": 0.0},
+        "MatConsoleRed": {"color": (0.82, 0.07, 0.06), "roughness": 0.35, "metallic": 0.0},
+        "MatCockpitBlack": {"color": (0.05, 0.05, 0.05), "roughness": 0.70, "metallic": 0.0},
+        "MatChrome": {"color": (0.8, 0.8, 0.85), "roughness": 0.20, "metallic": 0.9},
         "MatTireBlack": {"color": (0.025, 0.025, 0.025), "roughness": 0.80, "metallic": 0.0},
-        # Unlit, matte lamp lenses; chrome is reserved for bumper/key/hub.
-        "MatLampPlastic": {"color": (0.85, 0.84, 0.78), "roughness": 0.50, "metallic": 0.0},
-        # dark "unlit CRT" face for the screen quad (engine replaces it with
-        # the game texture in M8; dark reads right pre-M8)
+        "MatLampLens": {"color": (0.1, 0.12, 0.16), "roughness": 0.15, "metallic": 0.0},
         "MatScreenDark": {"color": (0.045, 0.055, 0.07), "roughness": 0.35, "metallic": 0.0},
     },
 }
 
 PIVOTS = {
-    "Body": "Base center at ground level; fixed, Blender world origin.",
+    "Body": "Base footprint center at ground level; fixed.",
     "ScreenFrame": "Screen recess center; local XY is screen plane, +Z faces player.",
-    "Screen": "Same origin and rotation as ScreenFrame; centered 0.16 x 0.10 m quad.",
-    "SteeringWheel": "Steering column top; local Z is column axis, tilted 25 degrees toward -Y.",
-    "GearLever": "Lever base on dashboard; tilt about local X by +/-20 degrees for LOW/HIGH.",
-    "IgnitionKey": "Key slot center; local Z is key insertion/rotation axis.",
-    "HeadlightLeft": "Left raised lamp block center (player's left, negative X).",
-    "HeadlightRight": "Right raised lamp block center (player's right, positive X).",
-    "Bumper": "Base front, centered on bumper bar.",
-    "DashPanel": "Dashboard face center, on the front surface of the instrument panel.",
+    "Screen": "Same origin and rotation as ScreenFrame; centered 0.15 x 0.095 m quad.",
+    "SteeringWheel": "Wheel hub center; local Z spin axis; plane tilted 25 degrees from vertical, top away.",
+    "GearLever": "Console lever base, right of wheel; shaft along local +Y; tilt +/-20 degrees about local X.",
+    "IgnitionKey": "Dash key slot, left of wheel; insertion and twist axis is local X.",
+    "HeadlightLeft": "Left pop-up lamp pod base; negative X is player's left.",
+    "HeadlightRight": "Right pop-up lamp pod base; positive X is player's right.",
+    "Bumper": "Base front, centered on dark bumper strip.",
+    "DashPanel": "Dashboard face center, on front surface of instrument panel.",
 }
 
 
@@ -201,47 +211,67 @@ def create_materials():
 
 def build_parts():
     p = PARAMS
-    red, black, chrome = "MatBodyRed", "MatDashBlack", "MatChrome"
+    red, black, chrome = "MatBodyRed", "MatCockpitBlack", "MatChrome"
     screen_rot = (math.radians(90 - p["screen_tilt_deg"]), 0, 0)
-    column_rot = (math.radians(p["column_tilt_deg"]), 0, 0)
+    column_rot = (math.radians(90 - p["wheel_tilt_from_vertical_deg"]), 0, 0)
     dash_rot = (math.radians(p["dash_rotation_x_deg"]), 0, 0)
     screen_basis = Euler(screen_rot).to_matrix()
     column_basis = Euler(column_rot).to_matrix()
     parts = {}
 
-    body = cube(p["body_size"], p["body_center"], red, p["body_bevel"])
-    additions = [cube(p["fender_size"], center, red, 0.009) for center in p["fender_centers"]]
+    # Start with a cube, taper the nose and slope its top before beveling.
+    # +Y is the car's nose (away from the seated player); no external wheels.
+    body = cube(p["body_size"], (0, 0, p["body_size"][2] / 2), red)
+    for vertex in body.data.vertices:
+        if vertex.co.y > 0:
+            vertex.co.x *= 0.78
+            if vertex.co.z > 0:
+                vertex.co.z -= p["body_size"][2] - p["nose_height"]
+    bevel(body, p["body_bevel"])
+    hood = cube(p["hood_size"], p["hood_center"], red)
+    for vertex in hood.data.vertices:
+        if vertex.co.z > 0:
+            vertex.co.z -= vertex.co.y / p["hood_size"][1] * p["hood_rise"]
+        if vertex.co.y > 0:
+            vertex.co.x *= 0.94
+    bevel(hood, p["body_bevel"])
+    additions = [body, hood]
+    additions.extend(cube(p["fender_size"], center, red, 0.014)
+                     for center in p["fender_centers"])
     additions.extend([
-        cube(p["rear_hump_size"], p["rear_hump_center"], red, 0.012),
-        cube(p["hood_scoop_size"], p["hood_scoop_center"], red, 0.008),
-        cube(p["console_size"], p["console_center"], red, 0.008),
+        cube(p["rear_hump_size"], p["rear_hump_center"], red, 0.010),
+        cube(p["spoiler_size"], p["spoiler_center"], red, 0.003),
+        cube(p["console_size"], p["console_center"], "MatConsoleRed", 0.006),
+        cube(p["dash_top_size"], p["dash_top_center"], black, 0.004),
+        cube(p["windshield_size"], p["windshield_center"], black, 0.003,
+             (math.radians(-20), 0, 0)),
     ])
-    backing_size = (*p["frame_size"][:2], p["screen_back_depth"])
-    backing_center = Vector(p["screen_center"]) + screen_basis @ Vector(
-        (0, 0, -(p["frame_size"][2] + p["screen_back_depth"]) / 2)
-    )
-    additions.append(cube(backing_size, backing_center, red, 0.003, screen_rot))
+    dash_surround = tuple(additions)
+    for center in p["side_vent_centers"]:
+        additions.append(cube(p["side_vent_size"], center, "MatTireBlack", 0.0007,
+                              (math.radians(p["side_vent_rake_deg"]), 0, 0)))
     column_center = Vector(p["wheel_center"]) + column_basis @ Vector((0, 0, -p["column_length"] / 2))
-    column = cylinder(p["column_radius"], p["column_length"], column_center, red)
+    column = cylinder(p["column_radius"], p["column_length"], column_center, black)
     column.rotation_euler = column_rot
-    for addition in additions:
-        boolean(body, addition, "UNION")
-    # Seat the dash in a real shell opening so red plastic cannot cover its
-    # face or fill the instrument recesses. Keep the column attached afterward.
-    pocket_back = p["dash_size"][2] + p["dash_pocket_back_clearance"]
-    pocket_front = p["dash_pocket_front_clearance"]
-    pocket_center = Vector(p["dash_center"]) + Euler(dash_rot).to_matrix() @ Vector(
-        (0, 0, (pocket_front - pocket_back) / 2)
-    )
-    boolean(body, cube((*p["dash_size"][:2], pocket_front + pocket_back),
-                       pocket_center, rotation=dash_rot), "DIFFERENCE")
-    boolean(body, column, "UNION")
-    parts["Body"] = finish("Body", [body])
+    additions.append(column)
+    # The stationary lever socket belongs to Body, so only the shaft pivots.
+    additions.append(cylinder(p["lever_socket_radius"], p["lever_socket_depth"],
+                              p["lever_base"], black))
+    # Clearance behind the recessed instrument panel, including TurboLamp.
+    pocket_depth = p["dash_size"][2] * 3
+    pocket_center = Vector(p["dash_center"]) + Euler(dash_rot).to_matrix() @ Vector((0, 0, -pocket_depth / 2))
+    for piece in dash_surround:
+        boolean(piece, cube((*p["dash_size"][:2], pocket_depth), pocket_center,
+                            rotation=dash_rot), "DIFFERENCE")
+    parts["Body"] = finish("Body", additions)
 
     frame = cube(p["frame_size"], material=black, rounding=p["frame_bevel"])
     boolean(frame, cube((*p["screen_size"], p["frame_size"][2] * 3)), "DIFFERENCE")
     bevel(frame, p["detail_bevel"])
-    parts["ScreenFrame"] = finish("ScreenFrame", [frame], p["screen_center"], screen_rot)
+    backing = cube((*p["frame_size"][:2], p["screen_back_depth"]),
+                   (0, 0, -(p["frame_size"][2] + p["screen_back_depth"]) / 2),
+                   black, 0.003)
+    parts["ScreenFrame"] = finish("ScreenFrame", [frame, backing], p["screen_center"], screen_rot)
     bpy.ops.mesh.primitive_plane_add(size=1)
     screen = bpy.context.object
     screen.scale = (*p["screen_size"], 1)
@@ -276,16 +306,14 @@ def build_parts():
     parts["SteeringWheel"]["rotation_axis_local"] = "Z"
 
     shaft_length = p["lever_length"] - p["lever_knob_radius"]
-    lever = [
-        cylinder(p["lever_radius"], shaft_length, (0, 0, shaft_length / 2), black),
-        bevel(cylinder(p["lever_socket_radius"], p["lever_socket_depth"],
-                       (0, 0, p["lever_socket_depth"] / 2), black), p["detail_bevel"]),
-    ]
+    shaft = cylinder(p["lever_radius"], shaft_length, (0, shaft_length / 2, 0), chrome)
+    shaft.rotation_euler.x = math.pi / 2
+    lever = [shaft]
     bpy.ops.mesh.primitive_uv_sphere_add(
         segments=p["knob_segments"], ring_count=p["knob_rings"],
-        radius=p["lever_knob_radius"], location=(0, 0, shaft_length),
+        radius=p["lever_knob_radius"], location=(0, shaft_length, 0),
     )
-    knob = assign(bpy.context.object, red)
+    knob = assign(bpy.context.object, "MatTireBlack")
     # UV-sphere primitive face ordering can vary between Blender processes.
     # Canonicalize only the ordering, preserving primitive geometry and UVs.
     topology = bmesh.new()
@@ -298,23 +326,30 @@ def build_parts():
     for face in knob.data.polygons:
         face.use_smooth = True
     lever.append(knob)
-    parts["GearLever"] = finish("GearLever", lever, p["lever_base"])
+    parts["GearLever"] = finish("GearLever", lever, p["lever_base"], (math.pi / 2, 0, 0))
     parts["GearLever"]["rotation_axis_local"] = "X"
     parts["GearLever"]["travel_degrees"] = [-p["lever_travel_deg"], p["lever_travel_deg"]]
 
-    key = [
-        cylinder(p["key_radius"], p["key_length"], (0, 0, p["key_length"] / 2), chrome),
-        cube(p["key_grip_size"], (0, 0, p["key_length"]), chrome, p["detail_bevel"]),
-    ]
-    parts["IgnitionKey"] = finish("IgnitionKey", key, p["key_slot"], dash_rot)
-    parts["IgnitionKey"]["rotation_axis_local"] = "Z"
+    key_shaft = cylinder(p["key_radius"], p["key_length"], (p["key_length"] / 2, 0, 0), chrome)
+    key_shaft.rotation_euler.y = math.pi / 2
+    key = [key_shaft, cube(p["key_grip_size"], (p["key_length"], 0, 0), chrome, p["detail_bevel"])]
+    parts["IgnitionKey"] = finish("IgnitionKey", key, p["key_slot"], (0, 0, -math.pi / 2))
+    parts["IgnitionKey"]["rotation_axis_local"] = "X"
 
     for name, center in zip(("HeadlightLeft", "HeadlightRight"), p["lamp_centers"]):
-        housing = cube(p["lamp_size"], material=black, rounding=0.003)
-        lens = cube(p["lamp_lens_size"], (0, -p["lamp_size"][1] / 2, 0),
-                    "MatLampPlastic", p["detail_bevel"])
-        parts[name] = finish(name, [housing, lens], center)
-    parts["Bumper"] = finish("Bumper", [cube(p["bumper_size"], material=chrome, rounding=0.004)], p["bumper_center"])
+        height, depth = p["lamp_size"][2], p["lamp_size"][1]
+        housing = cube(p["lamp_size"], (0, 0, height / 2), red, 0.003)
+        bezel = cube((p["lamp_size"][0] - 0.004, 0.003, height - 0.004),
+                     (0, depth / 2, height / 2), chrome, 0.001)
+        lens = cube(p["lamp_lens_size"], (0, depth / 2 + 0.002, height / 2),
+                    "MatLampLens", 0.001)
+        parts[name] = finish(name, [housing, bezel, lens], center,
+                             (math.radians(p["lamp_rake_deg"]), 0, 0))
+    bumper = [cube(p["bumper_size"], material=black, rounding=0.003)]
+    for x in (-p["running_light_spacing"], p["running_light_spacing"]):
+        bumper.append(cube(p["running_light_size"], (x, p["bumper_size"][1] / 2, 0),
+                           "MatLampLens", 0.001))
+    parts["Bumper"] = finish("Bumper", bumper, p["bumper_center"])
 
     # Front surface at local Z=0; three blind instrument recesses and a
     # through-hole for TurboLamp. These are features of DashPanel, not parts.
@@ -371,17 +406,41 @@ def export_and_manifest(parts, marker):
     assert abs(lower[2]) < 1e-6, "Toy must rest on Z=0"
     assert all(abs(s - 1.0) < 1e-6 for obj in parts.values() for s in obj.scale)
 
+    wheel = parts["SteeringWheel"]
+    wheel_extent = [max(v.co[i] for v in wheel.data.vertices) - min(v.co[i] for v in wheel.data.vertices)
+                    for i in range(3)]
+    assert wheel_extent[2] < min(wheel_extent[:2]) * 0.15, "Wheel must be thin along local Z"
+    normal = wheel.matrix_world.to_3x3() @ Vector((0, 0, 1))
+    assert abs(normal.z - math.sin(math.radians(p["wheel_tilt_from_vertical_deg"]))) < 1e-6
+    assert normal.y < 0, "Wheel must face player"
+    lever_extent = [max(v.co[i] for v in parts["GearLever"].data.vertices) for i in range(3)]
+    assert abs(lever_extent[1] - p["lever_length"]) < 1e-6
+
     output = Path(__file__).resolve().parents[1] / "models"
     output.mkdir(parents=True, exist_ok=True)
     glb_path = output / "toy.glb"
     bpy.ops.object.select_all(action="SELECT")
-    result = bpy.ops.export_scene.gltf(
-        filepath=str(glb_path), export_format="GLB", use_selection=True,
-        export_yup=True, export_apply=True, export_materials="EXPORT",
-        export_extras=True, export_animations=False, export_cameras=False,
-        export_lights=False, export_texcoords=True, export_normals=True,
-        export_tangents=False,
-    )
+    # Convert WORLD coordinates only. The exporter's automatic Y-up swizzle
+    # also swizzles mesh-local positions, turning a local-Z wheel into a
+    # local-Y wheel. Preconvert node transforms and disable that swizzle so
+    # glTF is Y-up while every part keeps its specified local control axes.
+    basis = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, -1, 0, 0), (0, 0, 0, 1)))
+    rest = {name: obj.matrix_world.copy() for name, obj in parts.items()}
+    try:
+        for name, obj in parts.items():
+            obj.matrix_world = basis @ rest[name]
+        bpy.context.view_layer.update()
+        result = bpy.ops.export_scene.gltf(
+            filepath=str(glb_path), export_format="GLB", use_selection=True,
+            export_yup=False, export_apply=True, export_materials="EXPORT",
+            export_extras=True, export_animations=False, export_cameras=False,
+            export_lights=False, export_texcoords=True, export_normals=True,
+            export_tangents=False,
+        )
+    finally:
+        for name, obj in parts.items():
+            obj.matrix_world = rest[name]
+        bpy.context.view_layer.update()
     assert result == {"FINISHED"}, "glTF export failed"
     gltf = read_glb(glb_path)
     nodes = {node["name"]: node for node in gltf["nodes"]}
@@ -394,12 +453,29 @@ def export_and_manifest(parts, marker):
     # components use x,y,z,w; row-major matrices are explicitly identified.
     basis = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, -1, 0, 0), (0, 0, 0, 1)))
     records = []
+    exported_world_vertices = []
     for name, obj in parts.items():
         obj.data.calc_loop_triangles()
         primitives = gltf["meshes"][nodes[name]["mesh"]]["primitives"]
         exported_vertices = sum(gltf["accessors"][prim["attributes"]["POSITION"]]["count"] for prim in primitives)
         exported_triangles = sum(gltf["accessors"][prim["indices"]]["count"] // 3 for prim in primitives)
         assert exported_triangles == len(obj.data.loop_triangles)
+        # Read the actual exported node TRS and POSITION accessor bounds.
+        node = nodes[name]
+        q = node.get("rotation", (0, 0, 0, 1))
+        exported_matrix = Matrix.LocRotScale(Vector(node.get("translation", (0, 0, 0))),
+                                            Quaternion((q[3], *q[:3])),
+                                            Vector(node.get("scale", (1, 1, 1))))
+        expected_matrix = basis @ obj.matrix_world
+        assert all(abs(exported_matrix[i][j] - expected_matrix[i][j]) < 1e-6
+                   for i in range(4) for j in range(4)), name
+        accessors = [gltf["accessors"][prim["attributes"]["POSITION"]] for prim in primitives]
+        local_min = [min(acc["min"][i] for acc in accessors) for i in range(3)]
+        local_max = [max(acc["max"][i] for acc in accessors) for i in range(3)]
+        if name == "SteeringWheel":
+            extent = [hi - lo for lo, hi in zip(local_min, local_max)]
+            assert extent[2] < min(extent[:2]) * 0.15, "Export changed wheel spin axis"
+        exported_world_vertices.extend(expected_matrix @ v.co for v in obj.data.vertices)
         if name == "Screen":
             # glTF primitives reference materials by index
             screen_mats = {
@@ -413,8 +489,10 @@ def export_and_manifest(parts, marker):
             "pivot_description": PIVOTS[name],
             "pivot_world": list(obj.matrix_world.translation),
             "rest_transform": transform_record(obj.matrix_world),
-            "gltf_rest_transform": transform_record(basis @ obj.matrix_world @ basis.inverted()),
+            "gltf_rest_transform": transform_record(basis @ obj.matrix_world),
             "material_names": material_names,
+            "local_bounds": {"min": local_min, "max": local_max},
+            "rotation_axis_local": obj.get("rotation_axis_local"),
             "mesh_count": 1,
             "vertex_count": len(obj.data.vertices),
             "polygon_count": len(obj.data.polygons),
@@ -428,8 +506,11 @@ def export_and_manifest(parts, marker):
         "gltf_vertex_count", "gltf_triangle_count",
     )}
     assert totals["triangle_count"] <= p["triangle_budget"], totals
+    gltf_lower = [min(v[i] for v in exported_world_vertices) for i in range(3)]
+    gltf_upper = [max(v[i] for v in exported_world_vertices) for i in range(3)]
+    assert abs(gltf_lower[1]) < 1e-6, "Export must rest on glTF Y=0"
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "asset": "toy.glb",
         "units": "meters",
         "coordinates": {"rest_transform": "Blender: X right, Y away from player, Z up",
@@ -438,9 +519,22 @@ def export_and_manifest(parts, marker):
         "params": p,
         "parts": records,
         "markers": [{"name": marker.name, "parent": marker.parent.name,
+                     "pivot_description": "Screen center; same local axes as ScreenFrame.",
+                     "mesh_count": 0, "vertex_count": 0, "material_names": [],
                      "rest_transform": transform_record(marker.matrix_world),
-                     "gltf_rest_transform": transform_record(basis @ marker.matrix_world @ basis.inverted())}],
+                     "gltf_rest_transform": transform_record(basis @ marker.matrix_world)}],
         "bounds_world": {"min": lower, "max": upper},
+        "bounds_gltf_world": {"min": gltf_lower, "max": gltf_upper},
+        "assertions": {
+            "SteeringWheel": {"passed": True, "disc_plane_local": "XY",
+                              "disc_normal_local": "Z", "spin_axis_local": "Z",
+                              "local_extent": wheel_extent, "max_thickness_ratio": 0.15,
+                              "gltf_accessor_bounds_verified": True},
+            "ground_gltf_min_y": gltf_lower[1],
+            "screen_has_texcoord_0": True,
+            "exported_rest_transforms_verified": True,
+            "triangle_budget": p["triangle_budget"],
+        },
         "totals": totals,
     }
     (output / "toy.manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

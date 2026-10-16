@@ -72,9 +72,9 @@ pub const GAME_H: u32 = 600;
 // toy screen quad size (must match assets/blender/toy.py PARAMS screen_size);
 // aspect-checked against the game canvas in the test below
 #[cfg_attr(not(test), expect(dead_code))]
-pub const SCREEN_W: f32 = 0.16;
+pub const SCREEN_W: f32 = 0.152;
 #[cfg_attr(not(test), expect(dead_code))]
-pub const SCREEN_H: f32 = 0.10;
+pub const SCREEN_H: f32 = 0.095;
 
 #[derive(Resource)]
 pub struct GameImage(pub Handle<Image>);
@@ -167,7 +167,7 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Sphere::new(0.0032))),
                 MeshMaterial3d(lamp),
-                Transform::from_translation(Vec3::new(0.062, 0.052, 0.108)),
+                Transform::from_translation(Vec3::new(0.05, 0.086, 0.048)),
             ));
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),

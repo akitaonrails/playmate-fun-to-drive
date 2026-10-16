@@ -5,6 +5,23 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.1.0 fix 2 — faithful toy model + wheel axis (2026-10-15)
+
+- User report: the steering wheel turned about the wrong axis (felt like Y
+  yaw) — glb inspection confirmed the disc normal was local Y. The model
+  was regenerated with the disc facing the player (thin local Z, spin axis
+  = local Z, asserted in the manifest check); the existing Z-rotation
+  animation is now correct.
+- Model redesign toward the real Playmates toy (simplified): reference
+  photos now ATTACHED to the astra generation call; new spec silhouette —
+  red wedge front-clip with tapered nose, broad black cockpit band, center
+  screen pod (0.152x0.095, aspect-exact), pop-up headlight pods at the
+  nose, protruding dark bumper with running lights, fenders/vents/cowl.
+  Turbo lamp + screen constants retargeted; eyes QA: geometry clean, wheel
+  faces player, wedge + black fascia reading; fidelity iterated twice
+  (further model likeness queued for the tuning pass — the gray game
+  texture dominates the "monitor" read; Y-dial warm look helps).
+
 ### v0.1.0 fix — toy view is the default (2026-10-15)
 
 - The build opened in the flat 2D game view; the toy was only reachable via

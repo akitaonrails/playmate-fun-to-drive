@@ -21,8 +21,10 @@ glb="$ROOT/assets/models/${name}.glb"
 prompt="Task: author ONE deterministic Blender generator script for a toy part.
 
 Read the part spec at: ${spec_rel}
-Also skim research/toy-mechanics.md and research/images/ for context if useful
-(you may attach no images; rely on the written specs).
+ATTACHED to this message are reference photographs of the real toy this
+model must resemble (simplified low-poly is fine; the SILHOUETTE and
+proportions must match the photos). Study them before writing the script.
+Also skim research/toy-mechanics.md for context.
 
 Write the file assets/blender/${name}.py — plain 'bpy' Python 3, and it MUST:
   - be fully deterministic: no randomness without a fixed seed, no time/date,
@@ -48,7 +50,12 @@ yourself with: blender --background --factory-startup --python assets/blender/${
 (from the repo root), fix until it exits 0, and report the part list +
 vertex counts. Blender binary: ${BLENDER}"
 
-"$here/astra.sh" "$prompt"
+IMG_ARGS=()
+for img in "$ROOT"/research/images/playmates-1985/ebay-1.jpg "$ROOT"/research/images/playmates-1985/ebay-2.jpg "$ROOT"/research/images/playmates-1985/ebay-3.jpg "$ROOT"/research/images/playmates-1985/yt-short.jpg; do
+  [[ -f "$img" ]] && IMG_ARGS+=(-i "$img")
+done
+
+"$here/astra.sh" "${IMG_ARGS[@]}" "$prompt"
 
 if [[ $run_blender -eq 1 ]] && command -v "$BLENDER" >/dev/null 2>&1; then
   echo "== re-running ${name}.py headless for reproducibility check =="
