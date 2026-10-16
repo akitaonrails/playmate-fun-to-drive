@@ -5,6 +5,15 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.1.0 fix — toy view is the default (2026-10-15)
+
+- The build opened in the flat 2D game view; the toy was only reachable via
+  T and the hint flashed by on the loader — the first playtest read as
+  "just a 2D game". Toy view is now the DEFAULT (T toggles the flat view),
+  mode/camera state is applied every frame (boot included), and a small
+  persistent controls hint sits bottom-left in both views (score/gear HUD
+  still only in the flat view).
+
 ### M13 — polish & packaging (done 2026-10-15)
 - Release pipeline: wasm-opt fixed via `tools/setup-wasm-opt.sh` (binaryen
   needs `--all-features` for our bulk-memory/sat-float output) — release
