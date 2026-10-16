@@ -2,8 +2,8 @@ SERVE_PORT ?= 8080
 
 .PHONY: serve check test build-native build-wasm build-wasm-webgpu package shots ci clean
 
-serve: ## build + serve with auto-reload, open in browser
-	cd crates/game-app && trunk serve --port $(SERVE_PORT) --open
+serve: ## build + serve with auto-reload (waits for the port, prints the URL)
+	SERVE_PORT=$(SERVE_PORT) tools/serve.sh
 
 check: ## fmt + clippy + unit tests + native debug build (run before every commit)
 	cargo fmt --all --check
