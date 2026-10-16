@@ -5,6 +5,23 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.2.0-dev2 — arcade loop rework (2026-10-16, user-directed)
+
+- Start/P pauses and resumes; Select/R restarts (gamepad + keyboard).
+- No more crash game-over: hazards/off-road are toy-ish BUMPS — the car
+  slows, the drum kicks left/right, a short flash plays, and the run
+  continues (fuel-out remains the only run end). The whole toy shakes and
+  the pad rumbles on every bump, synced to the same event.
+- Lap racing: the drum loop is a lap — LAP counter, live lap time, and
+  best lap time in the HUD (`LAP n | m:ss.xx | BEST m:ss.xx`); pause
+  overlay text. Verified live: 3 laps + best 6.0s over a 24-cycle drive.
+- Camera moved close: screen dominant upper-center, only the top half of
+  the steering wheel at the bottom (dash lowered so nothing occludes the
+  screen). eyes QA PASS.
+- game-core: bumped/laps/lap_time/lap_best/paused state, 3 new unit tests
+  (pause freeze/resume/restart, lap counting + best tracking), bump tests
+  replace crash tests — 46 green.
+
 ### v0.2.0-dev — OutRun restyle, lighting, playability (2026-10-16)
 
 - 2D game restyled classic-16-bit: gradient sky + striped sun + clouds,

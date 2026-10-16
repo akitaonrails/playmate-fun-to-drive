@@ -144,7 +144,7 @@ pub fn setup(
             is_active: false,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.28, 0.44).looking_at(Vec3::new(0.0, 0.09, 0.04), Vec3::Y),
+        Transform::from_xyz(0.0, 0.185, 0.275).looking_at(Vec3::new(0.0, 0.128, 0.02), Vec3::Y),
         bevy::core_pipeline::tonemapping::Tonemapping::None,
         ToyCamera,
     ));

@@ -31,6 +31,8 @@ pub struct InputState {
     pub gear_up: bool,
     /// Edge-triggered: restart request this tick.
     pub reset: bool,
+    /// Edge-triggered: pause/resume toggle this tick.
+    pub pause: bool,
 }
 
 /// Keyboard steering adapter (REQUEST R0/R8): a short press is a light

@@ -32,7 +32,8 @@ pub enum Phase {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct StepEvents {
     pub started: bool,
-    pub crashed: bool,
+    /// Toy-ish bump (hazard or off-road): the run continues.
+    pub bumped: bool,
     pub fuel_out: bool,
     pub game_over: bool,
 }
@@ -52,8 +53,19 @@ pub struct Game {
     pub fuel: f32,
     /// Crash flash intensity in [0, 1] while > 0.
     pub flash: f32,
-    /// Seconds accumulated off the road (crashes after grace).
+    /// Seconds accumulated off the road (bumps after grace).
     pub off_road: f32,
+    /// True while the run is paused (Start button / P).
+    pub paused: bool,
+    /// Completed laps (full drum revolutions since the run started).
+    pub laps: u32,
+    /// Seconds in the current lap.
+    pub lap_time: f32,
+    /// Best lap time in seconds (0 = none yet).
+    pub lap_best: f32,
+    /// Bump slow-down timer + kick direction.
+    pub bump_t: f32,
+    pub bump_dir: f32,
     gear: Gear,
 }
 
@@ -76,6 +88,12 @@ impl Game {
             fuel: t.fuel_secs,
             flash: 0.0,
             off_road: 0.0,
+            paused: false,
+            laps: 0,
+            lap_time: 0.0,
+            lap_best: 0.0,
+            bump_t: 0.0,
+            bump_dir: 0.0,
             gear: Gear::Low,
         }
     }
@@ -96,6 +114,19 @@ impl Game {
 
     pub fn step(&mut self, input: &InputState, dt: f32, t: &Tuning) -> StepEvents {
         let mut ev = StepEvents::default();
+
+        // pause works in every phase except Ready
+        if input.pause && self.phase != Phase::Ready {
+            self.paused = !self.paused;
+        }
+        if self.paused {
+            if input.reset {
+                self.paused = false;
+                self.start_run(t);
+                ev.started = true;
+            }
+            return ev;
+        }
 
         match self.phase {
             Phase::Ready => {
@@ -147,14 +178,27 @@ impl Game {
         self.fuel = t.fuel_secs;
         self.flash = 0.0;
         self.off_road = 0.0;
+        self.laps = 0;
+        self.lap_time = 0.0;
+        self.bump_t = 0.0;
+        self.bump_dir = 0.0;
+        // best lap persists across runs
     }
 
     fn step_running(&mut self, input: &InputState, dt: f32, t: &Tuning, ev: &mut StepEvents) {
-        // speed ramps toward the gear target (exponential smoothing)
-        let target = match self.gear {
+        // bump slow-down window
+        if self.bump_t > 0.0 {
+            self.bump_t = (self.bump_t - dt).max(0.0);
+        }
+        // speed ramps toward the gear target (exponential smoothing), capped
+        // while the bump rings out
+        let mut target = match self.gear {
             Gear::Low => t.scroll_speed_low,
             Gear::High => t.scroll_speed_high,
         };
+        if self.bump_t > 0.0 {
+            target *= 0.35;
+        }
         let k = 1.0 - (-dt / t.gear_ramp_secs).exp();
         self.speed += (target - self.speed) * k;
 
@@ -171,14 +215,14 @@ impl Game {
         self.road_x -= input.steer * t.steer_rate * dt;
         self.road_x = self.road_x.clamp(-1.35, 1.35);
 
-        // off-road accumulation (grace), then crash
+        // off-road accumulation (grace), then a toy-ish bump
         if self.road_x.abs() > t.off_road_limit {
             self.off_road += dt;
         } else {
             self.off_road = (self.off_road - 2.0 * dt).max(0.0);
         }
         if self.off_road > t.off_road_grace {
-            self.crash(ev, t);
+            self.bump(ev, t, self.road_x.signum());
             return;
         }
 
@@ -191,11 +235,25 @@ impl Game {
             if crossed && h.kind == HazardKind::Oncoming {
                 let x_eff = h.x + self.road_x;
                 if x_eff.abs() < hit_band {
-                    self.crash(ev, t);
+                    self.bump(ev, t, -x_eff.signum());
                     return;
                 }
             }
         }
+
+        // lap accounting: loop_pos wrapped => lap complete
+        if pos < prev_pos && self.speed > 0.0 {
+            if self.lap_time > 0.5 {
+                self.lap_best = if self.lap_best <= 0.0 {
+                    self.lap_time
+                } else {
+                    self.lap_best.min(self.lap_time)
+                };
+            }
+            self.laps += 1;
+            self.lap_time = 0.0;
+        }
+        self.lap_time += dt;
 
         // fuel
         self.fuel -= dt;
@@ -209,14 +267,15 @@ impl Game {
         }
     }
 
-    fn crash(&mut self, ev: &mut StepEvents, t: &Tuning) {
-        self.phase = Phase::Crashed {
-            timer: t.crash_flash_secs,
-        };
-        self.flash = 1.0;
-        ev.crashed = true;
-        // score (distance) and drum freeze happen naturally: speed decays in
-        // the Crashed phase and distance only advances in Running.
+    /// Toy-ish bump: kick the drum aside, drop speed, flash, keep running.
+    fn bump(&mut self, ev: &mut StepEvents, t: &Tuning, dir: f32) {
+        let d = if dir == 0.0 { 1.0 } else { dir };
+        self.bump_t = t.crash_flash_secs;
+        self.bump_dir = d;
+        self.road_x = (self.road_x + d * 0.38).clamp(-1.35, 1.35);
+        self.speed *= 0.45;
+        self.flash = 0.55;
+        ev.bumped = true;
     }
 }
 
@@ -230,6 +289,16 @@ mod tests {
     fn game(seed: u64) -> (Game, Tuning) {
         let t = Tuning::default();
         (Game::new(seed, &t), t)
+    }
+
+    trait Validated {
+        fn validated(self) -> Self;
+    }
+    impl Validated for Tuning {
+        fn validated(self) -> Self {
+            assert!(self.validate().is_ok());
+            self
+        }
     }
 
     fn idle() -> InputState {
@@ -358,25 +427,25 @@ mod tests {
                 DT,
                 &t,
             );
-            let mut crashed = false;
+            let mut bumped = false;
             for _ in 0..(10.0 / DT) as usize {
                 let ev = g.step(&idle(), DT, &t);
-                if ev.crashed {
-                    assert!(g.flash > 0.0, "flash must be lit at the crash moment");
-                    crashed = true;
+                if ev.bumped {
+                    assert!(g.flash > 0.0, "flash must be lit at the bump moment");
+                    bumped = true;
                     break;
                 }
             }
-            if crashed {
-                // flash window, then game over; distance frozen
-                let d = g.distance;
+            if bumped {
+                // toy-ish bump: run continues, drum keeps rolling
+                let d0 = g.distance;
                 run_seconds(&mut g, 2.0, &idle(), &t);
-                assert!(matches!(g.phase, Phase::GameOver { .. }));
-                assert_eq!(g.distance, d);
+                assert!(matches!(g.phase, Phase::Running));
+                assert!(g.distance > d0, "drum keeps rolling after a bump");
                 return;
             }
         }
-        panic!("no seed produced an off-road crash within 10s; drift model too weak?");
+        panic!("no seed produced an off-road bump within 10s; drift model too weak?");
     }
 
     #[test]
@@ -397,11 +466,12 @@ mod tests {
         let mut ev = StepEvents::default();
         for _ in 0..(6.0 / DT) as usize {
             ev = g.step(&right, DT, &t);
-            if ev.crashed {
+            if ev.bumped {
                 break;
             }
         }
-        assert!(ev.crashed, "holding full steer must run off the road");
+        assert!(ev.bumped, "holding full steer must bump off the road");
+        assert!(matches!(g.phase, Phase::Running), "no game-over on bumps");
     }
 
     #[test]
@@ -421,15 +491,15 @@ mod tests {
             DT,
             &t,
         );
-        let mut crashed = false;
+        let mut bumped = false;
         for _ in 0..(6.0 / DT) as usize {
             let ev = g.step(&idle(), DT, &t);
-            if ev.crashed {
-                crashed = true;
+            if ev.bumped {
+                bumped = true;
                 break;
             }
         }
-        assert!(crashed, "a dead-ahead oncoming hazard must hit");
+        assert!(bumped, "a dead-ahead oncoming hazard must bump");
     }
 
     #[test]
@@ -451,7 +521,7 @@ mod tests {
         );
         for _ in 0..(6.0 / DT) as usize {
             let ev = g.step(&idle(), DT, &t);
-            assert!(!ev.crashed, "side-lane hazard with no steering must miss");
+            assert!(!ev.bumped, "side-lane hazard with no steering must miss");
         }
     }
 
@@ -479,7 +549,7 @@ mod tests {
             };
             let ev = g.step(&input, DT, &t);
             assert!(
-                !ev.crashed,
+                !ev.bumped,
                 "autopilot should hold the road (road_x {})",
                 g.road_x
             );
@@ -538,13 +608,10 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..(8.0 / DT) as usize {
-            let ev = g.step(&right, DT, &t);
-            if ev.crashed {
-                break;
-            }
+            let _ = g.step(&right, DT, &t);
         }
         run_seconds(&mut g, 2.0, &idle(), &t);
-        assert!(matches!(g.phase, Phase::GameOver { .. }));
+        assert!(matches!(g.phase, Phase::Running));
 
         let ev = g.step(
             &InputState {
@@ -584,6 +651,108 @@ mod tests {
             &t,
         );
         assert_eq!(g.gear(), Gear::High);
+    }
+
+    #[test]
+    fn pause_freezes_and_resume_continues() {
+        let (mut g, t) = game(21);
+        g.step(
+            &InputState {
+                steer: 1.0,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        run_seconds(&mut g, 1.0, &idle(), &t);
+        let d_before = g.distance;
+        g.step(
+            &InputState {
+                pause: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(g.paused);
+        run_seconds(&mut g, 2.0, &idle(), &t);
+        assert_eq!(g.distance, d_before, "paused: drum frozen");
+        g.step(
+            &InputState {
+                pause: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(!g.paused);
+        run_seconds(&mut g, 0.5, &idle(), &t);
+        assert!(g.distance > d_before, "resumed: drum rolling");
+    }
+
+    #[test]
+    fn pause_then_restart_fresh_run() {
+        let (mut g, t) = game(22);
+        g.step(
+            &InputState {
+                steer: 1.0,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        run_seconds(&mut g, 1.0, &idle(), &t);
+        g.step(
+            &InputState {
+                pause: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        let ev = g.step(
+            &InputState {
+                reset: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(ev.started);
+        assert!(!g.paused);
+        assert_eq!(g.distance, 0.0);
+    }
+
+    #[test]
+    fn laps_count_and_best_time_tracks() {
+        let t = Tuning {
+            fuel_secs: 600.0,
+            scroll_speed_low: 30.0, // fast: wrap the ~60 m loop quickly
+            scroll_speed_high: 31.0,
+            ..Default::default()
+        }
+        .validated();
+        let road = RoadLoop::straight(60.0, vec![]);
+        let mut g = Game::with_road(23, road, &t);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        // run ~4.5 loops
+        for _ in 0..(9.0 / DT) as usize {
+            let _ = g.step(&idle(), DT, &t);
+        }
+        assert!(g.laps >= 4, "laps: {}", g.laps);
+        assert!(g.lap_best > 0.0);
+        let prev_best = g.lap_best;
+        for _ in 0..(2.0 / DT) as usize {
+            let _ = g.step(&idle(), DT, &t);
+        }
+        assert!(g.lap_best <= prev_best || g.laps == 5);
     }
 
     #[test]

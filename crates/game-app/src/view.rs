@@ -68,6 +68,9 @@ pub struct GearText;
 #[derive(Component)]
 pub struct StatusText;
 
+#[derive(Component)]
+pub struct LapText;
+
 /// M10 rolling-tube overlays: bands printed on the drum + recess shading.
 #[derive(Component)]
 struct DrumBand;
@@ -96,6 +99,12 @@ fn palette() -> Palette {
         rumble_white: Color::srgb(0.95, 0.95, 0.92),
         dash: Color::srgb(0.95, 0.95, 0.90),
     }
+}
+
+fn format_lap(secs: f32) -> String {
+    let m = (secs / 60.0) as u32;
+    let s = secs - m as f32 * 60.0;
+    format!("{m}:{s:05.2}")
 }
 
 fn sky_colors() -> [(Color, f32); 6] {
@@ -332,6 +341,21 @@ pub fn setup(mut commands: Commands) {
             ..default()
         },
         StatusText,
+    ));
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font_size: FontSize::Px(24.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.98, 0.92, 0.55)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(14.0),
+            left: Val::Px(16.0),
+            ..default()
+        },
+        LapText,
     ));
 
     // crash flash overlay
@@ -576,6 +600,7 @@ fn sync_flash(sim: Res<Sim>, mut q: Query<&mut Sprite, With<FlashOverlay>>) {
 }
 
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn sync_hud(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
@@ -591,7 +616,16 @@ fn sync_hud(
     >,
     mut score: Query<&mut Text, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
     mut gear: Query<&mut Text, (With<GearText>, Without<StatusText>)>,
-    mut status: Query<&mut Text, With<StatusText>>,
+    mut status: Query<&mut Text, (With<StatusText>, Without<LapText>)>,
+    mut lap: Query<
+        &mut Text,
+        (
+            With<LapText>,
+            Without<StatusText>,
+            Without<ScoreText>,
+            Without<GearText>,
+        ),
+    >,
 ) {
     if let Ok((mut tf, mut sp)) = fuel.single_mut() {
         let frac = (sim.0.fuel / tuning.0.fuel_secs).clamp(0.0, 1.0);
@@ -615,8 +649,23 @@ fn sync_hud(
             Gear::High => "HIGH (turbo)".to_string(),
         };
     }
+    if let Ok(mut text) = lap.single_mut() {
+        let best = if sim.0.lap_best > 0.0 {
+            format_lap(sim.0.lap_best)
+        } else {
+            "--:--.--".to_string()
+        };
+        **text = format!(
+            "LAP {} | {} | BEST {}",
+            sim.0.laps + 1,
+            format_lap(sim.0.lap_time),
+            best
+        );
+    }
     if let Ok(mut text) = status.single_mut() {
-        **text = if view.mode == crate::toy_view::ViewMode::Toy {
+        **text = if sim.0.paused {
+            "PAUSED | Start/P resume | Select/R restart".to_string()
+        } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
                     "ARROWS drive | G gear | R restart | T flat view | Y toy look".to_string()

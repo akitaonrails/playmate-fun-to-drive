@@ -107,6 +107,14 @@ fn gather_input(
             frame.state.gear_up = true;
             frame.pad_seen = true;
         }
+        if pad.just_pressed(GamepadButton::Start) {
+            frame.state.pause = true;
+            frame.pad_seen = true;
+        }
+        if pad.just_pressed(GamepadButton::Select) {
+            frame.state.reset = true;
+            frame.pad_seen = true;
+        }
     }
 
     frame.state.steer = steer.clamp(-1.0, 1.0);
@@ -115,6 +123,9 @@ fn gather_input(
     }
     if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
         frame.state.reset = true;
+    }
+    if keys.just_pressed(KeyCode::KeyP) {
+        frame.state.pause = true;
     }
 }
 
@@ -129,6 +140,7 @@ fn step_sim(
     // edge-triggered flags are consumed by exactly one fixed step
     frame.state.gear_up = false;
     frame.state.reset = false;
+    frame.state.pause = false;
 }
 
 fn publish_state(
@@ -139,7 +151,7 @@ fn publish_state(
 ) {
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"paused\":{},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -155,6 +167,10 @@ fn publish_state(
         },
         view.mode == toy_view::ViewMode::Toy,
         view.toy_look,
+        sim.0.paused,
+        sim.0.laps,
+        sim.0.lap_time,
+        sim.0.lap_best,
         frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,
