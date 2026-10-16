@@ -179,14 +179,14 @@ pub fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: FontSize::Px(22.0),
+            font_size: FontSize::Px(15.0),
             ..default()
         },
-        TextColor(Color::srgb(0.95, 0.85, 0.4)),
+        TextColor(Color::srgb(0.9, 0.88, 0.75)),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(250.0),
-            left: Val::Px(290.0),
+            bottom: Val::Px(12.0),
+            left: Val::Px(14.0),
             ..default()
         },
         StatusText,
@@ -335,6 +335,7 @@ fn sync_flash(sim: Res<Sim>, mut q: Query<&mut Sprite, With<FlashOverlay>>) {
 fn sync_hud(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
+    view: Res<crate::toy_view::ViewState>,
     mut fuel: Query<(&mut Transform, &mut Sprite), With<FuelBarFill>>,
     mut score: Query<&mut Text, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
     mut gear: Query<&mut Text, (With<GearText>, Without<StatusText>)>,
@@ -363,14 +364,32 @@ fn sync_hud(
         };
     }
     if let Ok(mut text) = status.single_mut() {
-        **text = match &sim.0.phase {
-            Phase::Ready => "ARROWS steer | G gear | R restart".to_string(),
-            Phase::Running => String::new(),
-            Phase::Crashed { .. } => "CRASHED!".to_string(),
-            Phase::GameOver { reason } => match reason {
-                EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
-                EndReason::Fuel => "GAME OVER - OUT OF FUEL | R to restart".to_string(),
-            },
+        **text = if view.mode == crate::toy_view::ViewMode::Toy {
+            // persistent hint over the toy view (the toy screen itself has
+            // no text UI, so this line is the only place to learn controls)
+            match &sim.0.phase {
+                Phase::Ready => {
+                    "ARROWS drive | G gear | R restart | T flat view | Y toy look".to_string()
+                }
+                Phase::Running => "T flat view | Y toy look".to_string(),
+                Phase::Crashed { .. } => "CRASHED!".to_string(),
+                Phase::GameOver { reason } => match reason {
+                    EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
+                    EndReason::Fuel => "GAME OVER - OUT OF FUEL | R to restart".to_string(),
+                },
+            }
+        } else {
+            match &sim.0.phase {
+                Phase::Ready => {
+                    "ARROWS steer | G gear | R restart | T toy view | Y toy look".to_string()
+                }
+                Phase::Running => String::new(),
+                Phase::Crashed { .. } => "CRASHED!".to_string(),
+                Phase::GameOver { reason } => match reason {
+                    EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
+                    EndReason::Fuel => "GAME OVER - OUT OF FUEL | R to restart".to_string(),
+                },
+            }
         };
     }
 }

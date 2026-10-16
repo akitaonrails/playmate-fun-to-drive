@@ -15,8 +15,8 @@ use crate::Sim;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
-    #[default]
     Game,
+    #[default]
     Toy,
 }
 
@@ -191,15 +191,12 @@ pub fn toggle_mode(
     mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
     mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
     mut hud_texts: Query<
-        &mut Visibility,
         (
-            Or<(
-                With<crate::view::ScoreText>,
-                With<crate::view::GearText>,
-                With<crate::view::StatusText>,
-            )>,
-            Without<ToyRoot>,
+            &mut Visibility,
+            Option<&crate::view::ScoreText>,
+            Option<&crate::view::GearText>,
         ),
+        Without<ToyRoot>,
     >,
 ) {
     if keys.just_pressed(KeyCode::KeyT) {
@@ -208,6 +205,34 @@ pub fn toggle_mode(
             ViewMode::Toy => ViewMode::Game,
         };
     }
+    apply_mode(
+        &mut state,
+        &mut commands,
+        &game_image,
+        &mut game_cam,
+        &mut toy_cam,
+        &mut toy_root,
+        &mut hud_texts,
+    );
+}
+
+#[allow(clippy::type_complexity)]
+fn apply_mode(
+    state: &mut ResMut<ViewState>,
+    commands: &mut Commands,
+    game_image: &Res<GameImage>,
+    game_cam: &mut Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
+    toy_cam: &mut Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
+    toy_root: &mut Query<&mut Visibility, With<ToyRoot>>,
+    hud_texts: &mut Query<
+        (
+            &mut Visibility,
+            Option<&crate::view::ScoreText>,
+            Option<&crate::view::GearText>,
+        ),
+        Without<ToyRoot>,
+    >,
+) {
     let toy = state.mode == ViewMode::Toy;
     if let Ok((entity, mut cam)) = game_cam.single_mut() {
         cam.is_active = true; // always renders: window in game mode, texture in toy mode
@@ -231,10 +256,11 @@ pub fn toggle_mode(
             Visibility::Hidden
         };
     }
-    // window-space HUD text only in game mode; in toy mode the game texture
-    // on the toy screen carries the world sprites (road, car, fuel bar)
-    for mut vis in hud_texts.iter_mut() {
-        *vis = if toy {
+    // score/gear HUD only in flat game mode; the persistent status line
+    // stays visible in BOTH modes (it carries the controls hint)
+    for (mut vis, score, gear) in hud_texts.iter_mut() {
+        let is_status = score.is_none() && gear.is_none();
+        *vis = if toy && !is_status {
             Visibility::Hidden
         } else {
             Visibility::Visible
