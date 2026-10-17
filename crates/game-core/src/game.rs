@@ -3,8 +3,10 @@
 //! Model mirrors the toy (research/toy-mechanics.md): the car is a FIXED
 //! decal at screen center-bottom; the printed drum (road loop) scrolls and
 //! shifts laterally under it. Steering moves the ROAD; hazards ride the road;
-//! crash = hazard under the car or road slipped out from under it (off-road).
+//! bump = an oncoming hazard under the car or the road slipping out from
+//! under it (off-road). Bumps slow the toy but do not end the timed session.
 
+use crate::environment::{WeatherSchedule, WeatherTransition, DAY_SECS};
 use crate::input::{Gear, InputState};
 use crate::rng::Rng;
 use crate::road::{HazardKind, RoadLoop};
@@ -12,21 +14,14 @@ use crate::tuning::Tuning;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndReason {
-    Crash,
-    Fuel,
+    Time,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Phase {
     Ready,
     Running,
-    /// crash flash window; transitions to `GameOver(Crash)` when it ends
-    Crashed {
-        timer: f32,
-    },
-    GameOver {
-        reason: EndReason,
-    },
+    GameOver { reason: EndReason },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -34,10 +29,83 @@ pub struct StepEvents {
     pub started: bool,
     /// Toy-ish bump (hazard or off-road): the run continues.
     pub bumped: bool,
-    pub fuel_out: bool,
+    pub time_up: bool,
     pub game_over: bool,
     pub nitro_collected: bool,
     pub nitro_started: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionResult {
+    pub day_cycles: u64,
+    pub cars_passed: u64,
+    pub cars_bumped: u64,
+    pub score: u64,
+}
+
+impl SessionResult {
+    pub fn new(day_cycles: u64, cars_passed: u64, cars_bumped: u64) -> Self {
+        Self {
+            day_cycles,
+            cars_passed,
+            cars_bumped,
+            score: score_for(day_cycles, cars_passed, cars_bumped),
+        }
+    }
+}
+
+/// Cycles dominate the ranking, passes distinguish similarly paced runs, and
+/// one collision cancels three clean passes. Wide signed arithmetic prevents
+/// either overflow or unsigned penalty underflow.
+pub fn score_for(day_cycles: u64, cars_passed: u64, cars_bumped: u64) -> u64 {
+    let positive = i128::from(day_cycles)
+        .saturating_mul(10_000)
+        .saturating_add(i128::from(cars_passed).saturating_mul(100));
+    let score = positive.saturating_sub(i128::from(cars_bumped).saturating_mul(300));
+    score.clamp(0, i128::from(u64::MAX)) as u64
+}
+
+pub const LEADERBOARD_CAPACITY: usize = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaderboardEntry {
+    pub initials: [u8; 3],
+    pub result: SessionResult,
+}
+
+impl LeaderboardEntry {
+    pub fn new(
+        initials: &str,
+        day_cycles: u64,
+        cars_passed: u64,
+        cars_bumped: u64,
+    ) -> Option<Self> {
+        let bytes = initials.as_bytes();
+        if bytes.len() != 3 || !bytes.iter().all(u8::is_ascii_uppercase) {
+            return None;
+        }
+        Some(Self {
+            initials: [bytes[0], bytes[1], bytes[2]],
+            result: SessionResult::new(day_cycles, cars_passed, cars_bumped),
+        })
+    }
+
+    pub fn initials_str(&self) -> &str {
+        // Construction guarantees uppercase ASCII.
+        std::str::from_utf8(&self.initials).expect("validated ASCII initials")
+    }
+}
+
+pub fn rank_leaderboard(entries: &mut Vec<LeaderboardEntry>) {
+    entries.sort_by(|a, b| {
+        b.result
+            .score
+            .cmp(&a.result.score)
+            .then_with(|| b.result.day_cycles.cmp(&a.result.day_cycles))
+            .then_with(|| b.result.cars_passed.cmp(&a.result.cars_passed))
+            .then_with(|| a.result.cars_bumped.cmp(&b.result.cars_bumped))
+    });
+    entries.truncate(LEADERBOARD_CAPACITY);
 }
 
 #[derive(Debug, Clone)]
@@ -51,20 +119,19 @@ pub struct Game {
     pub distance: f32,
     /// Road-center lateral offset at the car row, in half-widths. Car is at 0.
     pub road_x: f32,
-    /// Fuel remaining, seconds.
-    pub fuel: f32,
+    /// Authoritative competitive clock. Only advances while actively running.
+    pub session_remaining: f32,
+    /// Performance-driven environment clock; LOW speed advances at real time.
+    pub environment_time: f32,
+    pub day_cycles: u64,
+    pub cars_passed: u64,
+    pub cars_bumped: u64,
     /// Crash flash intensity in [0, 1] while > 0.
     pub flash: f32,
     /// Seconds accumulated off the road (bumps after grace).
     pub off_road: f32,
     /// True while the run is paused (Start button / P).
     pub paused: bool,
-    /// Completed laps (full drum revolutions since the run started).
-    pub laps: u32,
-    /// Seconds in the current lap.
-    pub lap_time: f32,
-    /// Best lap time in seconds (0 = none yet).
-    pub lap_best: f32,
     /// Bump slow-down timer + kick direction.
     pub bump_t: f32,
     pub bump_dir: f32,
@@ -78,6 +145,8 @@ pub struct Game {
     pub next_nitro_lane: f32,
     nitro_pickup_index: u32,
     gear: Gear,
+    weather: WeatherSchedule,
+    result: Option<SessionResult>,
 }
 
 impl Game {
@@ -96,13 +165,14 @@ impl Game {
             speed: 0.0,
             distance: 0.0,
             road_x: 0.0,
-            fuel: t.fuel_secs,
+            session_remaining: t.session_secs,
+            environment_time: 0.0,
+            day_cycles: 0,
+            cars_passed: 0,
+            cars_bumped: 0,
             flash: 0.0,
             off_road: 0.0,
             paused: false,
-            laps: 0,
-            lap_time: 0.0,
-            lap_best: 0.0,
             bump_t: 0.0,
             bump_dir: 0.0,
             nitro_charges: 0,
@@ -111,6 +181,8 @@ impl Game {
             next_nitro_lane: Self::nitro_lane(seed, 0),
             nitro_pickup_index: 0,
             gear: Gear::Low,
+            weather: WeatherSchedule::new(seed),
+            result: None,
         }
     }
 
@@ -128,6 +200,14 @@ impl Game {
 
     pub fn nitro_pickup_ahead(&self) -> f32 {
         self.next_nitro_distance - self.distance
+    }
+
+    pub fn weather(&self) -> WeatherTransition {
+        self.weather.at(self.environment_time)
+    }
+
+    pub fn result(&self) -> Option<&SessionResult> {
+        self.result.as_ref()
     }
 
     fn nitro_lane(seed: u64, index: u32) -> f32 {
@@ -150,6 +230,7 @@ impl Game {
 
     pub fn step(&mut self, input: &InputState, dt: f32, t: &Tuning) -> StepEvents {
         let mut ev = StepEvents::default();
+        let dt = dt.max(0.0);
 
         // pause works in every phase except Ready
         if input.pause && self.phase != Phase::Ready {
@@ -163,9 +244,14 @@ impl Game {
             }
             return ev;
         }
-        // the bump flash decays in every phase (bumps no longer stop the
-        // run, so nothing else would clear it)
-        self.flash = (self.flash - dt / t.crash_flash_secs).max(0.0);
+        // Running systems all share the same capped delta on the terminal
+        // tick. Other phases may use the full wall-clock delta safely.
+        let active_dt = if self.phase == Phase::Running {
+            dt.min(self.session_remaining)
+        } else {
+            dt
+        };
+        self.flash = (self.flash - active_dt / t.crash_flash_secs).max(0.0);
 
         match self.phase {
             Phase::Ready => {
@@ -183,23 +269,9 @@ impl Game {
                     ev.started = true;
                     return ev;
                 }
-                self.step_running(input, dt, t, &mut ev);
-            }
-            Phase::Crashed { timer } => {
-                self.speed = (self.speed - 24.0 * dt).max(0.0);
-                self.flash = (self.flash - dt / t.crash_flash_secs).max(0.0);
-                let timer = timer - dt;
-                if timer <= 0.0 {
-                    self.phase = Phase::GameOver {
-                        reason: EndReason::Crash,
-                    };
-                    ev.game_over = true;
-                } else {
-                    self.phase = Phase::Crashed { timer };
-                }
+                self.step_running(input, active_dt, t, &mut ev);
             }
             Phase::GameOver { .. } => {
-                self.flash = (self.flash - dt / t.crash_flash_secs).max(0.0);
                 if input.reset {
                     self.start_run(t);
                     ev.started = true;
@@ -214,11 +286,13 @@ impl Game {
         self.speed = 0.0;
         self.distance = 0.0;
         self.road_x = 0.0;
-        self.fuel = t.fuel_secs;
+        self.session_remaining = t.session_secs;
+        self.environment_time = 0.0;
+        self.day_cycles = 0;
+        self.cars_passed = 0;
+        self.cars_bumped = 0;
         self.flash = 0.0;
         self.off_road = 0.0;
-        self.laps = 0;
-        self.lap_time = 0.0;
         self.bump_t = 0.0;
         self.bump_dir = 0.0;
         self.nitro_charges = 0;
@@ -226,10 +300,15 @@ impl Game {
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
         self.next_nitro_lane = Self::nitro_lane(self.seed, 0);
-        // best lap persists across runs
+        self.result = None;
     }
 
     fn step_running(&mut self, input: &InputState, dt: f32, t: &Tuning, ev: &mut StepEvents) {
+        let dt = dt.max(0.0).min(self.session_remaining);
+        if dt <= 0.0 {
+            self.finish_session(ev);
+            return;
+        }
         if input.nitro && self.nitro_t <= 0.0 && self.nitro_charges > 0 {
             self.nitro_charges -= 1;
             self.nitro_t = t.nitro_duration_secs;
@@ -257,10 +336,12 @@ impl Game {
         let k = 1.0 - (-dt / t.gear_ramp_secs).exp();
         self.speed += (target - self.speed) * k;
 
-        let prev_pos = self.loop_pos();
-        self.distance += self.speed * dt;
+        let previous_distance = self.distance;
+        let distance_delta = self.speed * dt;
+        self.distance += distance_delta;
+        self.environment_time += distance_delta / t.scroll_speed_low;
+        self.day_cycles = (self.environment_time / DAY_SECS).floor().max(0.0) as u64;
         let pos = self.loop_pos();
-        let step_m = self.speed * dt;
 
         // road lateral dynamics: road drifts toward the printed curve target;
         // steering shifts the drum the other way (car "moves" relatively).
@@ -273,7 +354,7 @@ impl Game {
         // One deterministic pickup at a time. The absolute-distance schedule
         // keeps appearances occasional and guarantees more than four per
         // 100-second light cycle at LOW speed.
-        if self.distance >= self.next_nitro_distance {
+        while self.distance >= self.next_nitro_distance {
             let capacity_used = self.nitro_charges + u8::from(self.nitro_t > 0.0);
             let x_eff = self.next_nitro_lane + self.road_x;
             let pickup_band = t.car_half_width + 0.20;
@@ -284,56 +365,69 @@ impl Game {
             self.advance_nitro_pickup(t);
         }
 
-        // off-road accumulation (grace), then a toy-ish bump
+        // Accumulate off-road time, but defer its impulse until after all
+        // traffic crossings have been classified. A car collision wins when
+        // both conditions occur in the same tick.
         if self.road_x.abs() > t.off_road_limit {
             self.off_road += dt;
         } else {
             self.off_road = (self.off_road - 2.0 * dt).max(0.0);
         }
-        if self.off_road > t.off_road_grace {
-            self.bump(ev, t, self.road_x.signum());
-            return;
-        }
+        let off_road_bump = self.off_road > t.off_road_grace;
 
-        // hazards crossing the car row this step (swept)
+        // Fixed-step traffic contract: account every oncoming crossing in
+        // (previous_distance, distance], including repeated-loop encounters.
+        // All crossings in this tick use the tick's resolved road offset.
+        // Passed and bumped are mutually exclusive per encounter; roadside
+        // scenery never affects either counter, and collisions collectively
+        // produce at most one physical impulse below.
         let hit_band = (t.car_half_width + t.hazard_half_width) * (1.0 - t.collision_forgiveness);
+        let mut car_collision = false;
+        let mut car_bump_dir = 1.0;
         for h in &self.road.hazards {
-            let prev_ahead = (h.s - prev_pos).rem_euclid(self.road.length);
-            let ahead = (h.s - pos).rem_euclid(self.road.length);
-            let crossed = prev_ahead <= step_m && ahead > prev_ahead;
-            if crossed && h.kind == HazardKind::Oncoming {
+            if h.kind == HazardKind::Oncoming {
+                let crossings =
+                    crossings_between(previous_distance, self.distance, h.s, self.road.length);
+                if crossings == 0 {
+                    continue;
+                }
                 let x_eff = h.x + self.road_x;
                 if x_eff.abs() < hit_band {
-                    self.bump(ev, t, -x_eff.signum());
-                    return;
+                    self.cars_bumped = self.cars_bumped.saturating_add(crossings);
+                    car_collision = true;
+                    car_bump_dir = -x_eff.signum();
+                } else {
+                    self.cars_passed = self.cars_passed.saturating_add(crossings);
                 }
             }
         }
-
-        // lap accounting: loop_pos wrapped => lap complete
-        if pos < prev_pos && self.speed > 0.0 {
-            if self.lap_time > 0.5 {
-                self.lap_best = if self.lap_best <= 0.0 {
-                    self.lap_time
-                } else {
-                    self.lap_best.min(self.lap_time)
-                };
-            }
-            self.laps += 1;
-            self.lap_time = 0.0;
+        if car_collision {
+            self.bump(ev, t, car_bump_dir);
+        } else if off_road_bump {
+            self.bump(ev, t, self.road_x.signum());
         }
-        self.lap_time += dt;
 
-        // fuel
-        self.fuel -= dt;
-        if self.fuel <= 0.0 {
-            self.fuel = 0.0;
-            self.phase = Phase::GameOver {
-                reason: EndReason::Fuel,
-            };
-            ev.fuel_out = true;
-            ev.game_over = true;
+        self.session_remaining = (self.session_remaining - dt).max(0.0);
+        if self.session_remaining <= 0.0 {
+            self.finish_session(ev);
         }
+    }
+
+    fn finish_session(&mut self, ev: &mut StepEvents) {
+        if self.result.is_some() {
+            return;
+        }
+        self.session_remaining = 0.0;
+        self.phase = Phase::GameOver {
+            reason: EndReason::Time,
+        };
+        self.result = Some(SessionResult::new(
+            self.day_cycles,
+            self.cars_passed,
+            self.cars_bumped,
+        ));
+        ev.time_up = true;
+        ev.game_over = true;
     }
 
     /// Toy-ish bump: kick the drum aside, drop speed, flash, keep running.
@@ -347,6 +441,15 @@ impl Game {
         self.flash = 0.35;
         ev.bumped = true;
     }
+}
+
+fn crossings_between(start: f32, end: f32, hazard_s: f32, loop_length: f32) -> u64 {
+    if end <= start || loop_length <= 0.0 {
+        return 0;
+    }
+    let first = ((start - hazard_s) / loop_length).floor() as i64 + 1;
+    let last = ((end - hazard_s) / loop_length).floor() as i64;
+    last.saturating_sub(first).saturating_add(1).max(0) as u64
 }
 
 #[cfg(test)]
@@ -653,9 +756,9 @@ mod tests {
     }
 
     #[test]
-    fn fuel_runs_out_and_freezes_score() {
+    fn session_clock_ends_once_and_freezes_result() {
         let t = Tuning {
-            fuel_secs: 2.0,
+            session_secs: 2.0,
             ..Default::default()
         };
         let mut g = Game::with_road(6, RoadLoop::straight(60.0, vec![]), &t);
@@ -674,17 +777,19 @@ mod tests {
                 break;
             }
         }
-        assert!(ev.fuel_out);
-        assert_eq!(g.fuel, 0.0);
+        assert!(ev.time_up);
+        assert_eq!(g.session_remaining, 0.0);
         assert!(matches!(
             g.phase,
             Phase::GameOver {
-                reason: EndReason::Fuel
+                reason: EndReason::Time
             }
         ));
         let d = g.distance;
+        let result = *g.result().unwrap();
         run_seconds(&mut g, 2.0, &idle(), &t);
         assert_eq!(g.distance, d);
+        assert_eq!(g.result(), Some(&result));
     }
 
     #[test]
@@ -719,7 +824,9 @@ mod tests {
         assert!(ev.started);
         assert_eq!(g.phase, Phase::Running);
         assert_eq!(g.distance, 0.0);
-        assert_eq!(g.fuel, t.fuel_secs);
+        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.environment_time, 0.0);
+        assert_eq!(g.result(), None);
         // same seed => same course
         let (g2, _) = game(8);
         assert_eq!(g.road.hazards, g2.road.hazards);
@@ -819,17 +926,16 @@ mod tests {
     }
 
     #[test]
-    fn laps_count_and_best_time_tracks() {
+    fn faster_driving_completes_more_environment_cycles() {
         let t = Tuning {
-            fuel_secs: 600.0,
-            scroll_speed_low: 30.0, // fast: wrap the ~60 m loop quickly
-            scroll_speed_high: 31.0,
+            session_secs: 200.0,
             ..Default::default()
         }
         .validated();
-        let road = RoadLoop::straight(60.0, vec![]);
-        let mut g = Game::with_road(23, road, &t);
-        g.step(
+        let road = RoadLoop::straight(10_000.0, vec![]);
+        let mut low = Game::with_road(23, road.clone(), &t);
+        let mut high = Game::with_road(23, road, &t);
+        low.step(
             &InputState {
                 steer: 0.001,
                 ..Default::default()
@@ -837,17 +943,26 @@ mod tests {
             DT,
             &t,
         );
-        // run ~4.5 loops
-        for _ in 0..(9.0 / DT) as usize {
-            let _ = g.step(&idle(), DT, &t);
-        }
-        assert!(g.laps >= 4, "laps: {}", g.laps);
-        assert!(g.lap_best > 0.0);
-        let prev_best = g.lap_best;
-        for _ in 0..(2.0 / DT) as usize {
-            let _ = g.step(&idle(), DT, &t);
-        }
-        assert!(g.lap_best <= prev_best || g.laps == 5);
+        high.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        high.step(
+            &InputState {
+                gear_up: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        run_seconds(&mut low, 150.0, &idle(), &t);
+        run_seconds(&mut high, 150.0, &idle(), &t);
+        assert!(high.environment_time > low.environment_time);
+        assert!(high.day_cycles > low.day_cycles);
     }
 
     #[test]
@@ -995,7 +1110,7 @@ mod tests {
     #[test]
     fn at_least_four_nitro_pickups_appear_per_light_cycle_at_low_speed() {
         let t = Tuning {
-            fuel_secs: 600.0,
+            session_secs: 600.0,
             ..Default::default()
         };
         let mut g = Game::with_road(35, RoadLoop::straight(3000.0, vec![]), &t);
@@ -1020,5 +1135,189 @@ mod tests {
             collected >= 4,
             "only {collected} pickups in one 100 s light cycle"
         );
+    }
+
+    #[test]
+    fn ready_pause_and_reset_freeze_or_restore_all_session_clocks() {
+        let (mut g, t) = game(50);
+        g.step(&idle(), 5.0, &t);
+        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.environment_time, 0.0);
+
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        run_seconds(&mut g, 1.0, &idle(), &t);
+        let remaining = g.session_remaining;
+        let environment_time = g.environment_time;
+        g.step(
+            &InputState {
+                pause: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        run_seconds(&mut g, 5.0, &idle(), &t);
+        assert_eq!(g.session_remaining, remaining);
+        assert_eq!(g.environment_time, environment_time);
+
+        g.step(
+            &InputState {
+                reset: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.environment_time, 0.0);
+        assert_eq!(g.day_cycles, 0);
+    }
+
+    #[test]
+    fn terminal_step_uses_only_remaining_active_time_even_when_dt_overshoots() {
+        let t = Tuning::default();
+        let mut exact = Game::with_road(51, RoadLoop::straight(10_000.0, vec![]), &t);
+        exact.start_run(&t);
+        exact.speed = t.scroll_speed_low;
+        exact.session_remaining = 0.25;
+        let mut overshoot = exact.clone();
+
+        let exact_ev = exact.step(&idle(), 0.25, &t);
+        let overshoot_ev = overshoot.step(&idle(), 10.0, &t);
+        assert!(exact_ev.time_up && overshoot_ev.time_up);
+        assert_eq!(exact.distance, overshoot.distance);
+        assert_eq!(exact.environment_time, overshoot.environment_time);
+        assert_eq!(exact.result(), overshoot.result());
+    }
+
+    #[test]
+    fn environment_and_weather_are_timestep_partition_invariant_at_constant_speed() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(10_000.0, vec![]);
+        let mut whole = Game::with_road(52, road.clone(), &t);
+        let mut split = Game::with_road(52, road, &t);
+        for g in [&mut whole, &mut split] {
+            g.start_run(&t);
+            g.speed = t.scroll_speed_low;
+        }
+        whole.step(&idle(), 0.3, &t);
+        for _ in 0..3 {
+            split.step(&idle(), 0.1, &t);
+        }
+        assert!((whole.environment_time - split.environment_time).abs() < 1e-6);
+        assert_eq!(whole.day_cycles, split.day_cycles);
+        assert_eq!(whole.weather(), split.weather());
+    }
+
+    #[test]
+    fn oncoming_crossings_are_mutually_exclusive_and_roadside_is_ignored() {
+        let t = Tuning::default();
+        let hazards = vec![
+            Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.0,
+                s: 1.0,
+            },
+            Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.8,
+                s: 1.0,
+            },
+            Hazard {
+                kind: HazardKind::Roadside,
+                x: 0.0,
+                s: 1.0,
+            },
+        ];
+        let mut g = Game::with_road(53, RoadLoop::straight(10.0, hazards), &t);
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        let ev = g.step(&idle(), 0.1, &t);
+        assert!(ev.bumped);
+        assert_eq!(g.cars_bumped, 1);
+        assert_eq!(g.cars_passed, 1);
+        assert_eq!(g.cars_bumped + g.cars_passed, 2);
+    }
+
+    #[test]
+    fn repeated_loop_encounters_count_and_apply_only_one_impulse_per_tick() {
+        let t = Tuning::default();
+        let hazard = Hazard {
+            kind: HazardKind::Oncoming,
+            x: 0.0,
+            s: 1.0,
+        };
+        let mut g = Game::with_road(54, RoadLoop::straight(2.0, vec![hazard]), &t);
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        g.step(&idle(), 0.5, &t);
+        assert_eq!(g.cars_bumped, 3, "crossings at 1, 3, and 5 meters");
+        assert_eq!(g.bump_t, t.crash_flash_secs);
+    }
+
+    #[test]
+    fn car_collision_takes_precedence_over_simultaneous_off_road_bump() {
+        let t = Tuning::default();
+        let hazard = Hazard {
+            kind: HazardKind::Oncoming,
+            x: -1.0,
+            s: 1.0,
+        };
+        let mut g = Game::with_road(55, RoadLoop::straight(100.0, vec![hazard]), &t);
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        g.road_x = 1.1;
+        g.off_road = t.off_road_grace;
+        let ev = g.step(&idle(), 0.1, &t);
+        assert!(ev.bumped);
+        assert_eq!(g.cars_bumped, 1);
+        assert!(
+            g.bump_dir < 0.0,
+            "car direction must win over positive off-road side"
+        );
+    }
+
+    #[test]
+    fn score_clamps_and_has_expected_ordering_effects() {
+        assert_eq!(score_for(0, 0, 1), 0);
+        assert_eq!(score_for(1, 3, 1), 10_000);
+        assert!(score_for(2, 0, 0) > score_for(1, 99, 0));
+        assert_eq!(score_for(u64::MAX, u64::MAX, 0), u64::MAX);
+        assert_eq!(score_for(0, 0, u64::MAX), 0);
+    }
+
+    #[test]
+    fn leaderboard_validates_initials_sorts_stably_and_caps_at_ten() {
+        assert!(LeaderboardEntry::new("abC", 1, 0, 0).is_none());
+        assert!(LeaderboardEntry::new("TOOLONG", 1, 0, 0).is_none());
+        let mut entries = vec![
+            LeaderboardEntry::new("AAA", 1, 3, 1).unwrap(),
+            LeaderboardEntry::new("BBB", 1, 3, 1).unwrap(),
+            LeaderboardEntry::new("CCC", 2, 0, 0).unwrap(),
+            LeaderboardEntry::new("DDD", 1, 4, 0).unwrap(),
+        ];
+        for n in 0..9 {
+            let name = format!("Z{}A", (b'A' + n as u8) as char);
+            entries.push(LeaderboardEntry::new(&name, 0, n, 0).unwrap());
+        }
+        rank_leaderboard(&mut entries);
+        assert_eq!(entries.len(), LEADERBOARD_CAPACITY);
+        assert_eq!(entries[0].initials_str(), "CCC");
+        let aaa = entries
+            .iter()
+            .position(|entry| entry.initials_str() == "AAA")
+            .unwrap();
+        let bbb = entries
+            .iter()
+            .position(|entry| entry.initials_str() == "BBB")
+            .unwrap();
+        assert!(aaa < bbb, "equal entries retain insertion order");
     }
 }

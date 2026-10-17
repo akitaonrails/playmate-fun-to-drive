@@ -28,8 +28,8 @@ pub struct Tuning {
     pub hazard_half_width: f32,
     /// Near-miss forgiveness factor shrinks the hit band.
     pub collision_forgiveness: f32,
-    /// Fuel tank duration in seconds.
-    pub fuel_secs: f32,
+    /// Competitive session duration in seconds.
+    pub session_secs: f32,
     /// Nitro pickup spacing and boost behavior.
     pub nitro_pickup_first_m: f32,
     pub nitro_pickup_interval_m: f32,
@@ -82,7 +82,7 @@ impl Default for Tuning {
             car_half_width: 0.13,
             hazard_half_width: 0.14,
             collision_forgiveness: 0.35,
-            fuel_secs: 75.0,
+            session_secs: 600.0,
             nitro_pickup_first_m: 90.0,
             nitro_pickup_interval_m: 180.0,
             nitro_duration_secs: 5.0,
@@ -152,8 +152,8 @@ impl Tuning {
         if !(0.0..=0.5).contains(&self.collision_forgiveness) {
             return Err("collision_forgiveness out of [0, 0.5]");
         }
-        if !(15.0..=600.0).contains(&self.fuel_secs) {
-            return Err("fuel_secs out of [15, 600]");
+        if !(1.0..=3600.0).contains(&self.session_secs) {
+            return Err("session_secs out of [1, 3600]");
         }
         if !(30.0..=300.0).contains(&self.nitro_pickup_first_m) {
             return Err("nitro_pickup_first_m out of [30, 300]");

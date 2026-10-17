@@ -13,8 +13,14 @@ pub mod road;
 pub mod tuning;
 
 pub use dynamics::BodyDynamics;
-pub use environment::{daylight, season_weights, DAY_SECS, SEASON_SECS, YEAR_SECS};
-pub use game::{EndReason, Game, Phase, StepEvents};
+pub use environment::{
+    daylight, season_weights, WeatherKind, WeatherSchedule, WeatherTransition, DAY_SECS,
+    SEASON_SECS, WEATHER_FADE_SECS, WEATHER_SLOT_SECS, YEAR_SECS,
+};
+pub use game::{
+    rank_leaderboard, score_for, EndReason, Game, LeaderboardEntry, Phase, SessionResult,
+    StepEvents, LEADERBOARD_CAPACITY,
+};
 pub use input::{Gear, InputState, KeyboardSteering};
 pub use rng::Rng;
 pub use road::{Hazard, HazardKind, RoadLoop};

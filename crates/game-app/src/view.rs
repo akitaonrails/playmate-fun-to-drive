@@ -192,7 +192,7 @@ fn palette() -> Palette {
     }
 }
 
-fn format_lap(secs: f32) -> String {
+fn format_time(secs: f32) -> String {
     let m = (secs / 60.0) as u32;
     let s = secs - m as f32 * 60.0;
     format!("{m}:{s:05.2}")
@@ -212,7 +212,6 @@ fn sky_colors() -> [(Color, f32); 6] {
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
-    commands.init_resource::<Env>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     // ---- sky gradient bands (static), sun, clouds, sea, sand ----
@@ -921,7 +920,7 @@ fn sync_hud(
     time: Res<Time>,
 ) {
     if let Ok((mut tf, mut sp)) = fuel.single_mut() {
-        let frac = (sim.0.fuel / tuning.0.fuel_secs).clamp(0.0, 1.0);
+        let frac = (sim.0.session_remaining / tuning.0.session_secs).clamp(0.0, 1.0);
         let w = 180.0 * frac;
         tf.translation.x = FUEL_X_LEFT + w * 0.5;
         sp.custom_size = Some(Vec2::new(w.max(1.0), 14.0));
@@ -943,16 +942,10 @@ fn sync_hud(
         };
     }
     if let Ok(mut text) = lap.single_mut() {
-        let best = if sim.0.lap_best > 0.0 {
-            format_lap(sim.0.lap_best)
-        } else {
-            "--:--.--".to_string()
-        };
         text.0 = format!(
-            "LAP {} | {} | BEST {}",
-            sim.0.laps + 1,
-            format_lap(sim.0.lap_time),
-            best
+            "TIME {} | CYCLES {}",
+            format_time(sim.0.session_remaining),
+            sim.0.day_cycles
         );
     }
     let active = sim.0.nitro_active();
@@ -986,10 +979,8 @@ fn sync_hud(
                     "ARROWS drive | G gear | Y nitro | R restart | T flat | L toy look".to_string()
                 }
                 Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
-                Phase::Crashed { .. } => "CRASHED!".to_string(),
                 Phase::GameOver { reason } => match reason {
-                    EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
-                    EndReason::Fuel => "GAME OVER - OUT OF FUEL | R to restart".to_string(),
+                    EndReason::Time => "TIME UP | R to restart".to_string(),
                 },
             }
         } else {
@@ -998,26 +989,13 @@ fn sync_hud(
                     "ARROWS steer | G gear | Y nitro | R restart | T toy | L toy look".to_string()
                 }
                 Phase::Running => String::new(),
-                Phase::Crashed { .. } => "CRASHED!".to_string(),
                 Phase::GameOver { reason } => match reason {
-                    EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
-                    EndReason::Fuel => "GAME OVER - OUT OF FUEL | R to restart".to_string(),
+                    EndReason::Time => "TIME UP | R to restart".to_string(),
                 },
             }
         };
     }
 }
-
-/// Environment state shared by the render systems (day/night + seasons).
-#[derive(Resource, Default)]
-pub struct Env {
-    pub daylight: f32,
-    pub weights: [f32; 4], // spring, summer, autumn, winter
-}
-
-/// QA speed-up for the day/night + season cycles (1.0 = real pacing:
-/// 100 s day/night, 5 min seasons, 3 cycles per season).
-pub const ENV_TIME_SCALE: f32 = 1.0;
 
 /// scalar multiply in linear space (dim for night)
 fn scale_color(c: Color, k: f32) -> Color {
@@ -1042,8 +1020,8 @@ fn blend4(cols: [Color; 4], w: [f32; 4]) -> Color {
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_environment(
+    sim: Res<Sim>,
     time: Res<Time>,
-    mut env: ResMut<Env>,
     mut colors: ResMut<Palette>,
     mut sky: Query<&mut Sprite, (With<SkyBand>, Without<SkyObject>)>,
     mut sky_objs: Query<&mut Sprite, (With<SkyObject>, Without<SkyBand>, Without<Cloud>)>,
@@ -1069,11 +1047,9 @@ fn sync_environment(
         ),
     >,
 ) {
-    let t = time.elapsed_secs() * ENV_TIME_SCALE;
+    let t = sim.0.environment_time;
     let day = game_core::environment::daylight(t);
     let w = game_core::environment::season_weights(t);
-    env.daylight = day;
-    env.weights = w;
 
     let winter = w[3];
     let autumn = w[2];

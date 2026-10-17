@@ -70,7 +70,6 @@ fn main() {
             toy_view::apply_body_dynamics,
             toy_view::animate_parts,
             toy_view::turbo_lamp,
-            publish_state,
         )
             .chain(),
     )
@@ -158,26 +157,42 @@ fn step_sim(
 }
 
 fn publish_state(
-    env: Res<crate::view::Env>,
-    time: Res<Time>,
     sim: Res<Sim>,
     frame: Res<FrameInput>,
     view: Res<toy_view::ViewState>,
     rig: Res<toy_view::BodyRig>,
 ) {
-    let env_time = time.elapsed_secs() * crate::view::ENV_TIME_SCALE;
+    let weather = sim.0.weather();
+    let score = game_core::score_for(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped);
+    let result = match sim.0.result() {
+        Some(result) => format!(
+            "{{\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"score\":{}}}",
+            result.day_cycles, result.cars_passed, result.cars_bumped, result.score
+        ),
+        None => "null".to_string(),
+    };
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"toy\":{},\"look\":{:.2},\"paused\":{},\"day\":{:.2},\"sea\":{:.2},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_current\":\"{}\",\"weather_next\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
-            game_core::Phase::Crashed { .. } => "crashed",
             game_core::Phase::GameOver { .. } => "gameover",
         },
-        sim.0.distance,
+        score,
         sim.0.speed,
-        sim.0.fuel,
+        sim.0.session_remaining,
+        sim.0.environment_time,
+        sim.0.day_cycles,
+        sim.0.cars_passed,
+        sim.0.cars_bumped,
+        result,
+        weather_name(weather.from),
+        weather_name(weather.to),
+        weather.blend,
+        weather.slot,
+        game_core::daylight(sim.0.environment_time),
+        game_core::environment::season_index(sim.0.environment_time),
         match sim.0.gear() {
             game_core::Gear::Low => "low",
             game_core::Gear::High => "high",
@@ -189,11 +204,6 @@ fn publish_state(
         view.mode == toy_view::ViewMode::Toy,
         view.toy_look,
         sim.0.paused,
-        env.daylight,
-        game_core::environment::season_index(env_time),
-        sim.0.laps,
-        sim.0.lap_time,
-        sim.0.lap_best,
         frame.state.steer,
         sim.0.road_x,
         sim.0.off_road,
@@ -202,4 +212,12 @@ fn publish_state(
     );
     #[cfg(target_arch = "wasm32")]
     bridge::publish_state(&payload);
+}
+
+fn weather_name(weather: game_core::WeatherKind) -> &'static str {
+    match weather {
+        game_core::WeatherKind::Clear => "clear",
+        game_core::WeatherKind::Cloudy => "cloudy",
+        game_core::WeatherKind::Rain => "rain",
+    }
 }
