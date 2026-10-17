@@ -222,12 +222,14 @@ fn unlock_on_input(
     pads: Query<&Gamepad>,
     mut state: ResMut<AudioState>,
 ) {
-    if !state.unlocked
-        && (keys.get_just_pressed().next().is_some()
-            || pads
-                .iter()
-                .any(|pad| pad.get_just_pressed().next().is_some()))
-    {
+    let pressed = keys.get_just_pressed().next().is_some()
+        || pads
+            .iter()
+            .any(|pad| pad.get_just_pressed().next().is_some());
+    if pressed {
+        // Retrying matters on the web: an earlier AudioContext::resume promise
+        // may have been rejected because it raced browser user activation.
+        bridge::resume_audio();
         state.unlock();
     }
 }

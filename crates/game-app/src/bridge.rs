@@ -20,6 +20,20 @@ pub fn state_publisher_available() -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub fn resume_audio() {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    if let Ok(function) = js_sys::Reflect::get(&global, &"__ftdResumeAudio".into()) {
+        if let Ok(function) = function.dyn_into::<js_sys::Function>() {
+            let _ = function.call0(&global);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn resume_audio() {}
+
+#[cfg(target_arch = "wasm32")]
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
@@ -61,4 +75,22 @@ pub fn query_param(name: &str) -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn query_param(_name: &str) -> Option<String> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn audio_context_retry_shim_loads_before_wasm() {
+        let html = include_str!("../index.html");
+        let shim = html.find("TrackedAudioContext").expect("audio retry shim");
+        let wasm = html
+            .find("data-trunk rel=\"rust\"")
+            .expect("trunk wasm link");
+        assert!(
+            shim < wasm,
+            "the shim must wrap AudioContext before Bevy starts"
+        );
+        assert!(html.contains("__ftdResumeAudio"));
+        assert!(html.contains("'pointerdown', 'touchstart', 'keydown'"));
+    }
 }

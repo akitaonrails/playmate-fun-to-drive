@@ -114,7 +114,7 @@ impl Default for Tuning {
             low_overrev_start: 11.0,
             gear_ramp_secs: 0.6,
             brake_ramp_secs: 1.2,
-            curve_gain: 1.05,
+            curve_gain: 1.20,
             slope_speed_gain: 1.6,
             slope_speed_min_factor: 0.90,
             slope_speed_max_factor: 1.10,

@@ -24,7 +24,7 @@ const TRAFFIC_CAR_WIDTH_PX: f32 = 56.0;
 pub const ROWS: usize = 30;
 pub const D_MIN: f32 = 2.2; // meters to the nearest row
 pub const S_FAR: f32 = 0.045; // scale at the horizon row
-pub const CURVE_BEND: f32 = 0.055; // lateral half-widths gained per curve-meter
+pub const CURVE_BEND: f32 = 0.075; // lateral half-widths gained per curve-meter
 const ELEVATION_PX_PER_M: f32 = 105.0;
 
 fn row_scale(i: usize) -> f32 {

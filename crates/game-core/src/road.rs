@@ -163,22 +163,27 @@ impl RoadLoop {
         hazard.x + (target - hazard.x) * smooth
     }
 
-    /// A designed arcade course: long straights, broad 90-degree sweepers,
-    /// a short-radius 90-degree hairpin, and a fast opposing S-bend. Curve
-    /// magnitude represents inverse radius; segment length represents sweep.
+    /// A designed arcade course: a fair opening straight followed by broad
+    /// sweepers, three sustained short-radius corners, and an opposing S-bend.
+    /// Curve magnitude represents inverse radius; segment length represents
+    /// sweep, so the high-magnitude plateaus read as decisive 90-degree turns.
     fn technical_curve(direction: f32) -> Vec<f32> {
         let n = CURVE_SAMPLES as f32;
         let mut raw = vec![0.0f32; CURVE_SAMPLES];
         for (i, v) in raw.iter_mut().enumerate() {
             let t = i as f32 / n;
-            *v = if (0.12..0.28).contains(&t) {
-                0.56 * direction // long-radius 90-degree sweeper
-            } else if (0.35..0.44).contains(&t) {
-                -direction // short-radius 90-degree corner
-            } else if (0.52..0.59).contains(&t) {
-                0.78 * direction // fast S entry
-            } else if (0.59..0.66).contains(&t) {
-                -0.78 * direction // fast S exit
+            *v = if (0.15..0.30).contains(&t) {
+                0.68 * direction // long-radius sweeper
+            } else if (0.29..0.44).contains(&t) {
+                -direction // first tight 90-degree corner
+            } else if (0.48..0.58).contains(&t) {
+                0.92 * direction // fast S entry
+            } else if (0.58..0.69).contains(&t) {
+                -0.92 * direction // fast S exit
+            } else if (0.73..0.86).contains(&t) {
+                direction // second tight 90-degree corner
+            } else if (0.89..0.96).contains(&t) {
+                -0.76 * direction // sharp final bend before the seam
             } else {
                 0.0
             };
@@ -342,12 +347,23 @@ mod tests {
     fn technical_track_has_straights_and_mixed_radius_corners() {
         let r = loop_from(5);
         let at = |t: f32| r.curve_at(t * r.length);
-        assert!(at(0.07).abs() < 0.1, "opening straight");
-        assert!((0.45..0.65).contains(&at(0.20).abs()), "broad sweeper");
-        assert!(at(0.395).abs() > 0.9, "short-radius 90-degree corner");
-        assert!(at(0.48).abs() < 0.1, "straight between corners");
-        assert!(at(0.55).signum() != at(0.63).signum(), "opposing S-bend");
+        assert!(at(0.04).abs() < 0.1, "fair opening straight");
+        assert!((0.58..0.75).contains(&at(0.22).abs()), "broad sweeper");
+        assert!(at(0.36).abs() > 0.9, "first short-radius corner");
+        assert!(at(0.53).signum() != at(0.64).signum(), "opposing S-bend");
+        assert!(at(0.79).abs() > 0.9, "second short-radius corner");
         assert!((at(0.0) - at(1.0)).abs() < 1e-4, "seamless wrap");
+
+        let curved = r.curve.iter().filter(|value| value.abs() >= 0.55).count();
+        let sharp = r.curve.iter().filter(|value| value.abs() >= 0.85).count();
+        assert!(
+            curved >= CURVE_SAMPLES * 3 / 5,
+            "most of the loop should turn"
+        );
+        assert!(
+            sharp >= CURVE_SAMPLES / 3,
+            "tight corners should be frequent"
+        );
     }
 
     #[test]
