@@ -1,6 +1,8 @@
 //! Central tuning table (PLAN.md regression protocol: all magic numbers live
 //! here with tested bounds so feel-changes are reviewable and revertable).
 
+use crate::road::TrafficMotion;
+
 /// Every gameplay constant in one place. Values are the M5 starting points,
 /// derived from research/gameplay.md ("Tuning reference points").
 ///
@@ -56,6 +58,11 @@ pub struct Tuning {
     pub nitro_pickup_half_width: f32,
     pub nitro_lane_offset: f32,
     pub nitro_capacity: u8,
+    /// Difficulty-specific oncoming lane changes. Easy changes least often
+    /// and across the longest/farthest horizon band; Hard is more active.
+    pub traffic_easy: TrafficMotion,
+    pub traffic_medium: TrafficMotion,
+    pub traffic_hard: TrafficMotion,
     /// Crash/bump response.
     pub bump_target_speed_factor: f32,
     pub bump_lateral_kick: f32,
@@ -129,6 +136,19 @@ impl Default for Tuning {
             nitro_pickup_half_width: 0.20,
             nitro_lane_offset: 0.62,
             nitro_capacity: 3,
+            traffic_easy: TrafficMotion {
+                chance_percent: 12,
+                change_start_m: 42.0,
+                change_end_m: 22.0,
+                ..TrafficMotion::default()
+            },
+            traffic_medium: TrafficMotion::default(),
+            traffic_hard: TrafficMotion {
+                chance_percent: 32,
+                change_start_m: 34.0,
+                change_end_m: 18.0,
+                ..TrafficMotion::default()
+            },
             bump_target_speed_factor: 0.35,
             bump_lateral_kick: 0.38,
             bump_speed_retention: 0.45,
@@ -259,6 +279,17 @@ impl Tuning {
         }
         if !(1..=8).contains(&self.nitro_capacity) {
             return Err("nitro_capacity out of [1, 8]");
+        }
+        for traffic in [self.traffic_easy, self.traffic_medium, self.traffic_hard] {
+            traffic.validate()?;
+            if traffic.change_end_m < 16.0 {
+                return Err("traffic lane changes must finish near the horizon");
+            }
+        }
+        if !(self.traffic_easy.chance_percent <= self.traffic_medium.chance_percent
+            && self.traffic_medium.chance_percent <= self.traffic_hard.chance_percent)
+        {
+            return Err("traffic chance must increase with difficulty");
         }
         if !(0.0..=1.0).contains(&self.bump_target_speed_factor)
             || !(0.0..=1.0).contains(&self.bump_speed_retention)
@@ -424,6 +455,20 @@ mod tests {
             },
             Tuning {
                 bump_speed_retention: 1.1,
+                ..Tuning::default()
+            },
+            Tuning {
+                traffic_easy: TrafficMotion {
+                    change_end_m: 8.0,
+                    ..Tuning::default().traffic_easy
+                },
+                ..Tuning::default()
+            },
+            Tuning {
+                traffic_easy: TrafficMotion {
+                    chance_percent: 40,
+                    ..Tuning::default().traffic_easy
+                },
                 ..Tuning::default()
             },
         ] {

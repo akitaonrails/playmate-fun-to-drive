@@ -20,7 +20,7 @@ impl Plugin for ArcadeAudioPlugin {
             .add_systems(Startup, setup_audio)
             .add_systems(
                 Update,
-                (toggle_mute, update_mix, play_cues)
+                (unlock_on_input, toggle_mute, update_mix, play_cues)
                     .chain()
                     .in_set(crate::AppSet::Audio),
             );
@@ -212,6 +212,24 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         ));
     }
     commands.insert_resource(one_shots);
+}
+
+/// Browsers require audio to be resumed from a user gesture. Unlock on the
+/// first keyboard or gamepad press so menu cues and gameplay audio cannot be
+/// lost merely because a specific confirmation path was not used.
+fn unlock_on_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut state: ResMut<AudioState>,
+) {
+    if !state.unlocked
+        && (keys.get_just_pressed().next().is_some()
+            || pads
+                .iter()
+                .any(|pad| pad.get_just_pressed().next().is_some()))
+    {
+        state.unlock();
+    }
 }
 
 fn toggle_mute(

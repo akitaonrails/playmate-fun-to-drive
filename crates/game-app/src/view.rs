@@ -1235,6 +1235,7 @@ fn sync_roads(
 #[allow(clippy::type_complexity)]
 fn sync_hazards(
     sim: Res<Sim>,
+    tuning: Res<TuningRes>,
     proj: Res<Proj>,
     mut pool: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<HazardPart>>,
 ) {
@@ -1331,7 +1332,7 @@ fn sync_hazards(
         let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) else {
             continue;
         };
-        let x = (lat + sim.0.road.hazard_x_at(h, ahead)) * HALF_ROAD_PX * s;
+        let x = (lat + sim.0.hazard_x_at(h, ahead, &tuning.0)) * HALF_ROAD_PX * s;
         place(h.kind, x, y, s);
     }
     for (_, _, mut vis) in parts.by_ref() {
@@ -1613,6 +1614,7 @@ fn sync_flash(sim: Res<Sim>, mut q: Query<&mut Sprite, With<FlashOverlay>>) {
 fn sync_hud(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
+    audio: Res<crate::audio::AudioState>,
     view: Res<crate::toy_view::ViewState>,
     effects: Res<crate::VisualEffects>,
     mut score: Query<
@@ -1720,7 +1722,9 @@ fn sync_hud(
         sprite.color = Color::srgba(0.45, 0.95, 1.0, if selected { 0.65 * fade } else { 0.0 });
     }
     if let Ok(mut text) = status.single_mut() {
-        let next = if sim.0.paused {
+        let next = if audio.muted {
+            "SOUND OFF | M to unmute"
+        } else if sim.0.paused {
             "PAUSED | Start/P resume | Select/R restart"
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
@@ -2364,6 +2368,19 @@ pub fn add_view_systems(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_difficulty_finishes_lane_changes_near_the_horizon() {
+        let tuning = game_core::Tuning::default();
+        for motion in [
+            tuning.traffic_easy,
+            tuning.traffic_medium,
+            tuning.traffic_hard,
+        ] {
+            let end_scale = D_MIN / motion.change_end_m;
+            assert!(scale_to_y(end_scale) >= 90.0);
+        }
+    }
 
     #[test]
     fn rolling_terrain_moves_projected_rows_in_the_expected_direction() {

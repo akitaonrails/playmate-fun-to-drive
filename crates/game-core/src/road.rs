@@ -37,8 +37,8 @@ pub struct TrafficMotion {
 impl TrafficMotion {
     pub const DISABLED: Self = Self {
         chance_percent: 0,
-        change_start_m: 18.0,
-        change_end_m: 6.0,
+        change_start_m: 38.0,
+        change_end_m: 20.0,
         lane_offset: 0.72,
         lane_jitter: 0.05,
     };
@@ -67,7 +67,7 @@ impl TrafficMotion {
 impl Default for TrafficMotion {
     fn default() -> Self {
         Self {
-            chance_percent: 30,
+            chance_percent: 22,
             ..Self::DISABLED
         }
     }
@@ -81,7 +81,7 @@ pub struct RoadLoop {
     curve: Vec<f32>,
     /// Periodic terrain elevation in meters, kept deliberately low-relief.
     elevation: Vec<f32>,
-    traffic_motion: TrafficMotion,
+    traffic_motion_enabled: bool,
 }
 
 impl RoadLoop {
@@ -140,22 +140,24 @@ impl RoadLoop {
             hazards,
             curve,
             elevation,
-            traffic_motion,
+            traffic_motion_enabled: true,
         }
     }
 
     /// Deterministic approach line for traffic. A minority of cars move to an
     /// adjacent lane while distant, then lock their line before reaching the
     /// player. Rendering and collision both call this function.
-    pub fn hazard_x_at(&self, hazard: &Hazard, ahead: f32) -> f32 {
-        if hazard.kind != HazardKind::Oncoming || self.traffic_motion.chance_percent == 0 {
+    pub fn hazard_x_at(&self, hazard: &Hazard, ahead: f32, motion: TrafficMotion) -> f32 {
+        if hazard.kind != HazardKind::Oncoming
+            || !self.traffic_motion_enabled
+            || motion.chance_percent == 0
+        {
             return hazard.x;
         }
-        let Some(target) = oncoming_lane_target(hazard, self.traffic_motion) else {
+        let Some(target) = oncoming_lane_target(hazard, motion) else {
             return hazard.x;
         };
-        let t = ((self.traffic_motion.change_start_m - ahead)
-            / (self.traffic_motion.change_start_m - self.traffic_motion.change_end_m))
+        let t = ((motion.change_start_m - ahead) / (motion.change_start_m - motion.change_end_m))
             .clamp(0.0, 1.0);
         let smooth = t * t * (3.0 - 2.0 * t);
         hazard.x + (target - hazard.x) * smooth
@@ -215,7 +217,7 @@ impl RoadLoop {
             hazards,
             curve: vec![0.0; CURVE_SAMPLES],
             elevation: vec![0.0; CURVE_SAMPLES],
-            traffic_motion: TrafficMotion::DISABLED,
+            traffic_motion_enabled: false,
         })
     }
 
@@ -378,17 +380,22 @@ mod tests {
     #[test]
     fn some_generated_traffic_changes_lane_then_locks_near_player() {
         let r = loop_from(77);
+        let motion = TrafficMotion::default();
         let mut changed = 0;
         for hazard in r
             .hazards
             .iter()
             .filter(|hazard| hazard.kind == HazardKind::Oncoming)
         {
-            let far = r.hazard_x_at(hazard, 20.0);
-            let mid = r.hazard_x_at(hazard, 12.0);
-            let near = r.hazard_x_at(hazard, 5.0);
+            let far = r.hazard_x_at(hazard, motion.change_start_m + 1.0, motion);
+            let mid = r.hazard_x_at(
+                hazard,
+                (motion.change_start_m + motion.change_end_m) * 0.5,
+                motion,
+            );
+            let near = r.hazard_x_at(hazard, motion.change_end_m - 1.0, motion);
             assert_eq!(far, hazard.x);
-            assert_eq!(near, r.hazard_x_at(hazard, 0.0));
+            assert_eq!(near, r.hazard_x_at(hazard, 0.0, motion));
             if near != hazard.x {
                 changed += 1;
                 assert!(mid > hazard.x.min(near) && mid < hazard.x.max(near));

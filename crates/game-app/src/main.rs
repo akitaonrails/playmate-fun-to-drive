@@ -420,7 +420,6 @@ fn handle_end_input(
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
     mut frame: ResMut<FrameInput>,
-    mut audio_state: ResMut<audio::AudioState>,
     mut audio_events: ResMut<audio::AudioEvents>,
 ) {
     match end.0.mode {
@@ -444,7 +443,6 @@ fn handle_end_input(
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::South));
             if confirm {
-                audio_state.unlock();
                 audio_events.emit(audio::AudioCue::MenuConfirm);
                 audio_events.emit(audio::AudioCue::RunStart);
                 let difficulty = Difficulty::ALL[end.0.difficulty_index];

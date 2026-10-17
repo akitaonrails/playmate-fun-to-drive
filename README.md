@@ -25,6 +25,7 @@ separate local top-10 boards.
 | R | Restart while driving; return to difficulty selection from the leaderboard |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
+| M | Mute / unmute audio |
 | Gamepad | Left stick steers, LT brakes, LB/RB select LOW/HIGH, South confirms menus, North uses nitro, rumble on bumps |
 
 ## Run it

@@ -9,7 +9,7 @@
 use crate::environment::{WeatherSchedule, WeatherTransition, DAY_SECS};
 use crate::input::{Gear, InputState};
 use crate::rng::Rng;
-use crate::road::{HazardKind, RoadLoop};
+use crate::road::{Hazard, HazardKind, RoadLoop, TrafficMotion};
 use crate::tuning::Tuning;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +295,20 @@ impl Game {
 
     pub fn difficulty(&self) -> Difficulty {
         self.difficulty
+    }
+
+    pub fn traffic_motion(&self, tuning: &Tuning) -> TrafficMotion {
+        match self.difficulty {
+            Difficulty::Easy => tuning.traffic_easy,
+            Difficulty::Medium => tuning.traffic_medium,
+            Difficulty::Hard => tuning.traffic_hard,
+        }
+    }
+
+    /// Shared traffic resolver used by both presentation and collision.
+    pub fn hazard_x_at(&self, hazard: &Hazard, ahead: f32, tuning: &Tuning) -> f32 {
+        self.road
+            .hazard_x_at(hazard, ahead, self.traffic_motion(tuning))
     }
 
     pub fn session_duration(&self) -> f32 {
@@ -680,7 +694,7 @@ impl Game {
             if crossings == 0 {
                 continue;
             }
-            let x_eff = self.road.hazard_x_at(h, 0.0) + self.road_x;
+            let x_eff = self.hazard_x_at(h, 0.0, t) + self.road_x;
             match h.kind {
                 HazardKind::Oncoming if x_eff.abs() < hit_band => {
                     self.cars_bumped = self.cars_bumped.saturating_add(crossings);
@@ -2197,6 +2211,32 @@ mod tests {
         assert_eq!(entries.len(), LEADERBOARD_CAPACITY);
         for difficulty in Difficulty::ALL {
             assert_eq!(leaderboard_for(&entries, difficulty).count(), 10);
+        }
+    }
+
+    #[test]
+    fn harder_difficulties_enable_more_lane_changes_in_the_horizon_band() {
+        let t = Tuning::default();
+        let mut totals = [0usize; 3];
+        for seed in 1..=24 {
+            for (index, difficulty) in Difficulty::ALL.into_iter().enumerate() {
+                let game = Game::new(seed, difficulty, &t);
+                totals[index] += game
+                    .road
+                    .hazards
+                    .iter()
+                    .filter(|hazard| {
+                        hazard.kind == HazardKind::Oncoming
+                            && game.hazard_x_at(hazard, 0.0, &t) != hazard.x
+                    })
+                    .count();
+            }
+        }
+        assert!(totals[0] < totals[1], "Easy must change lanes less often");
+        assert!(totals[1] < totals[2], "Hard must change lanes more often");
+        for motion in [t.traffic_easy, t.traffic_medium, t.traffic_hard] {
+            assert!(motion.change_end_m >= 18.0);
+            assert!(motion.change_start_m - motion.change_end_m >= 16.0);
         }
     }
 }
