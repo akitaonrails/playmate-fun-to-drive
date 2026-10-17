@@ -2027,30 +2027,24 @@ fn fog_band_geometry(index: usize) -> (f32, Vec2, f32) {
     (y, Vec2::new(960.0, band_h + 1.0), 0.28 + t * 0.72)
 }
 
-fn projected_headlight_geometry(
-    row: usize,
-    layer: usize,
-    road_center: f32,
-    y0: f32,
-    y1: f32,
-    scale: f32,
-) -> (Vec2, Vec2, f32) {
-    let row_f = row as f32;
+fn projected_headlight_geometry(layer: usize, y0: f32, y1: f32) -> (Vec2, Vec2, f32) {
     let height = (y1 - y0).max(1.5);
-    let road_alignment = (row_f / 8.0).clamp(0.0, 1.0);
-    let flare = (row_f / 8.0).clamp(0.0, 1.0);
-    let beam_fraction = 0.14 + flare * 0.58;
-    let outer_width = HALF_ROAD_PX * 2.0 * scale * beam_fraction;
+    let center_y = y0 + height * 0.5;
+    let road_depth = HORIZON_Y - CAR_Y;
+    let fade_start_y = CAR_Y + road_depth * 0.32;
+    let beam_end_y = CAR_Y + road_depth * 0.50;
+    let distance = ((center_y - CAR_Y) / (beam_end_y - CAR_Y)).clamp(0.0, 1.0);
+    let outer_width = 64.0 + distance * 250.0;
     let layer_width = if layer == 0 {
         outer_width
     } else {
         outer_width * 0.62
     };
-    let near_fade = (row_f / 3.0).clamp(0.0, 1.0);
-    let far_fade = ((27.0 - row_f) / 10.0).clamp(0.0, 1.0);
+    let near_fade = ((center_y - CAR_Y) / 55.0).clamp(0.0, 1.0);
+    let far_fade = 1.0 - ((center_y - fade_start_y) / (beam_end_y - fade_start_y)).clamp(0.0, 1.0);
     let layer_strength = if layer == 0 { 0.28 } else { 0.72 };
     (
-        Vec2::new(road_center * road_alignment, y0 + height * 0.5),
+        Vec2::new(0.0, center_y),
         Vec2::new(layer_width.max(2.0), height + 1.5),
         near_fade * far_fade * layer_strength,
     )
@@ -2330,14 +2324,7 @@ fn sync_projected_headlights(
         } else {
             HORIZON_Y + 2.0
         };
-        let (center, size, strength) = projected_headlight_geometry(
-            band.row,
-            band.layer,
-            proj.rows_x[band.row],
-            y0,
-            y1,
-            proj.scales[band.row],
-        );
+        let (center, size, strength) = projected_headlight_geometry(band.layer, y0, y1);
         transform.translation.x = center.x;
         transform.translation.y = center.y;
         sprite.custom_size = Some(size);
@@ -2799,22 +2786,18 @@ mod tests {
     }
 
     #[test]
-    fn headlights_open_near_the_car_then_recede_with_perspective() {
-        let (near_center, near, near_weight) =
-            projected_headlight_geometry(1, 0, 80.0, -200.0, -180.0, row_scale(1));
-        let (_, middle, middle_weight) =
-            projected_headlight_geometry(7, 0, 80.0, -80.0, -55.0, row_scale(7));
-        let (far_center, far, far_weight) =
-            projected_headlight_geometry(24, 0, 80.0, 90.0, 100.0, row_scale(24));
-        let (_, inner, _) = projected_headlight_geometry(7, 1, 80.0, -80.0, -55.0, row_scale(7));
+    fn headlights_stay_straight_and_fade_by_midfield() {
+        let (near_center, near, near_weight) = projected_headlight_geometry(0, -200.0, -180.0);
+        let (middle_center, middle, middle_weight) = projected_headlight_geometry(0, -105.0, -85.0);
+        let (_, _, far_weight) = projected_headlight_geometry(0, -45.0, -30.0);
+        let (_, inner, _) = projected_headlight_geometry(1, -105.0, -85.0);
 
-        assert!(middle.x > near.x && middle.x > far.x);
+        assert!(middle.x > near.x);
         assert!(inner.x < middle.x);
-        assert!(middle_weight > near_weight && middle_weight > far_weight);
-        assert!(
-            near_center.x < far_center.x,
-            "beam eases onto the road center"
-        );
+        assert!(middle_weight > near_weight);
+        assert_eq!(far_weight, 0.0);
+        assert_eq!(near_center.x, 0.0);
+        assert_eq!(middle_center.x, 0.0);
     }
 
     #[test]
