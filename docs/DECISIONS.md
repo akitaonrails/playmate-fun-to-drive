@@ -93,23 +93,24 @@ Tomy's trip counter IS the score, so `score = distance (m)`; HIGH gear
 scores faster by covering more ground. The planned `score_rate` multiplier
 was dropped as double-bookkeeping.
 
-## D11 — Ten-minute local challenge and derived ranking
+## D11 — Original ten-minute challenge and derived ranking (duration superseded by D12)
 
 **Context**: the requested game mode replaces fuel/best-lap racing with a
 fixed ten-minute challenge whose result reflects environmental progress,
 traffic skill, and collisions.
 
-**Decision**: the pure core owns the 600-second clock, performance-driven
+**Decision**: the pure core owns the competitive clock, performance-driven
 environment time, counters, immutable result, and score formula
 `max(0, cycles*10000 + passed*100 - bumped*300)`. The app owns exactly-three
 uppercase initials and a browser-local, versioned top-10 board; stored scores
-are always recomputed from validated totals. No account or user identity is
+are always recomputed from validated totals. D12 replaces the original fixed
+600-second duration with difficulty-owned durations. No account or user identity is
 read or stored. A 1–600 second query override exists only as a durable QA
 affordance; while active it uses an empty ephemeral board and never accesses
 production leaderboard storage. Stored totals are additionally bounded to
 100 cycles and 100,000 passes/bumps, generous ceilings for any 600-second run.
 
-**Consequences**: runs are directly comparable without an online service;
+**Consequences**: scoring remains authoritative without an online service;
 localStorage failure loses persistence but never blocks play. D8 remains a
 historical record of the earlier mode and no longer describes current scoring.
 
@@ -124,11 +125,18 @@ and bogs toward 4.5 m/s until LOW is selected; recovery then progresses through
 `BuildSpeed` and `ReadyForHigh`. Downshifts retain 94% speed at or below 12 m/s
 and 82% above it. Nitro runs for five seconds and then has a three-second
 cooldown. `Difficulty::{Easy, Medium, Hard}` fixes standard run durations at
-120/360/600 seconds and is frozen into each result.
+120/360/600 seconds and is frozen into each result. The first-load menu
+defaults to Medium; after a leaderboard, the menu preserves the completed
+run's difficulty. Confirmed runs start in LOW and suppress gameplay input on
+the confirmation frame. Q/E and LB/RB select
+LOW/HIGH; gamepad South is reserved for menu confirmation. Storage v2 keeps
+three strict boards; when v2 is absent, a valid v1 payload is immediately
+rewritten to v2 with its rows assigned to Hard. Corrupt v1 data is never
+written back.
 
 **Consequences**: ignored/idempotent shift and nitro requests spend nothing;
 pause and terminal states freeze cooldown. Leaderboards keep and rank ten
-entries per difficulty, while legacy v1 entries remain readable as Hard.
+entries per difficulty, while valid legacy v1 entries migrate to Hard.
 Running integration splits at boost/bump timer boundaries and integrates the
 exponential speed ramp analytically, preventing a coarse terminal boost step
 from losing acceleration or failing to age leftover cooldown time.

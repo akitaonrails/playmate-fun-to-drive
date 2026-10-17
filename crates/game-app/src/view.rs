@@ -127,6 +127,41 @@ pub struct SnowFlake;
 pub struct GearText;
 
 #[derive(Component)]
+struct SpeedNeedle;
+#[derive(Component)]
+struct SpeedDigital;
+#[derive(Component)]
+struct SpeedTick {
+    red_zone: bool,
+}
+#[derive(Component)]
+struct GearPanelText;
+#[derive(Component)]
+struct RecoveryText;
+#[derive(Component)]
+struct CooldownFill;
+#[derive(Component)]
+struct CooldownText;
+
+#[derive(Component)]
+struct DifficultyOverlayRoot;
+#[derive(Component)]
+struct DifficultyCard(usize);
+#[derive(Component)]
+struct DifficultyCardText(usize);
+
+#[derive(Resource, Default)]
+pub struct InstrumentVisuals {
+    pub speed_kmh: f32,
+    pub needle_angle: f32,
+    pub overrev: f32,
+    pub cooldown: f32,
+    pub gauge_fill: f32,
+    pub recovery: &'static str,
+    pub cue: &'static str,
+}
+
+#[derive(Component)]
 pub struct StatusText;
 
 #[derive(Component)]
@@ -257,11 +292,216 @@ fn sky_colors() -> [(Color, f32); 6] {
     ]
 }
 
+const SPEED_CENTER: Vec2 = Vec2::new(365.0, -198.0);
+const SPEED_RADIUS: f32 = 82.0;
+
+fn speedometer_angle(kmh: f32) -> f32 {
+    (-135.0_f32.to_radians()) + (kmh.clamp(0.0, 120.0) / 120.0) * 270.0_f32.to_radians()
+}
+
+fn speedometer_danger(kmh: f32, nitro_active: bool) -> bool {
+    nitro_active || kmh >= 90.0
+}
+
+fn normal_recovery_cue(gear: Gear, speed: f32, shift_threshold: f32) -> &'static str {
+    if gear == Gear::Low && speed >= shift_threshold {
+        "SHIFT HIGH"
+    } else {
+        "Q LOW  |  E HIGH"
+    }
+}
+
+fn spawn_instruments(commands: &mut Commands) {
+    commands.spawn((
+        Sprite::from_color(
+            Color::srgba(0.015, 0.02, 0.035, 0.86),
+            Vec2::new(190.0, 190.0),
+        ),
+        Transform::from_xyz(SPEED_CENTER.x, SPEED_CENTER.y, 0.82),
+        HudPanel,
+    ));
+    for kmh in (0..=120).step_by(10) {
+        let a = speedometer_angle(kmh as f32);
+        let p = SPEED_CENTER + Vec2::new(a.cos(), a.sin()) * SPEED_RADIUS;
+        let major = kmh % 20 == 0;
+        commands.spawn((
+            Sprite::from_color(
+                if kmh >= 90 {
+                    Color::srgb(0.9, 0.16, 0.12)
+                } else {
+                    Color::srgb(0.70, 0.90, 0.96)
+                },
+                Vec2::new(
+                    if major { 3.0 } else { 2.0 },
+                    if major { 16.0 } else { 10.0 },
+                ),
+            ),
+            Transform::from_xyz(p.x, p.y, 0.90)
+                .with_rotation(Quat::from_rotation_z(a - std::f32::consts::FRAC_PI_2)),
+            SpeedTick {
+                red_zone: kmh >= 90,
+            },
+        ));
+        if major {
+            let lp = SPEED_CENTER + Vec2::new(a.cos(), a.sin()) * 61.0;
+            commands.spawn((
+                Text2d::new(kmh.to_string()),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.75, 0.88, 0.93)),
+                Transform::from_xyz(lp.x, lp.y, 0.91),
+            ));
+        }
+    }
+    commands.spawn((
+        Sprite::from_color(Color::srgb(1.0, 0.85, 0.28), Vec2::new(4.0, 64.0)),
+        Transform::from_xyz(SPEED_CENTER.x, SPEED_CENTER.y + 32.0, 0.96),
+        SpeedNeedle,
+    ));
+    commands.spawn((
+        Text2d::new("000 km/h"),
+        TextFont {
+            font_size: FontSize::Px(18.0),
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.93, 0.62)),
+        Transform::from_xyz(SPEED_CENTER.x, SPEED_CENTER.y - 27.0, 0.97),
+        SpeedDigital,
+    ));
+    commands.spawn((
+        Sprite::from_color(
+            Color::srgba(0.015, 0.02, 0.035, 0.86),
+            Vec2::new(176.0, 108.0),
+        ),
+        Transform::from_xyz(-378.0, -226.0, 0.82),
+        HudPanel,
+    ));
+    commands.spawn((
+        Text2d::new("LOW"),
+        TextFont {
+            font_size: FontSize::Px(32.0),
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.86, 0.32)),
+        Transform::from_xyz(-378.0, -205.0, 0.94),
+        GearPanelText,
+    ));
+    commands.spawn((
+        Text2d::new("Q LOW  |  E HIGH"),
+        TextFont {
+            font_size: FontSize::Px(13.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.65, 0.86, 0.94)),
+        Transform::from_xyz(-378.0, -246.0, 0.94),
+        RecoveryText,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.08, 0.11, 0.16), Vec2::new(12.0, 108.0)),
+        Transform::from_xyz(459.0, -205.0, 0.90),
+        HudPanel,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.12, 0.86, 0.95), Vec2::new(8.0, 104.0)),
+        Transform::from_xyz(459.0, -205.0, 0.92),
+        CooldownFill,
+    ));
+    commands.spawn((
+        Text2d::new("BOOST"),
+        TextFont {
+            font_size: FontSize::Px(11.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.66, 0.92, 1.0)),
+        Transform::from_xyz(438.0, -271.0, 0.94),
+        CooldownText,
+    ));
+}
+
+fn spawn_difficulty_overlay(commands: &mut Commands) {
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, 30.0),
+            Visibility::Visible,
+            DifficultyOverlayRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.01, 0.02, 0.05, 0.82),
+                    Vec2::new(960.0, 600.0),
+                ),
+                Transform::default(),
+            ));
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.025, 0.07, 0.14, 0.98),
+                    Vec2::new(780.0, 390.0),
+                ),
+                Transform::from_xyz(0.0, 0.0, 0.1),
+            ));
+            parent.spawn((
+                Text2d::new("SELECT RUN"),
+                TextFont {
+                    font_size: FontSize::Px(38.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.50, 0.95, 1.0)),
+                Transform::from_xyz(0.0, 135.0, 0.3),
+            ));
+            for (index, x, title, duration) in [
+                (0, -230.0, "EASY", "2:00"),
+                (1, 0.0, "MEDIUM", "6:00"),
+                (2, 230.0, "HARD", "10:00"),
+            ] {
+                parent.spawn((
+                    Sprite::from_color(
+                        Color::srgba(0.06, 0.16, 0.27, 0.96),
+                        Vec2::new(200.0, 150.0),
+                    ),
+                    Transform::from_xyz(x, 5.0, 0.2),
+                    DifficultyCard(index),
+                ));
+                parent.spawn((
+                    Text2d::new(format!("{title}\n{duration}")),
+                    TextFont {
+                        font_size: FontSize::Px(25.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.78, 0.92, 0.98)),
+                    Transform::from_xyz(x, 5.0, 0.3),
+                    DifficultyCardText(index),
+                ));
+            }
+            parent.spawn((
+                Text2d::new("<   ARROWS SELECT   >"),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.90, 1.0)),
+                Transform::from_xyz(0.0, -112.0, 0.3),
+            ));
+            parent.spawn((
+                Text2d::new("ENTER / GAMEPAD SOUTH TO START"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.88, 0.45)),
+                Transform::from_xyz(0.0, -153.0, 0.3),
+            ));
+        });
+}
+
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
     commands.init_resource::<WeatherVisuals>();
     commands.init_resource::<NitroVisuals>();
+    commands.init_resource::<InstrumentVisuals>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     // ---- sky gradient bands (static), sun, clouds, sea, sand ----
@@ -583,12 +823,6 @@ pub fn setup(mut commands: Commands) {
         ));
     }
 
-    commands.spawn((
-        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.78), Vec2::new(64.0, 34.0)),
-        Transform::from_xyz(178.0, NITRO_Y, 1.0),
-        HudPanel,
-    ));
-
     // in-screen HUD (Text2d => rendered INTO the game texture, so it shows
     // on the toy screen itself) with dark backing panels for contrast
     for (cx, w) in [(-355.0, 190.0), (-75.0, 350.0), (275.0, 330.0)] {
@@ -632,16 +866,7 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(275.0, 258.0, 1.1),
         TrafficText,
     ));
-    commands.spawn((
-        Text2d::new(""),
-        TextFont {
-            font_size: FontSize::Px(15.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.8, 0.93, 0.99)),
-        Transform::from_xyz(178.0, NITRO_Y, 1.1),
-        GearText,
-    ));
+    spawn_instruments(&mut commands);
     commands.spawn((
         Text::new(""),
         TextFont {
@@ -667,6 +892,8 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.0, 2.0),
         FlashOverlay,
     ));
+
+    spawn_difficulty_overlay(&mut commands);
 
     // Session-end presentation is rendered into the same 960x600 texture as
     // gameplay, so it remains legible in both flat and toy-screen views.
@@ -1260,7 +1487,6 @@ fn sync_hud(
             Without<TrafficText>,
         ),
     >,
-    mut gear: Query<&mut Text2d, (With<GearText>, Without<TrafficText>)>,
     mut status: Query<&mut Text, (With<StatusText>, Without<SessionText>)>,
     mut session: Query<
         &mut Text2d,
@@ -1297,12 +1523,6 @@ fn sync_hud(
 ) {
     if let Ok(mut text) = score.single_mut() {
         text.0 = format!("{:05.0} m", sim.0.distance);
-    }
-    if let Ok(mut text) = gear.single_mut() {
-        text.0 = match sim.0.gear() {
-            Gear::Low => "LOW".to_string(),
-            Gear::High => "HIGH".to_string(),
-        };
     }
     if let Ok(mut text) = session.single_mut() {
         text.0 = format!(
@@ -1368,7 +1588,7 @@ fn sync_hud(
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS drive | F low / G high | Y nitro | R restart | T flat | L toy look"
+                    "ARROWS drive | Q low / E high | Y nitro | R restart | T flat | L toy look"
                         .to_string()
                 }
                 Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
@@ -1377,7 +1597,7 @@ fn sync_hud(
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS steer | F low / G high | Y nitro | R restart | T toy | L toy look"
+                    "ARROWS steer | Q low / E high | Y nitro | R restart | T toy | L toy look"
                         .to_string()
                 }
                 Phase::Running => String::new(),
@@ -1395,10 +1615,13 @@ fn sync_end_overlay(
     mut texts: Query<(&EndOverlayText, &mut Text2d)>,
 ) {
     if let Ok(mut visibility) = root.single_mut() {
-        *visibility = if end.0.mode == crate::session::EndMode::Playing {
-            Visibility::Hidden
-        } else {
+        *visibility = if matches!(
+            end.0.mode,
+            crate::session::EndMode::NameEntry | crate::session::EndMode::Leaderboard
+        ) {
             Visibility::Visible
+        } else {
+            Visibility::Hidden
         };
     }
     let result = sim.0.result().copied().unwrap_or_else(|| {
@@ -1418,18 +1641,25 @@ fn sync_end_overlay(
             ),
             EndTextKind::Prompt => match end.0.mode {
                 crate::session::EndMode::NameEntry => {
-                    "TYPE YOUR 3-LETTER NAME  •  ENTER TO SUBMIT".to_string()
+                    format!(
+                        "{}  |  TYPE YOUR 3-LETTER NAME  |  ENTER TO SUBMIT",
+                        sim.0.difficulty().label()
+                    )
                 }
-                crate::session::EndMode::Leaderboard => "LOCAL TOP 5".to_string(),
+                crate::session::EndMode::Leaderboard => {
+                    format!("{}  |  LOCAL TOP 5", sim.0.difficulty().label())
+                }
+                crate::session::EndMode::DifficultySelect => String::new(),
                 crate::session::EndMode::Playing => String::new(),
             },
             EndTextKind::Initial(index) => end.0.initials.cell(index as usize).to_string(),
             EndTextKind::Table => table.clone(),
             EndTextKind::Footer => match end.0.mode {
                 crate::session::EndMode::NameEntry => {
-                    "A-Z enters letters  •  BACKSPACE edits".to_string()
+                    "A-Z enters letters  |  BACKSPACE edits".to_string()
                 }
                 crate::session::EndMode::Leaderboard => "R or ENTER starts a new run".to_string(),
+                crate::session::EndMode::DifficultySelect => String::new(),
                 crate::session::EndMode::Playing => String::new(),
             },
         };
@@ -1748,6 +1978,186 @@ fn sync_drum_overlays(
     }
 }
 
+fn cooldown_gauge(nitro_t: f32, cooldown: f32, t: &game_core::Tuning) -> (f32, &'static str) {
+    if nitro_t > 0.0 {
+        ((nitro_t / t.nitro_duration_secs).clamp(0.0, 1.0), "BURN")
+    } else if cooldown > 0.0 {
+        (
+            (1.0 - cooldown / t.nitro_cooldown_secs).clamp(0.0, 1.0),
+            "COOL",
+        )
+    } else {
+        (1.0, "READY")
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn sync_instruments(
+    sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    effects: Res<crate::VisualEffects>,
+    mut visuals: ResMut<InstrumentVisuals>,
+    mut needle: Query<
+        (&mut Transform, &mut Sprite),
+        (With<SpeedNeedle>, Without<SpeedTick>, Without<CooldownFill>),
+    >,
+    mut digital: Query<
+        &mut Text2d,
+        (
+            With<SpeedDigital>,
+            Without<GearPanelText>,
+            Without<RecoveryText>,
+            Without<CooldownText>,
+        ),
+    >,
+    mut gear: Query<
+        (&mut Text2d, &mut TextColor),
+        (
+            With<GearPanelText>,
+            Without<SpeedDigital>,
+            Without<RecoveryText>,
+            Without<CooldownText>,
+        ),
+    >,
+    mut recovery: Query<
+        (&mut Text2d, &mut TextColor),
+        (
+            With<RecoveryText>,
+            Without<GearPanelText>,
+            Without<SpeedDigital>,
+            Without<CooldownText>,
+        ),
+    >,
+    mut fill: Query<
+        (&mut Transform, &mut Sprite),
+        (With<CooldownFill>, Without<SpeedNeedle>, Without<SpeedTick>),
+    >,
+    mut cooldown_text: Query<
+        &mut Text2d,
+        (
+            With<CooldownText>,
+            Without<SpeedDigital>,
+            Without<GearPanelText>,
+            Without<RecoveryText>,
+        ),
+    >,
+    mut ticks: Query<(&SpeedTick, &mut Sprite), (Without<SpeedNeedle>, Without<CooldownFill>)>,
+) {
+    let kmh = sim.0.speed * 3.6;
+    let angle = speedometer_angle(kmh);
+    let danger = speedometer_danger(kmh, crate::nitro_effects_active(&sim.0));
+    let dir = Vec2::new(angle.cos(), angle.sin());
+    if let Ok((mut tf, mut sprite)) = needle.single_mut() {
+        tf.translation.x = SPEED_CENTER.x + dir.x * 31.0;
+        tf.translation.y = SPEED_CENTER.y + dir.y * 31.0;
+        tf.rotation = Quat::from_rotation_z(angle - std::f32::consts::FRAC_PI_2);
+        sprite.color = if danger {
+            Color::srgb(1.0, 0.24, 0.12)
+        } else {
+            Color::srgb(1.0, 0.85, 0.28)
+        };
+    }
+    if let Ok(mut text) = digital.single_mut() {
+        text.0 = format!("{:03.0} km/h", kmh.min(999.0));
+    }
+    if let Ok((mut text, mut color)) = gear.single_mut() {
+        text.0 = match sim.0.gear() {
+            Gear::Low => "LOW",
+            Gear::High => "HIGH",
+        }
+        .to_string();
+        color.0 = match sim.0.gear() {
+            Gear::Low => Color::srgb(1.0, 0.86, 0.32),
+            Gear::High => Color::srgb(0.25, 0.92, 1.0),
+        };
+    }
+    let (recovery_name, base_cue) = match sim.0.recovery() {
+        game_core::Recovery::Normal => (
+            "normal",
+            normal_recovery_cue(sim.0.gear(), sim.0.speed, tuning.0.shift_up_min_speed),
+        ),
+        game_core::Recovery::NeedLow => ("need_low", "SELECT LOW"),
+        game_core::Recovery::BuildSpeed => ("build_speed", "BUILD SPEED"),
+        game_core::Recovery::ReadyForHigh => ("ready_high", "SHIFT HIGH"),
+    };
+    let cue = match effects.action_cue {
+        crate::ActionCue::TooSoon => "TOO SOON",
+        crate::ActionCue::ShiftLow => "LOW ENGAGED",
+        crate::ActionCue::None => base_cue,
+    };
+    if let Ok((mut text, mut color)) = recovery.single_mut() {
+        text.0 = cue.to_string();
+        color.0 = if effects.action_cue == crate::ActionCue::TooSoon {
+            Color::srgb(1.0, 0.25, 0.15)
+        } else if cue == "SHIFT HIGH" {
+            Color::srgb(1.0, 0.76, 0.20)
+        } else {
+            Color::srgb(0.65, 0.86, 0.94)
+        };
+    }
+    let (gauge, gauge_label) = cooldown_gauge(sim.0.nitro_t, sim.0.nitro_cooldown, &tuning.0);
+    if let Ok((mut tf, mut sprite)) = fill.single_mut() {
+        let h = 104.0 * gauge.max(0.02);
+        tf.translation.y = -257.0 + h * 0.5;
+        sprite.custom_size = Some(Vec2::new(8.0, h));
+        sprite.color = if sim.0.nitro_t > 0.0 {
+            Color::srgb(1.0, 0.25, 0.08)
+        } else if sim.0.nitro_cooldown > 0.0 {
+            Color::srgb(1.0, 0.66, 0.12)
+        } else {
+            Color::srgb(0.12, 0.86, 0.95)
+        };
+    }
+    if let Ok(mut text) = cooldown_text.single_mut() {
+        text.0 = gauge_label.to_string();
+    }
+    for (tick, mut sprite) in &mut ticks {
+        if tick.red_zone {
+            sprite.color = if danger {
+                Color::srgb(1.0, 0.48, 0.12)
+            } else {
+                Color::srgb(0.9, 0.16, 0.12)
+            };
+        }
+    }
+    visuals.speed_kmh = kmh;
+    visuals.needle_angle = angle;
+    visuals.overrev = sim.0.low_overrev(&tuning.0);
+    visuals.cooldown = sim.0.nitro_cooldown;
+    visuals.gauge_fill = gauge;
+    visuals.recovery = recovery_name;
+    visuals.cue = cue;
+}
+
+fn sync_difficulty_overlay(
+    end: Res<crate::EndSession>,
+    mut root: Query<&mut Visibility, With<DifficultyOverlayRoot>>,
+    mut cards: Query<(&DifficultyCard, &mut Sprite)>,
+    mut texts: Query<(&DifficultyCardText, &mut TextColor)>,
+) {
+    if let Ok(mut visibility) = root.single_mut() {
+        *visibility = if end.0.mode == crate::session::EndMode::DifficultySelect {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for (card, mut sprite) in &mut cards {
+        sprite.color = if card.0 == end.0.difficulty_index {
+            Color::srgba(0.07, 0.48, 0.64, 0.98)
+        } else {
+            Color::srgba(0.06, 0.16, 0.27, 0.96)
+        };
+    }
+    for (card, mut color) in &mut texts {
+        color.0 = if card.0 == end.0.difficulty_index {
+            Color::srgb(1.0, 0.94, 0.55)
+        } else {
+            Color::srgb(0.78, 0.92, 0.98)
+        };
+    }
+}
+
 pub fn add_view_systems(app: &mut App) {
     app.add_systems(
         Update,
@@ -1763,7 +2173,9 @@ pub fn add_view_systems(app: &mut App) {
             sync_flash,
             sync_drum_overlays,
             sync_hud,
+            sync_instruments,
             sync_end_overlay,
+            sync_difficulty_overlay,
         )
             .chain(),
     );
@@ -1772,6 +2184,42 @@ pub fn add_view_systems(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speedometer_maps_true_kmh_across_full_sweep() {
+        assert!((speedometer_angle(0.0) + 135.0_f32.to_radians()).abs() < 1e-5);
+        assert!(speedometer_angle(60.0).abs() < 1e-5);
+        assert!((speedometer_angle(120.0) - 135.0_f32.to_radians()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn nitro_forces_speedometer_danger_before_redline() {
+        assert!(!speedometer_danger(50.0, false));
+        assert!(speedometer_danger(90.0, false));
+        assert!(speedometer_danger(50.0, true));
+    }
+
+    #[test]
+    fn normal_low_cue_requests_high_at_shift_threshold() {
+        assert_eq!(
+            normal_recovery_cue(Gear::Low, 9.99, 10.0),
+            "Q LOW  |  E HIGH"
+        );
+        assert_eq!(normal_recovery_cue(Gear::Low, 10.0, 10.0), "SHIFT HIGH");
+        assert_eq!(
+            normal_recovery_cue(Gear::High, 24.0, 10.0),
+            "Q LOW  |  E HIGH"
+        );
+    }
+
+    #[test]
+    fn cooldown_gauge_drains_then_refills() {
+        let t = game_core::Tuning::default();
+        assert_eq!(cooldown_gauge(5.0, 0.0, &t), (1.0, "BURN"));
+        assert_eq!(cooldown_gauge(0.0, 3.0, &t), (0.0, "COOL"));
+        assert_eq!(cooldown_gauge(0.0, 1.5, &t), (0.5, "COOL"));
+        assert_eq!(cooldown_gauge(0.0, 0.0, &t), (1.0, "READY"));
+    }
 
     #[test]
     fn weather_crossfade_weights_are_normalized() {

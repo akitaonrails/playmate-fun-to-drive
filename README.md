@@ -7,25 +7,25 @@ Dashboard 1985**, Tectoy Turbo Video Driver 1991): the 2D drum game plays
 reacts — steering wheel, gear lever, ignition key, G-force body lean, and a
 full-body jolt (with gamepad rumble) when you crash.
 
-Each run lasts ten minutes. Drive cleanly and quickly to complete as many
+Choose a two-, six-, or ten-minute run. Drive cleanly and quickly to complete as many
 day/night cycles as possible, pass traffic, collect nitro, and avoid bumps.
 At time-up, enter three initials for the local top-10 leaderboard for that
-difficulty (top five shown on the toy screen). The current app starts Hard
-(ten-minute) runs; Easy and Medium are available in the core for the upcoming
-difficulty selector.
+difficulty (top five shown on the toy screen). Easy, Medium, and Hard keep
+separate local top-10 boards.
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | Arrow Left/Right | Steer (tap = light nudge, hold = full lock ramp) |
-| F / G | Select LOW / HIGH gear (HIGH unlocks at speed 10) |
+| Q / E | Select LOW / HIGH gear (HIGH unlocks at 10 m/s / 36 km/h) |
 | Y | Use one collected nitro charge (five-second boost) |
 | A-Z / Backspace / Enter | Enter and submit three initials after time-up |
-| R / Enter | Start / restart from the leaderboard |
+| Left/Right + Enter | Select and start Easy / Medium / Hard |
+| R | Restart while driving; return to difficulty selection from the leaderboard |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
-| Gamepad | Left stick steers, South selects LOW, RTZ selects HIGH, North uses nitro, rumble on bumps |
+| Gamepad | Left stick steers, LB/RB select LOW/HIGH, South confirms menus, North uses nitro, rumble on bumps |
 
 ## Run it
 
@@ -53,9 +53,11 @@ make build-wasm-webgpu  # WebGPU-capable build (falls back to WebGL2)
   expectations — the dev agent's eyes).
 
 For deterministic browser QA, append `?qa_session_secs=2` (accepted range:
-1–600 seconds). This changes only the current run duration; the normal default
-remains 600 seconds. QA mode uses an empty ephemeral leaderboard and never
+1–600 seconds). This replaces only the active QA run duration and does not
+change the competitive Easy/Medium/Hard durations; first-load selection defaults
+to Medium (six minutes). QA mode uses an empty ephemeral leaderboard and never
 reads or writes production leaderboard storage. Normal leaderboard data is
-local to the browser under the versioned `fun-to-drive.leaderboard.v1` key;
+local to the browser under the versioned `fun-to-drive.leaderboard.v2` key;
+valid v1 rows migrate to the Hard board;
 stored totals above conservative 600-second plausibility ceilings (100 cycles
 or 100,000 passed/bumped cars) invalidate the stored board.

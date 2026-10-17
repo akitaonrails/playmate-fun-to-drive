@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Added Easy (2:00), Medium (6:00), and Hard (10:00) selection with isolated
+  per-difficulty local leaderboards and v1-to-v2 storage migration.
+- Added explicit Q/E and LB/RB LOW/HIGH controls, an analog 0–120 km/h
+  speedometer, recovery cues, red-zone/over-rev feedback, and a visible nitro
+  burn/cooldown gauge.
+- Replaced the shelf turbo dot with a low-poly 1980s wedge-car ornament whose
+  rear lights retain HIGH/nitro feedback; the physical lever now follows only
+  accepted core gear state and driving presentation includes downshift jolts.
+
 All notable changes. Format loosely based on Keep a Changelog; one entry per
 milestone (docs/PLAN.md).
 

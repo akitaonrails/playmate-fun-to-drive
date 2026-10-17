@@ -1,8 +1,9 @@
 use game_core::{rank_leaderboard, Difficulty, LeaderboardEntry, SessionResult};
 use serde::{Deserialize, Serialize};
 
-pub const STORAGE_KEY: &str = "fun-to-drive.leaderboard.v1";
-const STORAGE_VERSION: u8 = 1;
+pub const STORAGE_KEY: &str = "fun-to-drive.leaderboard.v2";
+pub const LEGACY_STORAGE_KEY: &str = "fun-to-drive.leaderboard.v1";
+const STORAGE_VERSION: u8 = 2;
 // These are deliberately generous ceilings for a run capped at 600 seconds.
 // Current maximum tuning cannot approach 100 cycles or 100k printed-traffic
 // encounters; the bounds reject corrupt/hostile numeric payloads without
@@ -13,6 +14,7 @@ const MAX_STORED_TRAFFIC: u64 = 100_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EndMode {
     #[default]
+    DifficultySelect,
     Playing,
     NameEntry,
     Leaderboard,
@@ -21,6 +23,7 @@ pub enum EndMode {
 impl EndMode {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::DifficultySelect => "difficulty_select",
             Self::Playing => "playing",
             Self::NameEntry => "name_entry",
             Self::Leaderboard => "leaderboard",
@@ -71,10 +74,21 @@ impl Initials {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EndFlow {
     pub mode: EndMode,
     pub initials: Initials,
+    pub difficulty_index: usize,
+}
+
+impl Default for EndFlow {
+    fn default() -> Self {
+        Self {
+            mode: EndMode::DifficultySelect,
+            initials: Initials::default(),
+            difficulty_index: 1,
+        }
+    }
 }
 
 impl EndFlow {
@@ -101,16 +115,31 @@ impl EndFlow {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StoredBoard {
+struct StoredBoardV1 {
     version: u8,
     entries: Vec<StoredEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct StoredBoardV2 {
+    version: u8,
+    boards: StoredBoards,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredBoards {
+    easy: Vec<StoredEntry>,
+    medium: Vec<StoredEntry>,
+    hard: Vec<StoredEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoredEntry {
     initials: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     difficulty: Option<String>,
     day_cycles: u64,
     cars_passed: u64,
@@ -118,11 +147,34 @@ struct StoredEntry {
 }
 
 pub fn decode_board(raw: &str) -> Vec<LeaderboardEntry> {
-    let Ok(stored) = serde_json::from_str::<StoredBoard>(raw) else {
-        return Vec::new();
+    decode_board_checked(raw).unwrap_or_default()
+}
+
+fn decode_board_checked(raw: &str) -> Option<Vec<LeaderboardEntry>> {
+    if let Ok(stored) = serde_json::from_str::<StoredBoardV2>(raw) {
+        if stored.version != STORAGE_VERSION {
+            return None;
+        }
+        let total =
+            stored.boards.easy.len() + stored.boards.medium.len() + stored.boards.hard.len();
+        if total > game_core::LEADERBOARD_CAPACITY {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(total);
+        if !decode_entries(stored.boards.easy, Difficulty::Easy, &mut entries)
+            || !decode_entries(stored.boards.medium, Difficulty::Medium, &mut entries)
+            || !decode_entries(stored.boards.hard, Difficulty::Hard, &mut entries)
+        {
+            return None;
+        }
+        rank_leaderboard(&mut entries);
+        return Some(entries);
+    }
+    let Ok(stored) = serde_json::from_str::<StoredBoardV1>(raw) else {
+        return None;
     };
-    if stored.version != STORAGE_VERSION || stored.entries.len() > 100 {
-        return Vec::new();
+    if stored.version != 1 || stored.entries.len() > 100 {
+        return None;
     }
     let mut entries = Vec::with_capacity(stored.entries.len().min(10));
     for entry in stored.entries {
@@ -130,42 +182,86 @@ pub fn decode_board(raw: &str) -> Vec<LeaderboardEntry> {
             || entry.cars_passed > MAX_STORED_TRAFFIC
             || entry.cars_bumped > MAX_STORED_TRAFFIC
         {
-            return Vec::new();
+            return None;
+        }
+        let valid = LeaderboardEntry::new(
+            &entry.initials,
+            Difficulty::Hard,
+            entry.day_cycles,
+            entry.cars_passed,
+            entry.cars_bumped,
+        )?;
+        entries.push(valid);
+    }
+    rank_leaderboard(&mut entries);
+    Some(entries)
+}
+
+/// Resolve startup storage and signal an actual v1 -> v2 write only when the
+/// legacy payload is fully valid. Presence of v2 is authoritative, even when
+/// corrupt, so stale legacy data cannot silently replace it.
+pub fn load_board_sources(
+    v2: Option<&str>,
+    legacy_v1: Option<&str>,
+) -> (Vec<LeaderboardEntry>, Option<String>) {
+    if let Some(raw) = v2 {
+        return (decode_board(raw), None);
+    }
+    let Some(entries) = legacy_v1.and_then(decode_board_checked) else {
+        return (Vec::new(), None);
+    };
+    let migrated = encode_board(&entries);
+    (entries, Some(migrated))
+}
+
+fn decode_entries(
+    stored: Vec<StoredEntry>,
+    difficulty: Difficulty,
+    entries: &mut Vec<LeaderboardEntry>,
+) -> bool {
+    if stored.len() > game_core::LEADERBOARD_CAPACITY_PER_DIFFICULTY {
+        return false;
+    }
+    for entry in stored {
+        if entry.day_cycles > MAX_STORED_CYCLES
+            || entry.cars_passed > MAX_STORED_TRAFFIC
+            || entry.cars_bumped > MAX_STORED_TRAFFIC
+        {
+            return false;
         }
         let Some(valid) = LeaderboardEntry::new(
             &entry.initials,
-            match entry.difficulty.as_deref() {
-                None | Some("hard") => Difficulty::Hard,
-                Some("medium") => Difficulty::Medium,
-                Some("easy") => Difficulty::Easy,
-                Some(_) => return Vec::new(),
-            },
+            difficulty,
             entry.day_cycles,
             entry.cars_passed,
             entry.cars_bumped,
         ) else {
-            return Vec::new();
+            return false;
         };
         entries.push(valid);
     }
-    rank_leaderboard(&mut entries);
-    entries
+    true
 }
 
 pub fn encode_board(entries: &[LeaderboardEntry]) -> String {
-    let board = StoredBoard {
+    let mut boards = StoredBoards::default();
+    for entry in entries.iter().take(game_core::LEADERBOARD_CAPACITY) {
+        let stored = StoredEntry {
+            initials: entry.initials_str().to_owned(),
+            difficulty: None,
+            day_cycles: entry.result.day_cycles,
+            cars_passed: entry.result.cars_passed,
+            cars_bumped: entry.result.cars_bumped,
+        };
+        match entry.result.difficulty {
+            Difficulty::Easy => boards.easy.push(stored),
+            Difficulty::Medium => boards.medium.push(stored),
+            Difficulty::Hard => boards.hard.push(stored),
+        }
+    }
+    let board = StoredBoardV2 {
         version: STORAGE_VERSION,
-        entries: entries
-            .iter()
-            .take(game_core::LEADERBOARD_CAPACITY)
-            .map(|entry| StoredEntry {
-                initials: entry.initials_str().to_owned(),
-                difficulty: Some(difficulty_name(entry.result.difficulty).to_owned()),
-                day_cycles: entry.result.day_cycles,
-                cars_passed: entry.result.cars_passed,
-                cars_bumped: entry.result.cars_bumped,
-            })
-            .collect(),
+        boards,
     };
     serde_json::to_string(&board).expect("leaderboard schema is serializable")
 }
@@ -241,12 +337,31 @@ mod tests {
 
     #[test]
     fn storage_round_trip_recomputes_score_and_rejects_corruption() {
-        let entries = vec![LeaderboardEntry::new("AAA", Difficulty::Medium, 3, 20, 2).unwrap()];
+        let mut entries = vec![
+            LeaderboardEntry::new("AAA", Difficulty::Medium, 3, 20, 2).unwrap(),
+            LeaderboardEntry::new("BBB", Difficulty::Easy, 1, 8, 0).unwrap(),
+            LeaderboardEntry::new("CCC", Difficulty::Hard, 5, 30, 1).unwrap(),
+        ];
+        rank_leaderboard(&mut entries);
         let raw = encode_board(&entries);
         let decoded = decode_board(&raw);
         assert_eq!(decoded, entries);
-        assert_eq!(decoded[0].result.difficulty, Difficulty::Medium);
-        assert_eq!(decoded[0].result.score, game_core::score_for(3, 20, 2));
+        assert_eq!(
+            game_core::leaderboard_for(&decoded, Difficulty::Easy).count(),
+            1
+        );
+        assert_eq!(
+            game_core::leaderboard_for(&decoded, Difficulty::Medium).count(),
+            1
+        );
+        assert_eq!(
+            game_core::leaderboard_for(&decoded, Difficulty::Hard).count(),
+            1
+        );
+        let medium = game_core::leaderboard_for(&decoded, Difficulty::Medium)
+            .next()
+            .unwrap();
+        assert_eq!(medium.result.score, game_core::score_for(3, 20, 2));
         let legacy = decode_board(
             r#"{"version":1,"entries":[{"initials":"OLD","day_cycles":1,"cars_passed":2,"cars_bumped":3}]}"#,
         );
@@ -258,6 +373,24 @@ mod tests {
             r#"{"version":1,"entries":[{"initials":"MAX","day_cycles":18446744073709551615,"cars_passed":18446744073709551615,"cars_bumped":18446744073709551615}]}"#
         )
         .is_empty());
+    }
+
+    #[test]
+    fn startup_migration_writes_only_valid_legacy_data() {
+        let legacy = r#"{"version":1,"entries":[{"initials":"OLD","day_cycles":1,"cars_passed":2,"cars_bumped":0}]}"#;
+        let (entries, migrated) = load_board_sources(None, Some(legacy));
+        assert_eq!(entries.len(), 1);
+        let migrated = migrated.expect("valid v1 needs an immediate v2 write");
+        assert!(migrated.contains("\"version\":2"));
+        assert_eq!(decode_board(&migrated), entries);
+
+        let (entries, migration) = load_board_sources(None, Some("corrupt"));
+        assert!(entries.is_empty());
+        assert!(migration.is_none(), "corrupt v1 must not overwrite storage");
+
+        let valid_v2 = encode_board(&[]);
+        let (_, migration) = load_board_sources(Some(&valid_v2), Some(legacy));
+        assert!(migration.is_none(), "present v2 is authoritative");
     }
 
     #[test]

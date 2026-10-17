@@ -23,6 +23,11 @@ struct Sim(pub Game);
 struct TuningRes(pub Tuning);
 
 #[derive(Resource, Default)]
+struct RunConfig {
+    qa_duration: Option<f32>,
+}
+
+#[derive(Resource, Default)]
 pub(crate) struct EndSession(pub(crate) EndFlow);
 
 #[derive(Resource)]
@@ -45,6 +50,18 @@ pub(crate) fn nitro_effects_active(game: &Game) -> bool {
 pub(crate) struct VisualEffects {
     pub(crate) nitro_pickup_glow: f32,
     pub(crate) nitro_segment: Option<u8>,
+    pub(crate) action_cue: ActionCue,
+    pub(crate) action_cue_secs: f32,
+    pub(crate) downshift_secs: f32,
+    pub(crate) downshift_severity: Option<game_core::DownshiftSeverity>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ActionCue {
+    #[default]
+    None,
+    ShiftLow,
+    TooSoon,
 }
 
 #[derive(Resource, Default)]
@@ -52,6 +69,7 @@ struct FrameInput {
     pub(crate) state: InputState,
     pub(crate) pad_seen: bool,
     kb: KeyboardSteering,
+    suppress_gameplay_once: bool,
 }
 
 fn main() {
@@ -61,14 +79,18 @@ fn main() {
     let (leaderboard, persistent) = if qa_mode {
         (Vec::new(), false)
     } else {
-        let (stored_board, persistent) = bridge::load_local(session::STORAGE_KEY);
-        (
-            stored_board
-                .as_deref()
-                .map(session::decode_board)
-                .unwrap_or_default(),
-            persistent,
-        )
+        let (stored_v2, mut persistent) = bridge::load_local(session::STORAGE_KEY);
+        let legacy_v1 = if stored_v2.is_none() {
+            bridge::load_local(session::LEGACY_STORAGE_KEY).0
+        } else {
+            None
+        };
+        let (entries, migration) =
+            session::load_board_sources(stored_v2.as_deref(), legacy_v1.as_deref());
+        if let Some(encoded) = migration {
+            persistent = bridge::save_local(session::STORAGE_KEY, &encoded);
+        }
+        (entries, persistent)
     };
     let mut app = App::new();
 
@@ -91,6 +113,7 @@ fn main() {
     )
     .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
     .insert_resource(TuningRes(tuning))
+    .insert_resource(RunConfig { qa_duration })
     .insert_resource(LeaderboardState {
         entries: leaderboard,
         persistent,
@@ -102,9 +125,9 @@ fn main() {
         let mut road = game_core::RoadLoop::generate(&mut rng);
         road.apply_square_curve();
         if let Some(duration) = qa_duration {
-            Game::with_road_for_duration(20261015, road, Difficulty::Hard, duration, &tuning)
+            Game::with_road_for_duration(20261015, road, Difficulty::Medium, duration, &tuning)
         } else {
-            Game::with_road(20261015, road, Difficulty::Hard, &tuning)
+            Game::with_road(20261015, road, Difficulty::Medium, &tuning)
         }
     }))
     .init_resource::<FrameInput>()
@@ -158,6 +181,11 @@ fn gather_input(
         frame.state.nitro = false;
         return;
     }
+    if frame.suppress_gameplay_once {
+        frame.suppress_gameplay_once = false;
+        frame.state = InputState::default();
+        return;
+    }
     // keyboard short/long-press shaping (M6, logic tested in game-core)
     let mut steer = frame.kb.update(
         keys.pressed(KeyCode::ArrowLeft),
@@ -166,8 +194,8 @@ fn gather_input(
         &tuning.0,
     );
 
-    let mut low_requested = keys.just_pressed(KeyCode::KeyF);
-    let mut high_requested = keys.just_pressed(KeyCode::KeyG);
+    let mut low_requested = keys.just_pressed(KeyCode::KeyQ);
+    let mut high_requested = keys.just_pressed(KeyCode::KeyE);
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
         let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
@@ -175,11 +203,11 @@ fn gather_input(
             steer = x; // analog stick overrides the keyboard shape
             frame.pad_seen = true;
         }
-        if pad.just_pressed(GamepadButton::South) {
+        if pad.just_pressed(GamepadButton::LeftTrigger) {
             low_requested = true;
             frame.pad_seen = true;
         }
-        if pad.just_pressed(GamepadButton::RightTrigger2) {
+        if pad.just_pressed(GamepadButton::RightTrigger) {
             high_requested = true;
             frame.pad_seen = true;
         }
@@ -199,7 +227,7 @@ fn gather_input(
 
     frame.state.steer = steer.clamp(-1.0, 1.0);
     frame.state.gear_request = game_core::gear_request(low_requested, high_requested);
-    if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
+    if keys.just_pressed(KeyCode::KeyR) {
         frame.state.reset = true;
     }
     if keys.just_pressed(KeyCode::KeyP) {
@@ -217,25 +245,64 @@ fn sync_end_flow(sim: Res<Sim>, mut end: ResMut<EndSession>) {
         {
             end.0.begin_entry();
         }
-        game_core::Phase::Ready | game_core::Phase::Running
-            if end.0.mode == EndMode::Leaderboard =>
-        {
-            end.0.mode = EndMode::Playing;
-            end.0.initials = session::Initials::default();
-        }
         _ => {}
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_end_input(
     keys: Res<ButtonInput<KeyCode>>,
-    sim: Res<Sim>,
+    pads: Query<&Gamepad>,
+    mut sim: ResMut<Sim>,
+    tuning: Res<TuningRes>,
+    config: Res<RunConfig>,
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
     mut frame: ResMut<FrameInput>,
 ) {
     match end.0.mode {
         EndMode::Playing => {}
+        EndMode::DifficultySelect => {
+            let left = keys.just_pressed(KeyCode::ArrowLeft)
+                || pads
+                    .iter()
+                    .any(|pad| pad.just_pressed(GamepadButton::DPadLeft));
+            let right = keys.just_pressed(KeyCode::ArrowRight)
+                || pads
+                    .iter()
+                    .any(|pad| pad.just_pressed(GamepadButton::DPadRight));
+            end.0.difficulty_index = menu_index_after_input(end.0.difficulty_index, left, right);
+            let confirm = keys.just_pressed(KeyCode::Enter)
+                || pads
+                    .iter()
+                    .any(|pad| pad.just_pressed(GamepadButton::South));
+            if confirm {
+                let difficulty = Difficulty::ALL[end.0.difficulty_index];
+                if let Some(duration) = config.qa_duration {
+                    sim.0 = Game::with_road_for_duration(
+                        sim.0.seed,
+                        sim.0.road.clone(),
+                        difficulty,
+                        duration,
+                        &tuning.0,
+                    );
+                    let _ = sim.0.step(
+                        &InputState {
+                            reset: true,
+                            ..default()
+                        },
+                        0.0,
+                        &tuning.0,
+                    );
+                } else {
+                    sim.0.restart_with_difficulty(difficulty, &tuning.0);
+                }
+                end.0.mode = EndMode::Playing;
+                frame.state = InputState::default();
+                frame.kb = KeyboardSteering::default();
+                frame.suppress_gameplay_once = true;
+            }
+        }
         EndMode::NameEntry => {
             if keys.just_pressed(KeyCode::Backspace) {
                 end.0.initials.pop();
@@ -258,9 +325,27 @@ fn handle_end_input(
         }
         EndMode::Leaderboard => {
             if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
-                frame.state.reset = true;
+                end.0.mode = EndMode::DifficultySelect;
+                end.0.difficulty_index = difficulty_index(sim.0.difficulty());
+                end.0.initials = session::Initials::default();
+                frame.state = InputState::default();
             }
         }
+    }
+}
+
+fn difficulty_index(difficulty: Difficulty) -> usize {
+    Difficulty::ALL
+        .iter()
+        .position(|candidate| *candidate == difficulty)
+        .unwrap_or(1)
+}
+
+fn menu_index_after_input(index: usize, left: bool, right: bool) -> usize {
+    match (left, right) {
+        (true, false) => index.saturating_sub(1),
+        (false, true) => (index + 1).min(Difficulty::ALL.len() - 1),
+        _ => index.min(Difficulty::ALL.len() - 1),
     }
 }
 
@@ -311,6 +396,10 @@ fn step_sim(
     if events.started {
         effects.nitro_pickup_glow = 0.0;
         effects.nitro_segment = None;
+        effects.action_cue = ActionCue::None;
+        effects.action_cue_secs = 0.0;
+        effects.downshift_secs = 0.0;
+        effects.downshift_severity = None;
     }
     if events.nitro_collected {
         effects.nitro_pickup_glow = NITRO_PICKUP_GLOW_SECS;
@@ -320,6 +409,16 @@ fn step_sim(
         crash.pending = true;
         crash.dir = sim.0.bump_dir;
     }
+    if events.high_rejected {
+        effects.action_cue = ActionCue::TooSoon;
+        effects.action_cue_secs = 0.75;
+    }
+    if events.downshifted {
+        effects.action_cue = ActionCue::ShiftLow;
+        effects.action_cue_secs = 0.55;
+        effects.downshift_secs = 0.38;
+        effects.downshift_severity = events.downshift_severity;
+    }
     // edge-triggered flags are consumed by exactly one fixed step
     frame.state.gear_request = None;
     frame.state.reset = false;
@@ -327,8 +426,27 @@ fn step_sim(
     frame.state.nitro = false;
 }
 
-fn tick_visual_effects(time: Res<Time>, mut effects: ResMut<VisualEffects>) {
+fn tick_visual_effects(
+    time: Res<Time>,
+    sim: Res<Sim>,
+    end: Res<EndSession>,
+    mut effects: ResMut<VisualEffects>,
+) {
+    if end.0.mode != EndMode::Playing || !matches!(sim.0.phase, game_core::Phase::Running) {
+        effects.action_cue = ActionCue::None;
+        effects.action_cue_secs = 0.0;
+        effects.downshift_secs = 0.0;
+        effects.downshift_severity = None;
+    }
     effects.nitro_pickup_glow = (effects.nitro_pickup_glow - time.delta_secs()).max(0.0);
+    effects.action_cue_secs = (effects.action_cue_secs - time.delta_secs()).max(0.0);
+    effects.downshift_secs = (effects.downshift_secs - time.delta_secs()).max(0.0);
+    if effects.action_cue_secs == 0.0 {
+        effects.action_cue = ActionCue::None;
+    }
+    if effects.downshift_secs == 0.0 {
+        effects.downshift_severity = None;
+    }
     if effects.nitro_pickup_glow <= 0.0 {
         effects.nitro_segment = None;
     }
@@ -344,6 +462,7 @@ fn publish_state(
     nitro_pose: Res<toy_view::NitroPose>,
     weather_visuals: Res<view::WeatherVisuals>,
     nitro_visuals: Res<view::NitroVisuals>,
+    instruments: Res<view::InstrumentVisuals>,
     end: Res<EndSession>,
     leaderboard: Res<LeaderboardState>,
 ) {
@@ -359,13 +478,15 @@ fn publish_state(
     let leaderboard_json = session::entries_json(&leaderboard.entries, sim.0.difficulty(), 10);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"difficulty\":\"{}\",\"difficulty_index\":{},\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"speed_kmh\":{:.3},\"speedometer_angle\":{:.5},\"overrev\":{:.3},\"recovery\":\"{}\",\"action_cue\":\"{}\",\"nitro_cooldown\":{:.3},\"cooldown_gauge\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"lever_target\":{:.4},\"lever_angle\":{:.4},\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
             game_core::Phase::GameOver { .. } => "gameover",
         },
         end.0.mode.as_str(),
+        session::difficulty_name(sim.0.difficulty()),
+        end.0.difficulty_index,
         end.0.initials.as_str(),
         leaderboard_json,
         leaderboard.persistent,
@@ -373,6 +494,13 @@ fn publish_state(
         sim.0.session_duration(),
         score,
         sim.0.speed,
+        instruments.speed_kmh,
+        instruments.needle_angle,
+        instruments.overrev,
+        instruments.recovery,
+        instruments.cue,
+        instruments.cooldown,
+        instruments.gauge_fill,
         sim.0.session_remaining,
         sim.0.environment_time,
         sim.0.day_cycles,
@@ -393,6 +521,8 @@ fn publish_state(
             game_core::Gear::Low => "low",
             game_core::Gear::High => "high",
         },
+        view.lever_target,
+        view.lever_angle,
         sim.0.nitro_charges,
         sim.0.nitro_t,
         sim.0.nitro_pickup_ahead(),
@@ -444,5 +574,15 @@ mod tests {
             "core charge is frozen for the result frame"
         );
         assert!(!nitro_effects_active(&game));
+    }
+
+    #[test]
+    fn difficulty_menu_navigation_clamps_and_ignores_conflicts() {
+        assert_eq!(menu_index_after_input(1, true, false), 0);
+        assert_eq!(menu_index_after_input(0, true, false), 0);
+        assert_eq!(menu_index_after_input(1, false, true), 2);
+        assert_eq!(menu_index_after_input(2, false, true), 2);
+        assert_eq!(menu_index_after_input(1, true, true), 1);
+        assert_eq!(difficulty_index(Difficulty::Medium), 1);
     }
 }

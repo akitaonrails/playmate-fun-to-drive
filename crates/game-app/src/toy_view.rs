@@ -30,6 +30,7 @@ pub struct ViewState {
     pub wheel_vel: f32,
     pub lever_angle: f32,
     pub lever_vel: f32,
+    pub lever_target: f32,
     /// M13: ignition key twist when the game runs.
     pub key_angle: f32,
     pub key_vel: f32,
@@ -45,6 +46,7 @@ impl Default for ViewState {
             wheel_vel: 0.0,
             lever_angle: 0.0,
             lever_vel: 0.0,
+            lever_target: -0.30,
             key_angle: 0.0,
             key_vel: 0.0,
         }
@@ -200,6 +202,9 @@ pub fn setup(
 #[derive(Resource)]
 pub struct TurboLamp(pub Handle<StandardMaterial>);
 
+#[derive(Component)]
+pub struct SportsCarOrnament;
+
 pub fn setup_diorama(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -211,14 +216,75 @@ pub fn setup_diorama(
         ..default()
     });
     commands.insert_resource(TurboLamp(lamp.clone()));
+    let body = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.90, 0.23, 0.20),
+        perceptual_roughness: 0.48,
+        ..default()
+    });
+    let body_shadow = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.09, 0.13),
+        perceptual_roughness: 0.55,
+        ..default()
+    });
+    let canopy = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.06, 0.10, 0.17),
+        metallic: 0.18,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
+    let tire = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.025, 0.032, 0.045),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
     commands
         .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
         .with_children(|parent| {
-            parent.spawn((
-                Mesh3d(meshes.add(Sphere::new(0.0032))),
-                MeshMaterial3d(lamp),
-                Transform::from_translation(Vec3::new(0.05, 0.086, 0.048)),
-            ));
+            parent
+                .spawn((
+                    Transform::from_xyz(0.048, 0.0815, 0.050)
+                        .with_rotation(Quat::from_rotation_y(-10.0_f32.to_radians())),
+                    Visibility::Visible,
+                    SportsCarOrnament,
+                ))
+                .with_children(|car| {
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.028, 0.006, 0.042))),
+                        MeshMaterial3d(body.clone()),
+                        Transform::from_xyz(0.0, 0.004, 0.0),
+                    ));
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.023, 0.004, 0.030))),
+                        MeshMaterial3d(body_shadow.clone()),
+                        Transform::from_xyz(0.0, 0.008, 0.001),
+                    ));
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.019, 0.005, 0.017))),
+                        MeshMaterial3d(canopy.clone()),
+                        Transform::from_xyz(0.0, 0.009, -0.004),
+                    ));
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.025, 0.0015, 0.004))),
+                        MeshMaterial3d(body_shadow.clone()),
+                        Transform::from_xyz(0.0, 0.0105, 0.017),
+                    ));
+                    for x in [-0.014, 0.014] {
+                        for z in [-0.012, 0.012] {
+                            car.spawn((
+                                Mesh3d(meshes.add(Cuboid::new(0.003, 0.006, 0.007))),
+                                MeshMaterial3d(tire.clone()),
+                                Transform::from_xyz(x, 0.0035, z),
+                            ));
+                        }
+                    }
+                    for x in [-0.007, 0.007] {
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.006, 0.0025, 0.0015))),
+                            MeshMaterial3d(lamp.clone()),
+                            Transform::from_xyz(x, 0.0065, 0.0215),
+                        ));
+                    }
+                });
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
@@ -314,6 +380,13 @@ fn apply_mode(
 /// M9: wheel + gear lever bound to live input. The wheel tracks
 /// `InputState.steer` (full lock ≈ 120°) with mechanical lag; the lever
 /// snaps LOW↔HIGH with a springy overshoot.
+fn lever_target_for(gear: Gear) -> f32 {
+    match gear {
+        Gear::Low => -0.30,
+        Gear::High => 0.30,
+    }
+}
+
 pub fn animate_parts(
     mut state: ResMut<ViewState>,
     sim: Res<Sim>,
@@ -322,6 +395,8 @@ pub fn animate_parts(
     mut commands: Commands,
     mut parts: Query<(Entity, &Name, &mut Transform, Option<&RestRotation>), Without<ToyRoot>>,
 ) {
+    let lever_target = lever_target_for(sim.0.gear());
+    state.lever_target = lever_target;
     if state.mode != ViewMode::Toy {
         return;
     }
@@ -329,10 +404,6 @@ pub fn animate_parts(
     // invert so turning LEFT rotates the wheel counter-clockwise as the
     // player sees it (positive local-Z rotation is CCW from the player side)
     let wheel_target = -frame.state.steer * 1.35; // ~77 deg full lock, gentler
-    let lever_target = match sim.0.gear() {
-        Gear::Low => -0.30,
-        Gear::High => 0.30,
-    };
     state.wheel_angle = game_core::dynamics::spring_step(
         state.wheel_angle,
         &mut state.wheel_vel,
@@ -348,7 +419,8 @@ pub fn animate_parts(
         140.0,
         11.0,
         dt,
-    );
+    )
+    .clamp(-0.349, 0.349);
 
     for (entity, name, mut tf, rest) in parts.iter_mut() {
         let Some(rest) = rest else {
@@ -477,6 +549,7 @@ pub fn apply_body_dynamics(
     mut rumble: bevy::ecs::message::MessageWriter<GamepadRumbleRequest>,
     sim: Res<Sim>,
     frame: Res<crate::FrameInput>,
+    effects: Res<crate::VisualEffects>,
     tuning: Res<crate::TuningRes>,
     time: Res<Time>,
     mut root: Query<&mut Transform, With<ToyRoot>>,
@@ -502,6 +575,12 @@ pub fn apply_body_dynamics(
         &tuning.0,
     );
     let (jx, jz, jroll) = rig.0.shake_offset(time.elapsed_secs(), &tuning.0);
+    let (drive_z, drive_pitch, drive_roll) = drive_pose_offsets(
+        effects.downshift_secs,
+        effects.downshift_severity,
+        sim.0.low_overrev(&tuning.0),
+        time.elapsed_secs(),
+    );
     let dt = time.delta_secs().min(0.05);
     let nitro_active = crate::nitro_effects_active(&sim.0);
     let (target_z, target_pitch) = nitro_pose_targets(nitro_active);
@@ -524,10 +603,35 @@ pub fn apply_body_dynamics(
         dt,
     );
     if let Ok(mut tf) = root.single_mut() {
-        tf.rotation = Quat::from_rotation_z(rig.0.roll + jroll)
-            * Quat::from_rotation_x(rig.0.pitch + nitro_pose.pitch);
-        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz + nitro_pose.z);
+        tf.rotation = Quat::from_rotation_z(rig.0.roll + jroll + drive_roll)
+            * Quat::from_rotation_x(rig.0.pitch + nitro_pose.pitch + drive_pitch);
+        tf.translation = Vec3::new(
+            rig.0.shift + jx,
+            0.0,
+            rig.0.heave + jz + nitro_pose.z + drive_z,
+        );
     }
+}
+
+fn drive_pose_offsets(
+    remaining: f32,
+    severity: Option<game_core::DownshiftSeverity>,
+    overrev: f32,
+    elapsed: f32,
+) -> (f32, f32, f32) {
+    let jolt = (remaining / 0.38).clamp(0.0, 1.0);
+    let severity_gain = match severity {
+        Some(game_core::DownshiftSeverity::Unsafe) => 1.0,
+        Some(game_core::DownshiftSeverity::Normal) => 0.52,
+        None => 0.0,
+    };
+    let kick = (jolt * std::f32::consts::PI).sin() * severity_gain;
+    let shake = overrev.clamp(0.0, 1.0);
+    (
+        -0.009 * kick + (elapsed * 41.0).sin() * 0.0008 * shake,
+        0.055 * kick,
+        (elapsed * 53.0).sin() * 0.012 * shake,
+    )
 }
 
 fn nitro_pose_targets(active: bool) -> (f32, f32) {
@@ -541,6 +645,7 @@ fn nitro_pose_targets(active: bool) -> (f32, f32) {
 /// M12: turbo lamp follows the gear (nods to the Tomy's HIGH-gear light).
 pub fn turbo_lamp(
     sim: Res<Sim>,
+    time: Res<Time>,
     lamp: Res<TurboLamp>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -549,7 +654,8 @@ pub fn turbo_lamp(
         let on = matches!(sim.0.gear(), Gear::High) || nitro_active;
         mat.emissive = if on {
             if nitro_active {
-                LinearRgba::new(2.0, 0.55, 0.10, 1.0)
+                let pulse = 0.88 + 0.12 * (time.elapsed_secs() * 7.0).sin();
+                LinearRgba::new(2.0 * pulse, 0.55 * pulse, 0.10 * pulse, 1.0)
             } else {
                 LinearRgba::new(1.2, 0.35, 0.08, 1.0)
             }
@@ -604,5 +710,21 @@ mod tests {
         assert!(z > 0.0, "the +Z camera side must make the screen larger");
         assert!(pitch < 0.0, "negative X pitch leans the toy face back");
         assert_eq!(nitro_pose_targets(false), (0.0, 0.0));
+    }
+
+    #[test]
+    fn unsafe_downshift_jolt_is_stronger_and_overrev_shakes() {
+        let normal = drive_pose_offsets(0.19, Some(game_core::DownshiftSeverity::Normal), 0.0, 0.0);
+        let unsafe_shift =
+            drive_pose_offsets(0.19, Some(game_core::DownshiftSeverity::Unsafe), 0.0, 0.0);
+        assert!(unsafe_shift.0.abs() > normal.0.abs());
+        assert!(unsafe_shift.1 > normal.1);
+        assert_ne!(drive_pose_offsets(0.0, None, 1.0, 0.123).2, 0.0);
+    }
+
+    #[test]
+    fn lever_target_is_authoritative_for_each_core_gear() {
+        assert_eq!(lever_target_for(Gear::Low), -0.30);
+        assert_eq!(lever_target_for(Gear::High), 0.30);
     }
 }
