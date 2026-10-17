@@ -274,7 +274,7 @@ impl Game {
         self.bump_dir = d;
         self.road_x = (self.road_x + d * 0.38).clamp(-1.35, 1.35);
         self.speed *= 0.45;
-        self.flash = 0.55;
+        self.flash = 0.35;
         ev.bumped = true;
     }
 }

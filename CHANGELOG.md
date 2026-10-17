@@ -5,6 +5,24 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.2.0-dev3 — pseudo-3D OutRun renderer + square test track (2026-10-16)
+
+- Renderer rewritten classic-super-scaler style: 30 geometrically-spaced
+  projected rows (near rows tall, far rows compressed), road/grass/rumble/
+  dashes all narrow to the horizon, CUMULATIVE curve bend (the drunk
+  zig-zag came from per-row independent curve offsets — the bend now
+  sweeps smoothly), foreground apron fills below the nearest row.
+- Sprites (traffic + palms) projected with distance scaling: cars shrink
+  into the distance on the road; palms sparse (3/side/loop) off-road as
+  scenery — no longer traffic-like.
+- Square test track (user request): `RoadLoop::apply_square_curve()` —
+  long straights + 4 constant-curvature corners (eased), used at boot;
+  unit-tested (straights straight, corners constant, seamless wrap).
+- Bump flash softened 0.55 -> 0.35 (was reading as a pale wash mid-fade).
+- Debugging notes: PIL pixel-band analysis (via astra) caught TWO real
+  bugs my code edits silently missed — a sign-inverted row height and an
+  apron-sync `.zip(None)` no-op. Assert-replace discipline reiterated.
+
 ### v0.2.0-dev2 — arcade loop rework (2026-10-16, user-directed)
 
 - Start/P pauses and resumes; Select/R restarts (gamepad + keyboard).

@@ -92,6 +92,36 @@ impl RoadLoop {
         }
     }
 
+    /// Replace the curve with a "square" track: long straights joined by
+    /// four constant-curvature corners (2 right, 2 left) — feel-testing
+    /// track per user request (drive straight, turn at corners).
+    pub fn apply_square_curve(&mut self) {
+        let n = CURVE_SAMPLES as f32;
+        let mut raw = vec![0.0f32; CURVE_SAMPLES];
+        for (i, v) in raw.iter_mut().enumerate() {
+            let t = i as f32 / n;
+            *v = if (0.22..=0.34).contains(&t) {
+                1.0
+            } else if (0.47..=0.59).contains(&t) {
+                -1.0
+            } else if (0.72..=0.84).contains(&t) {
+                1.0
+            } else if (0.94..=1.0).contains(&t) || t <= 0.06 {
+                -1.0
+            } else {
+                0.0
+            };
+        }
+        // soften the step transitions a little so corners ease in
+        let mut curve = raw.clone();
+        for i in 0..CURVE_SAMPLES {
+            let prev = raw[(i + CURVE_SAMPLES - 1) % CURVE_SAMPLES];
+            let next = raw[(i + 1) % CURVE_SAMPLES];
+            curve[i] = (raw[i] * 4.0 + prev + next) / 6.0;
+        }
+        self.curve = curve;
+    }
+
     /// Flat loop with explicit hazards: deterministic course for tests and
     /// simple scenarios (attract mode etc.).
     pub fn straight(length: f32, hazards: Vec<Hazard>) -> Self {
@@ -158,6 +188,20 @@ mod tests {
         );
         assert!(r.curve.first().unwrap().abs() < 1e-4);
         // joint smoothness itself is covered by curve_is_periodic_at_joint
+    }
+
+    #[test]
+    fn square_track_has_straights_and_corners() {
+        let mut r = loop_from(5);
+        r.apply_square_curve();
+        let n = CURVE_SAMPLES as f32;
+        let at = |t: f32| r.curve_at(t * r.length);
+        assert!(at(0.10).abs() < 0.1, "straight section");
+        assert!(at(0.28) > 0.8, "right corner");
+        assert!(at(0.53) < -0.8, "left corner");
+        assert!(at(0.65).abs() < 0.1, "straight again");
+        assert!((at(0.0) - at(1.0)).abs() < 1e-4, "seamless wrap");
+        let _ = n;
     }
 
     #[test]

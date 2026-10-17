@@ -14,9 +14,23 @@ pub const M_PER_PX: f32 = 0.08;
 pub const HALF_ROAD_PX: f32 = 190.0;
 pub const CAR_Y: f32 = -215.0;
 pub const HORIZON_Y: f32 = 120.0;
-const ROW_H: f32 = 26.0;
-const ROW_COUNT: usize = 14;
-const TOP_ROW_Y: f32 = HORIZON_Y - ROW_H * 0.5;
+
+// pseudo-3D projection (classic OutRun style): geometric row spacing,
+// cumulative curve bend, sprites scaled by distance
+pub const ROWS: usize = 30;
+pub const D_MIN: f32 = 2.2; // meters to the nearest row
+pub const S_FAR: f32 = 0.045; // scale at the horizon row
+pub const CURVE_BEND: f32 = 0.055; // lateral half-widths gained per curve-meter
+
+fn row_scale(i: usize) -> f32 {
+    S_FAR.powf(i as f32 / ROWS as f32)
+}
+fn scale_to_y(s: f32) -> f32 {
+    CAR_Y + (HORIZON_Y - CAR_Y) * (1.0 - s) / (1.0 - S_FAR)
+}
+fn scale_to_d(s: f32) -> f32 {
+    D_MIN / s
+}
 const VIEW_TOP: f32 = 322.0;
 const PALM_POOL: usize = 10;
 const HAZARD_POOL: usize = 16;
@@ -43,6 +57,10 @@ struct CenterDash;
 
 #[derive(Component)]
 struct GrassRow;
+
+/// Fills the screen below the nearest projected row (foreground apron).
+#[derive(Component)]
+struct Apron;
 
 #[derive(Component)]
 struct HazardPart;
@@ -77,6 +95,51 @@ struct DrumBand;
 
 #[derive(Component)]
 struct RecessShade;
+
+/// Per-frame road projection shared by road/sprite sync systems.
+#[derive(Resource, Default)]
+pub struct Proj {
+    /// lateral center (half-width units incl. bend) at each row's distance
+    pub rows_x: [f32; ROWS],
+    /// cumulative curve at each row distance (half-width units)
+    pub cum: [f32; ROWS],
+}
+
+impl Proj {
+    /// Project a world distance to (screen_y, scale, lateral_units).
+    pub fn project(&self, d: f32, road_x: f32) -> Option<(f32, f32, f32)> {
+        if d < D_MIN * 0.55 {
+            return None;
+        }
+        let s = (D_MIN / d).min(1.0);
+        if s < S_FAR * 1.05 {
+            return None;
+        }
+        // interpolate cumulative bend at d via the row table
+        let cum = {
+            // rows are ordered near(0)..far(ROWS-1); d decreases with index
+            let mut val = self.cum[ROWS - 1];
+            for i in 0..ROWS {
+                let di = scale_to_d(row_scale(i));
+                if d <= di {
+                    let d0 = if i == 0 {
+                        D_MIN
+                    } else {
+                        scale_to_d(row_scale(i - 1))
+                    };
+                    let t = if di > d0 { (d - d0) / (di - d0) } else { 1.0 };
+                    let c0 = if i == 0 { 0.0 } else { self.cum[i - 1] };
+                    val = c0 + (self.cum[i] - c0) * t;
+                    break;
+                }
+                val = self.cum[i];
+            }
+            val
+        };
+        let y = scale_to_y(s);
+        Some((y, s, road_x + CURVE_BEND * cum))
+    }
+}
 
 #[derive(Resource, Default)]
 struct Palette {
@@ -120,6 +183,7 @@ fn sky_colors() -> [(Color, f32); 6] {
 
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
+    commands.init_resource::<Proj>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     // ---- sky gradient bands (static), sun, clouds, sea, sand ----
@@ -176,46 +240,81 @@ pub fn setup(mut commands: Commands) {
         GrassBase,
     ));
 
-    // ---- scrolling world rows: grass stripe + road + rumble + dashes ----
-    for i in 0..ROW_COUNT {
-        let y = TOP_ROW_Y - i as f32 * ROW_H;
+    // ---- perspective world rows (classic super-scaler feel) ----
+    // geometry (y, height, width) is STATIC from the row scale; only the
+    // lateral x positions and stripe colors animate per frame.
+    for i in 0..ROWS {
+        let s = row_scale(i);
+        let y = scale_to_y(s);
+        let y_next = if i + 1 < ROWS {
+            scale_to_y(row_scale(i + 1))
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let h = (y_next - y).max(1.5);
         commands.spawn((
             Sprite {
-                custom_size: Some(Vec2::new(HALF_ROAD_PX * 2.0, ROW_H + 1.0)),
+                custom_size: Some(Vec2::new(HALF_ROAD_PX * 2.0 * s, h + 1.0)),
                 ..default()
             },
-            Transform::from_xyz(0.0, y, -4.0),
+            Transform::from_xyz(0.0, y + h * 0.5, -4.0),
             RoadRow,
         ));
         commands.spawn((
             Sprite {
-                custom_size: Some(Vec2::new(960.0, ROW_H + 1.0)),
+                custom_size: Some(Vec2::new(960.0, h + 1.0)),
                 ..default()
             },
-            Transform::from_xyz(0.0, y, -4.4),
+            Transform::from_xyz(0.0, y + h * 0.5, -4.4),
             GrassRow,
         ));
         for side in [-1.0f32, 1.0] {
             commands.spawn((
                 Sprite {
-                    custom_size: Some(Vec2::new(14.0, ROW_H - 6.0)),
+                    custom_size: Some(Vec2::new((16.0 * s).max(1.5), h + 1.0)),
                     ..default()
                 },
-                Transform::from_xyz(0.0, y, -3.9),
+                Transform::from_xyz(0.0, y + h * 0.5, -3.9),
                 EdgeRumble,
             ));
             let _ = side;
         }
-        for lane in [-0.4f32, 0.4] {
+        for _lane in [-0.4f32, 0.4] {
             commands.spawn((
                 Sprite {
-                    custom_size: Some(Vec2::new(7.0, ROW_H - 10.0)),
+                    custom_size: Some(Vec2::new((7.0 * s).max(1.0), h * 0.6)),
+                    // dashes sit inside their row span
                     ..default()
                 },
-                Transform::from_xyz(lane * HALF_ROAD_PX, y, -3.8),
+                Transform::from_xyz(0.0, y + h * 0.5, -3.8),
                 CenterDash,
             ));
         }
+    }
+
+    // ---- foreground apron (below the nearest row, static geometry) ----
+    let apron_h = CAR_Y - (-322.0);
+    for (w, z, marker_apply) in [(960.0f32, -4.4, false), (HALF_ROAD_PX * 2.0, -4.0, true)] {
+        let _ = marker_apply;
+        commands.spawn((
+            Sprite {
+                custom_size: Some(Vec2::new(w, apron_h + 2.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, -322.0 + apron_h * 0.5, z),
+            Apron,
+        ));
+    }
+    for side in [-1.0f32, 1.0] {
+        commands.spawn((
+            Sprite {
+                custom_size: Some(Vec2::new(16.0, apron_h + 2.0)),
+                ..default()
+            },
+            Transform::from_xyz(0.0, -322.0 + apron_h * 0.5, -3.9),
+            Apron,
+        ));
+        let _ = side;
     }
 
     // ---- palms (pooled, ride the loop) ----
@@ -394,18 +493,15 @@ pub fn setup(mut commands: Commands) {
     }
 }
 
-fn row_y(i: usize) -> f32 {
-    TOP_ROW_Y - i as f32 * ROW_H
+fn row_dist(i: usize) -> f32 {
+    scale_to_d(row_scale(i))
 }
 
-fn row_ahead(i: usize) -> f32 {
-    (CAR_Y - row_y(i)) * M_PER_PX
-}
-
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_roads(
     sim: Res<Sim>,
     colors: Res<Palette>,
+    mut proj: ResMut<Proj>,
     mut rows: Query<
         (&mut Transform, &mut Sprite),
         (With<RoadRow>, Without<EdgeRumble>, Without<CenterDash>),
@@ -427,17 +523,34 @@ fn sync_roads(
             Without<CenterDash>,
         ),
     >,
+    mut apron: Query<
+        (&mut Transform, &mut Sprite),
+        (
+            With<Apron>,
+            Without<RoadRow>,
+            Without<EdgeRumble>,
+            Without<CenterDash>,
+            Without<GrassRow>,
+        ),
+    >,
 ) {
-    let xs: Vec<f32> = (0..ROW_COUNT)
-        .map(|i| sim.0.road_offset_at(row_ahead(i)) * HALF_ROAD_PX)
-        .collect();
+    // walk rows near->far, accumulating the curve bend (classic pseudo-3D:
+    // the bend is CUMULATIVE, so the road sweeps smoothly instead of
+    // zig-zagging row to row)
+    let mut cum = 0.0f32;
+    for i in 0..ROWS {
+        let s = row_scale(i);
+        let d = row_dist(i);
+        let pos = sim.0.distance + d;
+        cum += sim.0.road.curve_at(pos) * (d - if i == 0 { D_MIN } else { row_dist(i - 1) });
+        proj.rows_x[i] = HALF_ROAD_PX * s * (sim.0.road_x + CURVE_BEND * cum);
+        proj.cum[i] = cum;
+    }
 
     for (i, (mut tf, mut sp)) in rows.iter_mut().enumerate() {
-        if let Some(x) = xs.get(i) {
-            tf.translation.x = *x;
-        }
-        let s_abs = sim.0.distance + row_ahead(i);
-        let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        tf.translation.x = proj.rows_x[i];
+        let pos = sim.0.distance + row_dist(i);
+        let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on {
             colors.asphalt_a
         } else {
@@ -445,19 +558,48 @@ fn sync_roads(
         };
     }
     for (i, (mut tf, mut sp)) in grass.iter_mut().enumerate() {
-        let y = row_y(i);
-        tf.translation = Vec3::new(0.0, y, -4.4);
-        let s_abs = sim.0.distance + row_ahead(i);
-        let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        tf.translation.x = 0.0;
+        let pos = sim.0.distance + row_dist(i);
+        let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.grass_a } else { colors.grass_b };
+    }
+    // foreground apron follows row 0 (grass full width + road band + edges)
+    if let Some(&x0) = proj.rows_x.first() {
+        let pos0 = sim.0.distance + D_MIN;
+        let on0 = ((pos0 / 3.5).floor() as i64).rem_euclid(2) == 0;
+        for (idx, (mut tf, mut sp)) in apron.iter_mut().enumerate() {
+            let w = sp.custom_size.map(|c| c.x).unwrap_or(0.0);
+            if w > 900.0 {
+                // grass
+                tf.translation.x = 0.0;
+                sp.color = if on0 { colors.grass_a } else { colors.grass_b };
+            } else if w > 100.0 {
+                // road band
+                tf.translation.x = x0;
+                sp.color = if on0 {
+                    colors.asphalt_a
+                } else {
+                    colors.asphalt_b
+                };
+            } else {
+                // rumble strips
+                let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
+                tf.translation.x = x0 + side * (HALF_ROAD_PX - 8.0);
+                sp.color = if on0 {
+                    colors.rumble_red
+                } else {
+                    colors.rumble_white
+                };
+            }
+        }
     }
     for (idx, (mut tf, mut sp)) in rumble.iter_mut().enumerate() {
         let row = idx / 2;
         let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
-        let Some(x) = xs.get(row) else { continue };
-        tf.translation.x = x + side * (HALF_ROAD_PX - 7.0);
-        let s_abs = sim.0.distance + row_ahead(row);
-        let red = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        let s = row_scale(row);
+        tf.translation.x = proj.rows_x[row] + side * (HALF_ROAD_PX - 8.0) * s;
+        let pos = sim.0.distance + row_dist(row);
+        let red = ((pos / 7.0).floor() as i64).rem_euclid(2) == 0;
         sp.color = if red {
             colors.rumble_red
         } else {
@@ -467,10 +609,10 @@ fn sync_roads(
     for (i, (mut tf, mut sp)) in dashes.iter_mut().enumerate() {
         let row = i / 2;
         let lane: f32 = if i % 2 == 0 { -0.4 } else { 0.4 };
-        let Some(x) = xs.get(row) else { continue };
-        tf.translation.x = x + lane * HALF_ROAD_PX;
-        let s_abs = sim.0.distance + row_ahead(row);
-        let on = ((s_abs / 3.5).floor() as i64).rem_euclid(2) == 0;
+        let s = row_scale(row);
+        tf.translation.x = proj.rows_x[row] + lane * HALF_ROAD_PX * s;
+        let pos = sim.0.distance + row_dist(row);
+        let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.dash } else { colors.asphalt_a };
     }
 }
@@ -478,56 +620,46 @@ fn sync_roads(
 #[allow(clippy::type_complexity)]
 fn sync_hazards(
     sim: Res<Sim>,
+    proj: Res<Proj>,
     mut pool: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<HazardPart>>,
 ) {
     let lp = sim.0.loop_pos();
-    let visible: Vec<(f32, f32, game_core::HazardKind)> = sim
-        .0
-        .road
-        .hazards
-        .iter()
-        .filter_map(|h| {
-            let ahead = (h.s - lp).rem_euclid(sim.0.road.length);
-            let y = CAR_Y + ahead / M_PER_PX;
-            if y < CAR_Y - 60.0 || y > HORIZON_Y - 16.0 {
-                return None;
-            }
-            let x = (sim.0.road_offset_at(ahead) + h.x) * HALF_ROAD_PX;
-            Some((x, y, h.kind))
-        })
-        .collect();
-
     let mut parts = pool.iter_mut();
-    let mut place = |body: Color, accent: Color, dark: Color, w: f32, x: f32, y: f32| {
-        // 4 parts per hazard: body, window, bumper-lights, shadow strip
+    let mut place = |body: Color, accent: Color, dark: Color, w: f32, x: f32, y: f32, s: f32| {
+        let w = (w * s).max(2.0);
         if let Some((mut tf, mut sp, mut vis)) = parts.next() {
             tf.translation = Vec3::new(x, y, -2.5);
             sp.color = body;
-            sp.custom_size = Some(Vec2::new(w, 24.0));
+            sp.custom_size = Some(Vec2::new(w, w * 0.42));
             *vis = Visibility::Visible;
         }
         if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y + 3.0, -2.4);
+            tf.translation = Vec3::new(x, y + w * 0.12, -2.4);
             sp.color = dark;
-            sp.custom_size = Some(Vec2::new(w * 0.5, 10.0));
+            sp.custom_size = Some(Vec2::new(w * 0.5, w * 0.18));
             *vis = Visibility::Visible;
         }
         if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y - 10.0, -2.4);
+            tf.translation = Vec3::new(x, y - w * 0.18, -2.4);
             sp.color = accent;
-            sp.custom_size = Some(Vec2::new(w * 0.9, 5.0));
+            sp.custom_size = Some(Vec2::new(w * 0.9, w * 0.09));
             *vis = Visibility::Visible;
         }
         if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y - 13.0, -2.6);
+            tf.translation = Vec3::new(x, y - w * 0.24, -2.6);
             sp.color = Color::srgb(0.06, 0.06, 0.07);
-            sp.custom_size = Some(Vec2::new(w * 0.95, 6.0));
+            sp.custom_size = Some(Vec2::new(w * 0.95, w * 0.1));
             *vis = Visibility::Visible;
         }
     };
 
-    for &(x, y, kind) in visible.iter() {
-        match kind {
+    for h in &sim.0.road.hazards {
+        let ahead = (h.s - lp).rem_euclid(sim.0.road.length);
+        let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) else {
+            continue;
+        };
+        let x = (lat + h.x) * HALF_ROAD_PX * s;
+        match h.kind {
             game_core::HazardKind::Oncoming => place(
                 Color::srgb(0.93, 0.91, 0.85),
                 Color::srgb(1.0, 0.9, 0.4),
@@ -535,6 +667,7 @@ fn sync_hazards(
                 56.0,
                 x,
                 y,
+                s,
             ),
             game_core::HazardKind::Roadside => place(
                 Color::srgb(0.95, 0.45, 0.10),
@@ -543,6 +676,7 @@ fn sync_hazards(
                 30.0,
                 x,
                 y,
+                s,
             ),
         }
     }
@@ -555,40 +689,49 @@ fn sync_hazards(
 #[allow(clippy::type_complexity)]
 fn sync_palms(
     sim: Res<Sim>,
-    mut pool: Query<(&mut Transform, &mut Visibility), (With<PalmPart>, Without<HazardPart>)>,
+    proj: Res<Proj>,
+    mut pool: Query<
+        (&mut Transform, &mut Visibility, &mut Sprite),
+        (With<PalmPart>, Without<HazardPart>),
+    >,
 ) {
     let lp = sim.0.loop_pos();
     let l = sim.0.road.length;
-    let mut spots: Vec<(f32, f32)> = Vec::new(); // (x, y)
-    for k in 0..5u32 {
-        for side in [-1.0f32, 1.0] {
-            let s = (k as f32 + 0.5) / 5.0 * l;
-            let ahead = (s - lp).rem_euclid(l);
-            let y = CAR_Y + ahead / M_PER_PX;
-            if y < CAR_Y - 60.0 || y > HORIZON_Y - 10.0 {
-                continue;
+    // sparse roadside scenery: 3 per side per loop (not traffic-dense)
+    let mut spots: Vec<(f32, f32, f32)> = Vec::new();
+    for k in 0..3u32 {
+        for side in [-1.45f32, 1.45] {
+            let s_pos = (k as f32 + if side < 0.0 { 0.5 } else { 0.0 }) / 3.0 * l;
+            let ahead = (s_pos - lp).rem_euclid(l);
+            if let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) {
+                let x = (lat + side) * HALF_ROAD_PX * s;
+                spots.push((x, y, s));
             }
-            let x = (sim.0.road_offset_at(ahead) + side * 1.5) * HALF_ROAD_PX;
-            spots.push((x, y));
         }
     }
     let mut parts = pool.iter_mut();
-    for &(x, y) in spots.iter() {
-        // trunk / wide fronds / cross fronds
-        if let Some((mut tf, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y, -3.0);
+    for &(x, y, s) in spots.iter() {
+        let h = (46.0 * s).max(2.0);
+        // trunk
+        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
+            tf.translation = Vec3::new(x, y + h * 0.2, -3.0);
+            sp.custom_size = Some(Vec2::new((9.0 * s).max(1.0), h));
             *vis = Visibility::Visible;
         }
-        if let Some((mut tf, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y + 26.0, -2.9);
+        // wide fronds
+        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
+            tf.translation = Vec3::new(x, y + h * 0.95, -2.9);
+            sp.custom_size = Some(Vec2::new((52.0 * s).max(2.0), (14.0 * s).max(1.0)));
             *vis = Visibility::Visible;
         }
-        if let Some((mut tf, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y + 20.0, -2.9);
+        // cross fronds
+        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
+            tf.translation = Vec3::new(x, y + h * 0.8, -2.9);
+            sp.custom_size = Some(Vec2::new((30.0 * s).max(2.0), (10.0 * s).max(1.0)));
             *vis = Visibility::Visible;
         }
     }
-    for (_, mut vis) in parts.by_ref() {
+    for (_, mut vis, _) in parts.by_ref() {
         *vis = Visibility::Hidden;
     }
 }

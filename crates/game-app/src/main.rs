@@ -48,7 +48,13 @@ fn main() {
     )
     .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
     .insert_resource(TuningRes(tuning))
-    .insert_resource(Sim(Game::new(20261015, &tuning)))
+    .insert_resource(Sim({
+        // square feel-test track: straights + 4 constant corners (user req)
+        let mut rng = game_core::Rng::new(20261015);
+        let mut road = game_core::RoadLoop::generate(&mut rng);
+        road.apply_square_curve();
+        Game::with_road(20261015, road, &tuning)
+    }))
     .init_resource::<FrameInput>()
     .add_systems(
         Startup,
