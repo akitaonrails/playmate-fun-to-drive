@@ -36,6 +36,8 @@ const PALM_POOL: usize = 10;
 const HAZARD_POOL: usize = 16;
 const FUEL_X_LEFT: f32 = 240.0;
 const FUEL_Y: f32 = 270.0;
+const NITRO_X_LEFT: f32 = 302.0;
+const NITRO_Y: f32 = 226.0;
 
 #[derive(Component)]
 struct SkyBand;
@@ -66,6 +68,9 @@ struct Apron;
 struct HazardPart;
 
 #[derive(Component)]
+struct NitroPickupPart;
+
+#[derive(Component)]
 struct PalmPart;
 
 #[derive(Component)]
@@ -76,6 +81,9 @@ struct FlashOverlay;
 
 #[derive(Component)]
 struct FuelBarFill;
+
+#[derive(Component)]
+struct NitroBarSegment(u8);
 
 #[derive(Component)]
 pub struct ScoreText;
@@ -414,6 +422,16 @@ pub fn setup(mut commands: Commands) {
         }
     }
 
+    // ---- next nitro pickup (one deterministic road item at a time) ----
+    for _ in 0..4 {
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.15, 0.92, 1.0), Vec2::new(36.0, 48.0)),
+            Transform::from_xyz(0.0, CAR_Y, -2.3),
+            Visibility::Hidden,
+            NitroPickupPart,
+        ));
+    }
+
     // ---- the fixed player car "decal" (composite) ----
     commands.spawn((
         Sprite::from_color(Color::srgb(0.86, 0.10, 0.08), Vec2::new(92.0, 30.0)),
@@ -454,6 +472,30 @@ pub fn setup(mut commands: Commands) {
         FuelBarFill,
     ));
 
+    // Three-cell nitro meter, rendered into the toy screen. During a boost,
+    // the active cell shrinks over five seconds; a stored full meter blinks.
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.82), Vec2::new(196.0, 34.0)),
+        Transform::from_xyz(332.0, NITRO_Y, 1.0),
+        HudPanel,
+    ));
+    commands.spawn((
+        Text2d::new("NITRO Y"),
+        TextFont {
+            font_size: FontSize::Px(16.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.55, 0.95, 1.0)),
+        Transform::from_xyz(253.0, NITRO_Y, 1.1),
+    ));
+    for i in 0..3u8 {
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.10, 0.16, 0.20), Vec2::new(34.0, 14.0)),
+            Transform::from_xyz(NITRO_X_LEFT + i as f32 * 40.0 + 17.0, NITRO_Y, 1.1),
+            NitroBarSegment(i),
+        ));
+    }
+
     // in-screen HUD (Text2d => rendered INTO the game texture, so it shows
     // on the toy screen itself) with dark backing panels for contrast
     for (cx, w) in [(-330.0, 210.0), (0.0, 330.0), (332.0, 196.0)] {
@@ -468,7 +510,7 @@ pub fn setup(mut commands: Commands) {
         ));
     }
     commands.spawn((
-        Text::new(""),
+        Text2d::new(""),
         TextFont {
             font_size: FontSize::Px(24.0),
             ..default()
@@ -478,7 +520,7 @@ pub fn setup(mut commands: Commands) {
         ScoreText,
     ));
     commands.spawn((
-        Text::new(""),
+        Text2d::new(""),
         TextFont {
             font_size: FontSize::Px(26.0),
             ..default()
@@ -488,7 +530,7 @@ pub fn setup(mut commands: Commands) {
         LapText,
     ));
     commands.spawn((
-        Text::new(""),
+        Text2d::new(""),
         TextFont {
             font_size: FontSize::Px(20.0),
             ..default()
@@ -512,22 +554,6 @@ pub fn setup(mut commands: Commands) {
         },
         StatusText,
     ));
-    commands.spawn((
-        Text::new(""),
-        TextFont {
-            font_size: FontSize::Px(24.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.98, 0.92, 0.55)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(14.0),
-            left: Val::Px(16.0),
-            ..default()
-        },
-        LapText,
-    ));
-
     // crash flash overlay
     commands.spawn((
         Sprite {
@@ -756,6 +782,54 @@ fn sync_hazards(
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn sync_nitro_pickup(
+    sim: Res<Sim>,
+    proj: Res<Proj>,
+    mut parts: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<NitroPickupPart>>,
+) {
+    let mut parts = parts.iter_mut();
+    let Some((y, s, lat)) = proj.project(sim.0.nitro_pickup_ahead(), sim.0.road_x) else {
+        for (_, _, mut vis) in parts {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    };
+    let x = (lat + sim.0.next_nitro_lane) * HALF_ROAD_PX * s;
+    let w = (38.0 * s).max(3.0);
+    let h = (50.0 * s).max(4.0);
+    let specs = [
+        (Color::srgb(0.08, 0.72, 0.95), Vec2::new(w, h), 0.0, 0.0),
+        (
+            Color::srgb(1.0, 0.55, 0.08),
+            Vec2::new(w * 0.52, h * 0.16),
+            0.0,
+            h * 0.55,
+        ),
+        (
+            Color::srgb(0.88, 1.0, 1.0),
+            Vec2::new(w * 0.70, h * 0.16),
+            0.0,
+            -h * 0.05,
+        ),
+        (
+            Color::srgb(0.02, 0.18, 0.28),
+            Vec2::new(w * 0.22, h * 0.52),
+            0.0,
+            0.0,
+        ),
+    ];
+    for ((mut tf, mut sprite, mut vis), (color, size, dx, dy)) in parts.by_ref().zip(specs) {
+        tf.translation = Vec3::new(x + dx, y + dy, -2.3);
+        sprite.color = color;
+        sprite.custom_size = Some(size);
+        *vis = Visibility::Visible;
+    }
+    for (_, _, mut vis) in parts {
+        *vis = Visibility::Hidden;
+    }
+}
+
 /// Palms ride the loop on both grass shoulders.
 #[allow(clippy::type_complexity)]
 fn sync_palms(
@@ -828,11 +902,11 @@ fn sync_hud(
             Without<HazardPart>,
         ),
     >,
-    mut score: Query<&mut Text, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
-    mut gear: Query<&mut Text, (With<GearText>, Without<StatusText>)>,
+    mut score: Query<&mut Text2d, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
+    mut gear: Query<&mut Text2d, (With<GearText>, Without<StatusText>)>,
     mut status: Query<&mut Text, (With<StatusText>, Without<LapText>)>,
     mut lap: Query<
-        &mut Text,
+        &mut Text2d,
         (
             With<LapText>,
             Without<StatusText>,
@@ -840,6 +914,11 @@ fn sync_hud(
             Without<GearText>,
         ),
     >,
+    mut nitro: Query<
+        (&NitroBarSegment, &mut Transform, &mut Sprite),
+        (With<NitroBarSegment>, Without<FuelBarFill>),
+    >,
+    time: Res<Time>,
 ) {
     if let Ok((mut tf, mut sp)) = fuel.single_mut() {
         let frac = (sim.0.fuel / tuning.0.fuel_secs).clamp(0.0, 1.0);
@@ -855,10 +934,10 @@ fn sync_hud(
         };
     }
     if let Ok(mut text) = score.single_mut() {
-        **text = format!("{:05.0} m", sim.0.distance);
+        text.0 = format!("{:05.0} m", sim.0.distance);
     }
     if let Ok(mut text) = gear.single_mut() {
-        **text = match sim.0.gear() {
+        text.0 = match sim.0.gear() {
             Gear::Low => "LOW".to_string(),
             Gear::High => "HIGH (turbo)".to_string(),
         };
@@ -869,12 +948,34 @@ fn sync_hud(
         } else {
             "--:--.--".to_string()
         };
-        **text = format!(
+        text.0 = format!(
             "LAP {} | {} | BEST {}",
             sim.0.laps + 1,
             format_lap(sim.0.lap_time),
             best
         );
+    }
+    let active = sim.0.nitro_active();
+    let active_frac = (sim.0.nitro_t / tuning.0.nitro_duration_secs).clamp(0.0, 1.0);
+    let full_blink = sim.0.nitro_charges == 3 && !active;
+    let blink_on = !full_blink || (time.elapsed_secs() * 4.0).floor() as i32 % 2 == 0;
+    for (segment, mut tf, mut sp) in &mut nitro {
+        let i = segment.0;
+        let frac = if i < sim.0.nitro_charges {
+            1.0
+        } else if active && i == sim.0.nitro_charges {
+            active_frac
+        } else {
+            0.0
+        };
+        let w = if frac > 0.0 { 34.0 * frac } else { 34.0 };
+        tf.translation.x = NITRO_X_LEFT + i as f32 * 40.0 + w * 0.5;
+        sp.custom_size = Some(Vec2::new(w, 14.0));
+        sp.color = if frac > 0.0 {
+            Color::srgba(0.10, 0.86, 1.0, if blink_on { 1.0 } else { 0.28 })
+        } else {
+            Color::srgb(0.10, 0.16, 0.20)
+        };
     }
     if let Ok(mut text) = status.single_mut() {
         **text = if sim.0.paused {
@@ -882,9 +983,9 @@ fn sync_hud(
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS drive | G gear | R restart | T flat view | Y toy look".to_string()
+                    "ARROWS drive | G gear | Y nitro | R restart | T flat | L toy look".to_string()
                 }
-                Phase::Running => "T flat view | Y toy look".to_string(),
+                Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
                 Phase::Crashed { .. } => "CRASHED!".to_string(),
                 Phase::GameOver { reason } => match reason {
                     EndReason::Crash => "GAME OVER - CRASH | R to restart".to_string(),
@@ -894,7 +995,7 @@ fn sync_hud(
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS steer | G gear | R restart | T toy view | Y toy look".to_string()
+                    "ARROWS steer | G gear | Y nitro | R restart | T toy | L toy look".to_string()
                 }
                 Phase::Running => String::new(),
                 Phase::Crashed { .. } => "CRASHED!".to_string(),
@@ -1113,6 +1214,7 @@ pub fn add_view_systems(app: &mut App) {
             sync_roads,
             sync_palms,
             sync_hazards,
+            sync_nitro_pickup,
             sync_flash,
             sync_drum_overlays,
             sync_hud,

@@ -18,7 +18,7 @@ if pgrep -x trunk >/dev/null 2>&1; then
 fi
 
 echo ">> starting trunk (first build can take a couple of minutes)"
-(cd crates/game-app && trunk serve --port "$PORT") &
+(cd crates/game-app && env -u NO_COLOR trunk serve --port "$PORT") &
 TRUNK_PID=$!
 
 echo ">> waiting for http://localhost:$PORT to accept connections..."
@@ -26,7 +26,7 @@ for i in $(seq 1 240); do
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
     echo ""
     echo ">> READY: open http://localhost:$PORT"
-    echo ">> controls: ARROWS drive | G gear | R restart | P pause | T flat view | Y toy look"
+    echo ">> controls: ARROWS drive | G gear | Y nitro | R restart | P pause | T flat view | L toy look"
     break
   fi
   if ! kill -0 "$TRUNK_PID" 2>/dev/null; then

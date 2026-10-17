@@ -36,6 +36,8 @@ pub struct StepEvents {
     pub bumped: bool,
     pub fuel_out: bool,
     pub game_over: bool,
+    pub nitro_collected: bool,
+    pub nitro_started: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,15 @@ pub struct Game {
     /// Bump slow-down timer + kick direction.
     pub bump_t: f32,
     pub bump_dir: f32,
+    /// Stored pickups (the active charge, if any, lives in `nitro_t`).
+    pub nitro_charges: u8,
+    /// Seconds remaining in the active boost.
+    pub nitro_t: f32,
+    /// Absolute course distance of the next pickup.
+    pub next_nitro_distance: f32,
+    /// Lane of the next pickup, relative to road center.
+    pub next_nitro_lane: f32,
+    nitro_pickup_index: u32,
     gear: Gear,
 }
 
@@ -94,6 +105,11 @@ impl Game {
             lap_best: 0.0,
             bump_t: 0.0,
             bump_dir: 0.0,
+            nitro_charges: 0,
+            nitro_t: 0.0,
+            next_nitro_distance: t.nitro_pickup_first_m,
+            next_nitro_lane: Self::nitro_lane(seed, 0),
+            nitro_pickup_index: 0,
             gear: Gear::Low,
         }
     }
@@ -104,6 +120,26 @@ impl Game {
 
     pub fn loop_pos(&self) -> f32 {
         self.distance.rem_euclid(self.road.length)
+    }
+
+    pub fn nitro_active(&self) -> bool {
+        self.nitro_t > 0.0
+    }
+
+    pub fn nitro_pickup_ahead(&self) -> f32 {
+        self.next_nitro_distance - self.distance
+    }
+
+    fn nitro_lane(seed: u64, index: u32) -> f32 {
+        const LANES: [f32; 3] = [-0.62, 0.0, 0.62];
+        let mixed = seed ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        LANES[((mixed ^ (mixed >> 32)) % LANES.len() as u64) as usize]
+    }
+
+    fn advance_nitro_pickup(&mut self, t: &Tuning) {
+        self.nitro_pickup_index += 1;
+        self.next_nitro_distance += t.nitro_pickup_interval_m;
+        self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index);
     }
 
     /// Lateral offset of the road row `ahead_m` meters ahead of the car.
@@ -185,10 +221,23 @@ impl Game {
         self.lap_time = 0.0;
         self.bump_t = 0.0;
         self.bump_dir = 0.0;
+        self.nitro_charges = 0;
+        self.nitro_t = 0.0;
+        self.nitro_pickup_index = 0;
+        self.next_nitro_distance = t.nitro_pickup_first_m;
+        self.next_nitro_lane = Self::nitro_lane(self.seed, 0);
         // best lap persists across runs
     }
 
     fn step_running(&mut self, input: &InputState, dt: f32, t: &Tuning, ev: &mut StepEvents) {
+        if input.nitro && self.nitro_t <= 0.0 && self.nitro_charges > 0 {
+            self.nitro_charges -= 1;
+            self.nitro_t = t.nitro_duration_secs;
+            ev.nitro_started = true;
+        }
+        if self.nitro_t > 0.0 {
+            self.nitro_t = (self.nitro_t - dt).max(0.0);
+        }
         // bump slow-down window
         if self.bump_t > 0.0 {
             self.bump_t = (self.bump_t - dt).max(0.0);
@@ -201,6 +250,9 @@ impl Game {
         };
         if self.bump_t > 0.0 {
             target *= 0.35;
+        }
+        if self.nitro_t > 0.0 {
+            target *= t.nitro_speed_multiplier;
         }
         let k = 1.0 - (-dt / t.gear_ramp_secs).exp();
         self.speed += (target - self.speed) * k;
@@ -217,6 +269,20 @@ impl Game {
         self.road_x += (curve_target - self.road_x) * drift;
         self.road_x -= input.steer * t.steer_rate * dt;
         self.road_x = self.road_x.clamp(-1.35, 1.35);
+
+        // One deterministic pickup at a time. The absolute-distance schedule
+        // keeps appearances occasional and guarantees more than four per
+        // 100-second light cycle at LOW speed.
+        if self.distance >= self.next_nitro_distance {
+            let capacity_used = self.nitro_charges + u8::from(self.nitro_t > 0.0);
+            let x_eff = self.next_nitro_lane + self.road_x;
+            let pickup_band = t.car_half_width + 0.20;
+            if x_eff.abs() < pickup_band && capacity_used < 3 {
+                self.nitro_charges += 1;
+                ev.nitro_collected = true;
+            }
+            self.advance_nitro_pickup(t);
+        }
 
         // off-road accumulation (grace), then a toy-ish bump
         if self.road_x.abs() > t.off_road_limit {
@@ -275,6 +341,7 @@ impl Game {
         let d = if dir == 0.0 { 1.0 } else { dir };
         self.bump_t = t.crash_flash_secs;
         self.bump_dir = d;
+        self.off_road = 0.0;
         self.road_x = (self.road_x + d * 0.38).clamp(-1.35, 1.35);
         self.speed *= 0.45;
         self.flash = 0.35;
@@ -475,6 +542,31 @@ mod tests {
         }
         assert!(ev.bumped, "holding full steer must bump off the road");
         assert!(matches!(g.phase, Phase::Running), "no game-over on bumps");
+    }
+
+    #[test]
+    fn bump_resets_off_road_grace_so_recovery_is_possible() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(40, RoadLoop::straight(500.0, vec![]), &t);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        g.road_x = 1.2;
+        let mut bumped = false;
+        for _ in 0..120 {
+            if g.step(&idle(), DT, &t).bumped {
+                bumped = true;
+                break;
+            }
+        }
+        assert!(bumped);
+        assert_eq!(g.off_road, 0.0);
+        assert!(g.bump_t > 0.0);
     }
 
     #[test]
@@ -773,5 +865,160 @@ mod tests {
         let a = g.road_offset_at(0.0);
         let b = g.road_offset_at(0.5);
         assert!((a - b).abs() < 0.5, "half a meter ahead should be close");
+    }
+
+    #[test]
+    fn nitro_pickup_collects_in_lane_and_caps_at_three() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(1000.0, vec![]);
+        let mut g = Game::with_road(31, road, &t);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+
+        for expected in 1..=3 {
+            g.next_nitro_distance = g.distance;
+            g.road_x = -g.next_nitro_lane;
+            let ev = g.step(&idle(), DT, &t);
+            assert!(ev.nitro_collected);
+            assert_eq!(g.nitro_charges, expected);
+        }
+
+        g.next_nitro_distance = g.distance;
+        g.road_x = -g.next_nitro_lane;
+        let ev = g.step(&idle(), DT, &t);
+        assert!(!ev.nitro_collected, "a full meter cannot overfill");
+        assert_eq!(g.nitro_charges, 3);
+    }
+
+    #[test]
+    fn missed_nitro_pickup_advances_to_the_next_spawn() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(1000.0, vec![]);
+        let mut g = Game::with_road(32, road, &t);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        let old_distance = g.distance;
+        g.next_nitro_distance = old_distance;
+        g.next_nitro_lane = 0.62;
+        g.road_x = -0.62;
+        // Deliberately move the road away from the pickup lane.
+        g.road_x = 0.0;
+        let ev = g.step(&idle(), DT, &t);
+        assert!(!ev.nitro_collected);
+        assert_eq!(g.nitro_charges, 0);
+        assert!((g.next_nitro_distance - (old_distance + t.nitro_pickup_interval_m)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn nitro_spends_one_charge_boosts_and_expires_in_five_seconds() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(2000.0, vec![]);
+        let mut boosted = Game::with_road(33, road.clone(), &t);
+        let mut normal = Game::with_road(33, road, &t);
+        for g in [&mut boosted, &mut normal] {
+            g.step(
+                &InputState {
+                    steer: 0.001,
+                    ..Default::default()
+                },
+                DT,
+                &t,
+            );
+            run_seconds(g, 2.0, &idle(), &t);
+        }
+        boosted.nitro_charges = 2;
+        let ev = boosted.step(
+            &InputState {
+                nitro: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(ev.nitro_started);
+        assert_eq!(boosted.nitro_charges, 1);
+        assert!(boosted.nitro_active());
+
+        run_seconds(&mut boosted, 1.0, &idle(), &t);
+        run_seconds(&mut normal, 1.0, &idle(), &t);
+        assert!(
+            boosted.speed > normal.speed * 1.15,
+            "boost speed {} vs {}",
+            boosted.speed,
+            normal.speed
+        );
+
+        run_seconds(&mut boosted, 4.1, &idle(), &t);
+        assert!(!boosted.nitro_active());
+        assert_eq!(boosted.nitro_t, 0.0);
+    }
+
+    #[test]
+    fn restart_clears_nitro_and_restores_first_pickup() {
+        let (mut g, t) = game(34);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        g.nitro_charges = 3;
+        g.nitro_t = 2.0;
+        g.next_nitro_distance = 999.0;
+        g.step(
+            &InputState {
+                reset: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert_eq!(g.nitro_charges, 0);
+        assert_eq!(g.nitro_t, 0.0);
+        assert_eq!(g.next_nitro_distance, t.nitro_pickup_first_m);
+    }
+
+    #[test]
+    fn at_least_four_nitro_pickups_appear_per_light_cycle_at_low_speed() {
+        let t = Tuning {
+            fuel_secs: 600.0,
+            ..Default::default()
+        };
+        let mut g = Game::with_road(35, RoadLoop::straight(3000.0, vec![]), &t);
+        g.step(
+            &InputState {
+                steer: 0.001,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        let mut collected = 0;
+        for _ in 0..(100.0 / DT) as usize {
+            g.road_x = -g.next_nitro_lane;
+            if g.step(&idle(), DT, &t).nitro_collected {
+                collected += 1;
+                // Keep capacity open so this test counts every appearance.
+                g.nitro_charges = 0;
+            }
+        }
+        assert!(
+            collected >= 4,
+            "only {collected} pickups in one 100 s light cycle"
+        );
     }
 }

@@ -30,6 +30,11 @@ pub struct Tuning {
     pub collision_forgiveness: f32,
     /// Fuel tank duration in seconds.
     pub fuel_secs: f32,
+    /// Nitro pickup spacing and boost behavior.
+    pub nitro_pickup_first_m: f32,
+    pub nitro_pickup_interval_m: f32,
+    pub nitro_duration_secs: f32,
+    pub nitro_speed_multiplier: f32,
     /// Duration of the crash flash / crashed phase.
     pub crash_flash_secs: f32,
     /// Body dynamics (M11): shared spring stiffness/damping for the rig.
@@ -78,6 +83,10 @@ impl Default for Tuning {
             hazard_half_width: 0.14,
             collision_forgiveness: 0.35,
             fuel_secs: 75.0,
+            nitro_pickup_first_m: 90.0,
+            nitro_pickup_interval_m: 180.0,
+            nitro_duration_secs: 5.0,
+            nitro_speed_multiplier: 1.30,
             crash_flash_secs: 0.9,
             body_k: 55.0,
             body_c: 7.5,
@@ -145,6 +154,18 @@ impl Tuning {
         }
         if !(15.0..=600.0).contains(&self.fuel_secs) {
             return Err("fuel_secs out of [15, 600]");
+        }
+        if !(30.0..=300.0).contains(&self.nitro_pickup_first_m) {
+            return Err("nitro_pickup_first_m out of [30, 300]");
+        }
+        if !(80.0..=260.0).contains(&self.nitro_pickup_interval_m) {
+            return Err("nitro_pickup_interval_m out of [80, 260]");
+        }
+        if !(2.0..=8.0).contains(&self.nitro_duration_secs) {
+            return Err("nitro_duration_secs out of [2, 8]");
+        }
+        if !(1.05..=1.75).contains(&self.nitro_speed_multiplier) {
+            return Err("nitro_speed_multiplier out of [1.05, 1.75]");
         }
         if !(0.2..=3.0).contains(&self.crash_flash_secs) {
             return Err("crash_flash_secs out of [0.2, 3]");

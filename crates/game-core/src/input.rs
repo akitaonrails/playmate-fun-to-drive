@@ -33,6 +33,8 @@ pub struct InputState {
     pub reset: bool,
     /// Edge-triggered: pause/resume toggle this tick.
     pub pause: bool,
+    /// Edge-triggered: spend one nitro charge this tick.
+    pub nitro: bool,
 }
 
 /// Keyboard steering adapter (REQUEST R0/R8): a short press is a light

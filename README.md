@@ -13,10 +13,11 @@ full-body jolt (with gamepad rumble) when you crash.
 |---|---|
 | Arrow Left/Right | Steer (tap = light nudge, hold = full lock ramp) |
 | G | Gear LOW ⇄ HIGH (turbo lamp lights) |
+| Y | Use one collected nitro charge (five-second boost) |
 | R / Enter | Start / restart after game over |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
-| Y | Cycle the rolling-tube look dial (0 / 0.5 / 1 — flat by default) |
-| Gamepad | Left stick steers (analog), South/RTZ shifts gear, rumble on crash |
+| L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
+| Gamepad | Left stick steers, South/RTZ shifts, North uses nitro, rumble on bumps |
 
 ## Run it
 
@@ -34,7 +35,7 @@ make package      # release wasm bundle -> release/fun-to-drive-web.zip
 make build-wasm-webgpu  # WebGPU-capable build (falls back to WebGL2)
 ```
 
-- Game logic: `crates/game-core` (pure, seeded, 40 unit tests).
+- Game logic: `crates/game-core` (pure, seeded, 53 unit tests).
 - Presentation: `crates/game-app` (Bevy 0.20, wasm32 via trunk).
 - Docs: `docs/REQUEST.md` (charter), `docs/PLAN.md` (milestones + deferred
   tuning), `docs/DECISIONS.md`, `research/` (the real toys).

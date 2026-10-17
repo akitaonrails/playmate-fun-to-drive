@@ -430,7 +430,7 @@ pub fn paint_screen(
     }
 }
 
-/// M10: drive the screen shader uniforms; `Y` cycles the toy_look dial
+/// M10: drive the screen shader uniforms; `L` cycles the toy_look dial
 /// (0.0 -> 0.5 -> 1.0 -> 0.0) for manual comparison.
 pub fn update_screen_mat(
     keys: Res<ButtonInput<KeyCode>>,
@@ -438,7 +438,7 @@ pub fn update_screen_mat(
     mat_handle: Res<ScreenMatHandle>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyY) {
+    if keys.just_pressed(KeyCode::KeyL) {
         view.toy_look = match view.toy_look {
             x if x < 0.25 => 0.5,
             x if x < 0.75 => 1.0,
@@ -494,7 +494,14 @@ pub fn apply_body_dynamics(
     if let Ok(mut tf) = root.single_mut() {
         tf.rotation =
             Quat::from_rotation_z(rig.0.roll + jroll) * Quat::from_rotation_x(rig.0.pitch);
-        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz);
+        // Nitro throws the physical toy away from the player, then lets it
+        // ease forward as the five-second charge drains.
+        let nitro_kick = if sim.0.nitro_active() {
+            -0.014 * (sim.0.nitro_t / tuning.0.nitro_duration_secs).sqrt()
+        } else {
+            0.0
+        };
+        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz + nitro_kick);
     }
 }
 
@@ -505,9 +512,13 @@ pub fn turbo_lamp(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if let Some(mut mat) = materials.get_mut(&lamp.0) {
-        let on = matches!(sim.0.gear(), Gear::High);
+        let on = matches!(sim.0.gear(), Gear::High) || sim.0.nitro_active();
         mat.emissive = if on {
-            LinearRgba::new(1.2, 0.35, 0.08, 1.0)
+            if sim.0.nitro_active() {
+                LinearRgba::new(2.0, 0.55, 0.10, 1.0)
+            } else {
+                LinearRgba::new(1.2, 0.35, 0.08, 1.0)
+            }
         } else {
             LinearRgba::new(0.0, 0.0, 0.0, 1.0)
         };

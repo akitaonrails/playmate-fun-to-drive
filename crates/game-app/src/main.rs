@@ -121,6 +121,10 @@ fn gather_input(
             frame.state.reset = true;
             frame.pad_seen = true;
         }
+        if pad.just_pressed(GamepadButton::North) {
+            frame.state.nitro = true;
+            frame.pad_seen = true;
+        }
     }
 
     frame.state.steer = steer.clamp(-1.0, 1.0);
@@ -132,6 +136,9 @@ fn gather_input(
     }
     if keys.just_pressed(KeyCode::KeyP) {
         frame.state.pause = true;
+    }
+    if keys.just_pressed(KeyCode::KeyY) {
+        frame.state.nitro = true;
     }
 }
 
@@ -147,6 +154,7 @@ fn step_sim(
     frame.state.gear_up = false;
     frame.state.reset = false;
     frame.state.pause = false;
+    frame.state.nitro = false;
 }
 
 fn publish_state(
@@ -160,7 +168,7 @@ fn publish_state(
     let env_time = time.elapsed_secs() * crate::view::ENV_TIME_SCALE;
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"paused\":{},\"day\":{:.2},\"sea\":{:.2},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"toy\":{},\"look\":{:.2},\"paused\":{},\"day\":{:.2},\"sea\":{:.2},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -174,6 +182,10 @@ fn publish_state(
             game_core::Gear::Low => "low",
             game_core::Gear::High => "high",
         },
+        sim.0.nitro_charges,
+        sim.0.nitro_t,
+        sim.0.nitro_pickup_ahead(),
+        sim.0.next_nitro_lane,
         view.mode == toy_view::ViewMode::Toy,
         view.toy_look,
         sim.0.paused,

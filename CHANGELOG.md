@@ -5,6 +5,24 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.2.0-dev5 — collectible nitro boost (2026-10-17)
+
+- Deterministic cyan nitro canisters now appear in road lanes often enough
+  to offer at least four pickups per 100-second day/night cycle at LOW speed.
+- Three-cell in-screen nitro meter: collected charges fill cyan cells, a full
+  meter blinks, and the active cell drains over a five-second boost.
+- Y / gamepad North spends one charge for a 30% speed boost; the toy kicks
+  backward and eases forward with the draining charge, and its turbo lamp
+  burns brighter while nitro is active. The rolling-tube look toggle moved
+  from Y to L.
+- Corrected the previous HUD implementation to use actual Bevy `Text2d`, so
+  score/lap/gear/nitro labels render inside the game image and on the toy's
+  screen instead of clipping at the browser corner.
+- Bumps now reset the off-road grace accumulator, preventing a single
+  excursion from trapping the car in a bump-every-tick near-stop.
+- Nitro state is published for deterministic browser QA; 53 core tests plus
+  3 app tests pass, including pickup, capacity, boost, expiry, and recovery.
+
 ### v0.2.0-dev4 — in-screen HUD, softer toy motion, day/night + seasons (2026-10-16)
 
 - HUD moved INTO the game image (Text2d on dark panels): score top-left,

@@ -19,11 +19,11 @@ build-native: ## native release binary
 
 build-wasm: ## wasm release bundle via trunk
 	tools/setup-wasm-opt.sh
-	cd crates/game-app && trunk build --release
+	cd crates/game-app && env -u NO_COLOR trunk build --release
 
 build-wasm-webgpu: ## WebGPU-capable wasm bundle (falls back to WebGL2)
 	tools/setup-wasm-opt.sh
-	cd crates/game-app && trunk build --release --features webgpu --dist dist-webgpu
+	cd crates/game-app && env -u NO_COLOR trunk build --release --features webgpu --dist dist-webgpu
 
 package: build-wasm ## shippable zip of the release wasm build
 	rm -rf release && mkdir -p release
