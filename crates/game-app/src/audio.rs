@@ -11,6 +11,8 @@ use game_core::{Gear, Phase};
 use crate::{bridge, view, EndSession, FrameInput, Sim, TuningRes};
 
 pub const STORAGE_KEY: &str = "fun-to-drive.audio.v1";
+const EFFECTS_GAIN: f32 = 0.94;
+const MUSIC_GAIN: f32 = 1.18;
 
 pub struct ArcadeAudioPlugin;
 
@@ -20,7 +22,13 @@ impl Plugin for ArcadeAudioPlugin {
             .add_systems(Startup, setup_audio)
             .add_systems(
                 Update,
-                (unlock_on_input, toggle_mute, update_mix, play_cues)
+                (
+                    unlock_on_input,
+                    toggle_mute,
+                    update_mix,
+                    schedule_weather_cues,
+                    play_cues,
+                )
                     .chain()
                     .in_set(crate::AppSet::Audio),
             );
@@ -34,6 +42,7 @@ pub(crate) enum AudioCue {
     Crash,
     NitroPickup,
     NitroStart,
+    Thunder,
     MenuMove,
     MenuConfirm,
     RunStart,
@@ -50,6 +59,7 @@ impl AudioCue {
             Self::Crash => "crash",
             Self::NitroPickup => "nitro_pickup",
             Self::NitroStart => "nitro_start",
+            Self::Thunder => "thunder",
             Self::MenuMove => "menu_move",
             Self::MenuConfirm => "menu_confirm",
             Self::RunStart => "run_start",
@@ -60,13 +70,15 @@ impl AudioCue {
     }
 
     const fn volume(self) -> f32 {
-        match self {
+        let base = match self {
             Self::Crash => 0.55,
+            Self::Thunder => 0.46,
             Self::NitroStart => 0.45,
             Self::NitroPickup | Self::RunStart => 0.38,
             Self::Shift | Self::Clank | Self::MenuConfirm | Self::Submit => 0.34,
             Self::MenuMove | Self::Key | Self::Delete => 0.25,
-        }
+        };
+        base * EFFECTS_GAIN
     }
 }
 
@@ -135,6 +147,7 @@ struct AudioAssets {
     crash: Handle<AudioSource>,
     nitro_pickup: Handle<AudioSource>,
     nitro_start: Handle<AudioSource>,
+    thunder: Handle<AudioSource>,
     menu_move: Handle<AudioSource>,
     menu_confirm: Handle<AudioSource>,
     run_start: Handle<AudioSource>,
@@ -151,6 +164,7 @@ impl AudioAssets {
             AudioCue::Crash => self.crash.clone(),
             AudioCue::NitroPickup => self.nitro_pickup.clone(),
             AudioCue::NitroStart => self.nitro_start.clone(),
+            AudioCue::Thunder => self.thunder.clone(),
             AudioCue::MenuMove => self.menu_move.clone(),
             AudioCue::MenuConfirm => self.menu_confirm.clone(),
             AudioCue::RunStart => self.run_start.clone(),
@@ -184,6 +198,7 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         crash: load("crash"),
         nitro_pickup: load("nitro_pickup"),
         nitro_start: load("nitro_start"),
+        thunder: load("thunder"),
         menu_move: load("menu_move"),
         menu_confirm: load("menu_confirm"),
         run_start: load("run_start"),
@@ -270,6 +285,7 @@ struct MixTargets {
 #[derive(Debug, Clone, Copy)]
 struct MixInput {
     active: bool,
+    music_active: bool,
     speed: f32,
     max_speed: f32,
     gear: Gear,
@@ -286,14 +302,23 @@ fn mix_targets(input: MixInput) -> MixTargets {
     let speed = (input.speed / input.max_speed.max(0.01)).clamp(0.0, 1.3);
     let gear_pitch = if input.gear == Gear::High { 0.05 } else { 0.0 };
     let pitch = (0.65 + speed * 0.72 + gear_pitch).clamp(0.65, 1.48);
+    let music = {
+        let mut levels = [0.0; 3];
+        if input.music_active {
+            levels[input.music_track.min(2)] =
+                (if input.nitro { 0.075 } else { 0.095 }) * MUSIC_GAIN;
+        }
+        levels
+    };
     if !input.active {
         return MixTargets {
+            music,
             engine_pitch: pitch,
             ..default()
         };
     }
 
-    let engine = 0.055 + 0.115 * speed.min(1.0);
+    let engine = (0.055 + 0.115 * speed.min(1.0)) * EFFECTS_GAIN;
     let (engine_low, engine_high) = match input.gear {
         Gear::Low => (engine, engine * 0.08),
         Gear::High => (engine * 0.12, engine * 1.05),
@@ -306,17 +331,17 @@ fn mix_targets(input: MixInput) -> MixTargets {
     MixTargets {
         engine_low,
         engine_high,
-        wind: (0.015 + 0.115 * speed.powf(1.45)).min(0.15),
-        rain: 0.115 * input.rain.clamp(0.0, 1.0),
-        brake: 0.13 * input.brake.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0),
-        skid: 0.14 * input.rain.clamp(0.0, 1.0) * slip * speed.min(1.0),
-        overrev: 0.105 * input.overrev.clamp(0.0, 1.0),
-        nitro: if input.nitro { 0.24 } else { 0.0 },
-        music: {
-            let mut levels = [0.0; 3];
-            levels[input.music_track.min(2)] = if input.nitro { 0.075 } else { 0.095 };
-            levels
+        wind: (0.015 + 0.115 * speed.powf(1.45)).min(0.15) * EFFECTS_GAIN,
+        rain: 0.115 * input.rain.clamp(0.0, 1.0) * EFFECTS_GAIN,
+        brake: 0.13 * input.brake.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
+        skid: 0.14 * input.rain.clamp(0.0, 1.0) * slip * speed.min(1.0) * EFFECTS_GAIN,
+        overrev: 0.105 * input.overrev.clamp(0.0, 1.0) * EFFECTS_GAIN,
+        nitro: if input.nitro {
+            0.24 * EFFECTS_GAIN
+        } else {
+            0.0
         },
+        music,
         engine_pitch: pitch,
     }
 }
@@ -332,13 +357,14 @@ fn update_mix(
     mut state: ResMut<AudioState>,
     mut layers: Query<(&AudioLayer, &mut AudioSink)>,
 ) {
-    let active = state.unlocked
-        && !state.muted
+    let audible = state.unlocked && !state.muted;
+    let active = audible
         && end.0.mode == crate::session::EndMode::Playing
         && matches!(sim.0.phase, Phase::Running)
         && !sim.0.paused;
     let target = mix_targets(MixInput {
         active,
+        music_active: audible,
         speed: sim.0.speed,
         max_speed: sim.0.high_speed_target(&tuning.0),
         gear: sim.0.gear(),
@@ -392,6 +418,56 @@ fn update_mix(
     }
 }
 
+#[derive(Default)]
+struct ThunderSchedule {
+    slot: Option<u64>,
+    emitted: u8,
+}
+
+fn thunder_strike_times(seed: u64, slot: u64) -> [Option<f32>; 2] {
+    let mixed = seed
+        .wrapping_add(slot.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        .rotate_left(23)
+        ^ 0xD1B5_4A32_D192_ED03;
+    let first = 7.0 + (mixed & 0x7ff) as f32 / 2047.0 * 8.0;
+    let second = (mixed & 0x3 == 0).then(|| 20.0 + ((mixed >> 13) & 0x7ff) as f32 / 2047.0 * 7.0);
+    [Some(first), second]
+}
+
+fn schedule_weather_cues(
+    sim: Res<Sim>,
+    end: Res<EndSession>,
+    weather: Res<view::WeatherVisuals>,
+    mut schedule: Local<ThunderSchedule>,
+    mut events: ResMut<AudioEvents>,
+) {
+    let transition = sim.0.weather();
+    if schedule.slot != Some(transition.slot) {
+        schedule.slot = Some(transition.slot);
+        schedule.emitted = 0;
+    }
+    if end.0.mode != crate::session::EndMode::Playing
+        || !matches!(sim.0.phase, Phase::Running)
+        || sim.0.paused
+        || weather.rain_visible < 0.55
+    {
+        return;
+    }
+
+    let slot_time =
+        sim.0.environment_time - transition.slot as f32 * game_core::environment::WEATHER_SLOT_SECS;
+    for (index, strike_time) in thunder_strike_times(sim.0.seed, transition.slot)
+        .into_iter()
+        .enumerate()
+    {
+        let bit = 1 << index;
+        if schedule.emitted & bit == 0 && strike_time.is_some_and(|time| slot_time >= time) {
+            events.emit(AudioCue::Thunder);
+            schedule.emitted |= bit;
+        }
+    }
+}
+
 fn play_cues(
     mut commands: Commands,
     assets: Option<Res<AudioAssets>>,
@@ -421,6 +497,7 @@ mod tests {
     fn driving() -> MixInput {
         MixInput {
             active: true,
+            music_active: true,
             speed: 12.0,
             max_speed: 24.0,
             gear: Gear::Low,
@@ -438,6 +515,7 @@ mod tests {
     fn silent_when_session_is_not_active() {
         let targets = mix_targets(MixInput {
             active: false,
+            music_active: false,
             ..driving()
         });
         assert_eq!(targets.engine_low, 0.0);
@@ -445,6 +523,23 @@ mod tests {
         assert_eq!(targets.rain, 0.0);
         assert_eq!(targets.brake, 0.0);
         assert_eq!(targets.music, [0.0; 3]);
+    }
+
+    #[test]
+    fn soundtrack_keeps_playing_outside_the_driving_session() {
+        let targets = mix_targets(MixInput {
+            active: false,
+            music_active: true,
+            music_track: 1,
+            ..driving()
+        });
+        assert_eq!(targets.engine_low, 0.0);
+        assert_eq!(targets.wind, 0.0);
+        assert_eq!(
+            targets.music.iter().filter(|level| **level > 0.0).count(),
+            1
+        );
+        assert!(targets.music[1] > 0.09);
     }
 
     #[test]
@@ -457,6 +552,27 @@ mod tests {
         assert!(low.engine_low > low.engine_high * 5.0);
         assert!(high.engine_high > high.engine_low * 5.0);
         assert!(high.engine_pitch > low.engine_pitch);
+    }
+
+    #[test]
+    fn mix_balance_softens_effects_and_lifts_music() {
+        let targets = mix_targets(driving());
+        let raw_engine = 0.055 + 0.115 * 0.5;
+        assert!(targets.engine_low < raw_engine);
+        assert!(targets.music[0] > 0.095);
+        assert!(AudioCue::Crash.volume() < 0.55);
+    }
+
+    #[test]
+    fn thunder_schedule_is_deterministic_sparse_and_inside_each_weather_slot() {
+        for seed in 0..16 {
+            for slot in 0..16 {
+                let strikes = thunder_strike_times(seed, slot);
+                assert_eq!(strikes, thunder_strike_times(seed, slot));
+                assert!(strikes[0].is_some_and(|time| (7.0..=15.0).contains(&time)));
+                assert!(strikes[1].is_none_or(|time| (20.0..=27.0).contains(&time)));
+            }
+        }
     }
 
     #[test]
@@ -501,12 +617,17 @@ mod tests {
     #[test]
     fn overrev_layer_tracks_authoritative_intensity() {
         let quiet = mix_targets(driving());
+        let early_warning = mix_targets(MixInput {
+            overrev: 0.4,
+            ..driving()
+        });
         let warning = mix_targets(MixInput {
             overrev: 0.8,
             ..driving()
         });
         assert_eq!(quiet.overrev, 0.0);
-        assert!(warning.overrev > 0.08);
+        assert!(early_warning.overrev > 0.0);
+        assert!((warning.overrev - early_warning.overrev * 2.0).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -48,6 +48,7 @@ const NITRO_Y: f32 = 216.0;
 const RAIN_POOL: usize = 84;
 const SPEED_LINE_POOL: usize = 28;
 const VISIBILITY_BANDS: usize = 8;
+const HEADLIGHT_LAYERS: usize = 2;
 
 #[derive(Component)]
 struct SkyBand;
@@ -84,7 +85,10 @@ struct NightShade;
 struct RoadFogBand(usize);
 
 #[derive(Component)]
-struct HeadlightBand(usize);
+struct HeadlightBand {
+    row: usize,
+    layer: usize,
+}
 
 #[derive(Component)]
 struct NitroPickupPart(u8);
@@ -337,6 +341,35 @@ fn format_time(secs: f32) -> String {
     let m = (secs / 60.0) as u32;
     let s = secs - m as f32 * 60.0;
     format!("{m}:{s:05.2}")
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CountdownStyle {
+    color: Color,
+    scale: f32,
+}
+
+fn countdown_style(remaining: f32, elapsed: f32, running: bool) -> CountdownStyle {
+    const WARNING_SECS: f32 = 10.0;
+    if !running || remaining > WARNING_SECS {
+        return CountdownStyle {
+            color: Color::srgb(0.99, 0.95, 0.75),
+            scale: 1.0,
+        };
+    }
+
+    let urgency = 1.0 - (remaining / WARNING_SECS).clamp(0.0, 1.0);
+    let frequency = 3.0 + urgency * 4.0;
+    let pulse = 0.5 + 0.5 * (elapsed * std::f32::consts::TAU * frequency).sin();
+    CountdownStyle {
+        color: Color::srgba(
+            1.0,
+            0.18 + 0.54 * (1.0 - urgency) + pulse * 0.18,
+            0.08 + pulse * 0.10,
+            0.24 + pulse * 0.76,
+        ),
+        scale: 1.0 + pulse * (0.10 + urgency * 0.12),
+    }
 }
 
 fn sky_colors() -> [(Color, f32); 6] {
@@ -682,12 +715,15 @@ pub fn setup(mut commands: Commands) {
             Transform::from_xyz(0.0, y, 0.14),
             RoadFogBand(index),
         ));
-        let (y, size, _) = headlight_band_geometry(index);
-        commands.spawn((
-            Sprite::from_color(Color::srgba(1.0, 0.88, 0.58, 0.0), size),
-            Transform::from_xyz(0.0, y, 0.20),
-            HeadlightBand(index),
-        ));
+    }
+    for row in 0..ROWS {
+        for layer in 0..HEADLIGHT_LAYERS {
+            commands.spawn((
+                Sprite::from_color(Color::srgba(1.0, 0.88, 0.58, 0.0), Vec2::ONE),
+                Transform::from_xyz(0.0, CAR_Y, 0.19 + layer as f32 * 0.01),
+                HeadlightBand { row, layer },
+            ));
+        }
     }
     // sea + sand at the horizon
     commands.spawn((
@@ -1805,6 +1841,23 @@ fn sync_hud(
     }
 }
 
+fn sync_countdown_style(
+    sim: Res<Sim>,
+    time: Res<Time>,
+    mut timer: Query<(&mut TextColor, &mut Transform), With<SessionText>>,
+) {
+    let Ok((mut color, mut transform)) = timer.single_mut() else {
+        return;
+    };
+    let style = countdown_style(
+        sim.0.session_remaining,
+        time.elapsed_secs(),
+        matches!(sim.0.phase, Phase::Running) && !sim.0.paused,
+    );
+    color.0 = style.color;
+    transform.scale = Vec3::splat(style.scale);
+}
+
 fn sync_end_overlay(
     sim: Res<Sim>,
     end: Res<crate::EndSession>,
@@ -1903,6 +1956,19 @@ fn scale_color(c: Color, k: f32) -> Color {
     Color::LinearRgba(LinearRgba::rgb(l.red * k, l.green * k, l.blue * k))
 }
 
+fn asphalt_palette(brightness: f32, rain: f32) -> (Color, Color, Color) {
+    let wet = rain.clamp(0.0, 1.0);
+    let sheen = wet * 0.32;
+    let asphalt_a = Color::srgb(0.34, 0.35, 0.40).mix(&Color::srgb(0.38, 0.40, 0.47), sheen);
+    let asphalt_b = Color::srgb(0.30, 0.31, 0.36).mix(&Color::srgb(0.28, 0.30, 0.37), sheen);
+    let reflected_markings = brightness * (1.0 + wet * 0.08);
+    (
+        scale_color(asphalt_a, brightness),
+        scale_color(asphalt_b, brightness),
+        scale_color(Color::srgb(0.95, 0.95, 0.90), reflected_markings),
+    )
+}
+
 fn blend4(cols: [Color; 4], w: [f32; 4]) -> Color {
     let mut r = 0.0;
     let mut g = 0.0;
@@ -1961,12 +2027,33 @@ fn fog_band_geometry(index: usize) -> (f32, Vec2, f32) {
     (y, Vec2::new(960.0, band_h + 1.0), 0.28 + t * 0.72)
 }
 
-fn headlight_band_geometry(index: usize) -> (f32, Vec2, f32) {
-    let t = index as f32 / (VISIBILITY_BANDS - 1) as f32;
-    let band_h = 300.0 / VISIBILITY_BANDS as f32;
-    let y = -205.0 + band_h * (index as f32 + 0.5);
-    let width = 82.0 + (390.0 - 82.0) * t;
-    (y, Vec2::new(width, band_h + 1.5), 0.55 + t * 0.45)
+fn projected_headlight_geometry(
+    row: usize,
+    layer: usize,
+    road_center: f32,
+    y0: f32,
+    y1: f32,
+    scale: f32,
+) -> (Vec2, Vec2, f32) {
+    let row_f = row as f32;
+    let height = (y1 - y0).max(1.5);
+    let road_alignment = (row_f / 8.0).clamp(0.0, 1.0);
+    let flare = (row_f / 8.0).clamp(0.0, 1.0);
+    let beam_fraction = 0.14 + flare * 0.58;
+    let outer_width = HALF_ROAD_PX * 2.0 * scale * beam_fraction;
+    let layer_width = if layer == 0 {
+        outer_width
+    } else {
+        outer_width * 0.62
+    };
+    let near_fade = (row_f / 3.0).clamp(0.0, 1.0);
+    let far_fade = ((27.0 - row_f) / 10.0).clamp(0.0, 1.0);
+    let layer_strength = if layer == 0 { 0.28 } else { 0.72 };
+    (
+        Vec2::new(road_center * road_alignment, y0 + height * 0.5),
+        Vec2::new(layer_width.max(2.0), height + 1.5),
+        near_fade * far_fade * layer_strength,
+    )
 }
 
 fn traffic_visibility(scale: f32, visibility: RoadVisibilityVisuals) -> (f32, f32) {
@@ -2098,14 +2185,12 @@ fn sync_environment(
     );
     colors.grass_a = scale_color(g1, bright);
     colors.grass_b = scale_color(g2, bright);
-    colors.asphalt_a = scale_color(Color::srgb(0.34, 0.35, 0.40), bright);
-    colors.asphalt_b = scale_color(Color::srgb(0.30, 0.31, 0.36), bright);
+    (colors.asphalt_a, colors.asphalt_b, colors.dash) = asphalt_palette(bright, rain_visible);
     // rumble goes snow-pale in deep winter
     let rum_a = Color::srgb(0.85, 0.15, 0.12).mix(&Color::srgb(0.88, 0.9, 0.95), winter * 0.6);
     let rum_b = Color::srgb(0.95, 0.95, 0.92).mix(&Color::srgb(0.7, 0.75, 0.85), winter * 0.5);
     colors.rumble_red = scale_color(rum_a, bright);
     colors.rumble_white = scale_color(rum_b, bright);
-    colors.dash = scale_color(Color::srgb(0.95, 0.95, 0.90), bright);
 
     // sky: day bands blended toward a night palette; winter grays, autumn warms
     let day_bands = sky_colors();
@@ -2213,10 +2298,6 @@ fn sync_road_visibility(
         ),
     >,
     mut fog: Query<(&RoadFogBand, &mut Sprite), (Without<NightShade>, Without<HeadlightBand>)>,
-    mut headlights: Query<
-        (&HeadlightBand, &mut Sprite),
-        (Without<NightShade>, Without<RoadFogBand>),
-    >,
 ) {
     let daylight = game_core::environment::daylight(sim.0.environment_time);
     let seasons = game_core::environment::season_weights(sim.0.environment_time);
@@ -2235,9 +2316,37 @@ fn sync_road_visibility(
             visuals.fog_alpha * weight,
         );
     }
-    for (band, mut sprite) in &mut headlights {
-        let (_, _, weight) = headlight_band_geometry(band.0);
-        sprite.color = Color::srgba(1.0, 0.88, 0.58, visuals.headlights * weight * 0.105);
+}
+
+fn sync_projected_headlights(
+    visuals: Res<RoadVisibilityVisuals>,
+    proj: Res<Proj>,
+    mut headlights: Query<(&HeadlightBand, &mut Transform, &mut Sprite)>,
+) {
+    for (band, mut transform, mut sprite) in &mut headlights {
+        let y0 = proj.rows_y[band.row];
+        let y1 = if band.row + 1 < ROWS {
+            proj.rows_y[band.row + 1]
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let (center, size, strength) = projected_headlight_geometry(
+            band.row,
+            band.layer,
+            proj.rows_x[band.row],
+            y0,
+            y1,
+            proj.scales[band.row],
+        );
+        transform.translation.x = center.x;
+        transform.translation.y = center.y;
+        sprite.custom_size = Some(size);
+        let (red, green, blue) = if band.layer == 0 {
+            (1.0, 0.78, 0.42)
+        } else {
+            (1.0, 0.91, 0.68)
+        };
+        sprite.color = Color::srgba(red, green, blue, visuals.headlights * strength * 0.055);
     }
 }
 
@@ -2500,12 +2609,14 @@ pub fn add_view_systems(app: &mut App) {
             ambient::sync,
             sync_palms,
             sync_hazards,
+            sync_projected_headlights,
             sync_nitro_pickup,
             sync_nitro_exhaust,
             sync_nitro_speed_lines,
             sync_flash,
             sync_drum_overlays,
             sync_hud,
+            sync_countdown_style,
             sync_instruments,
             sync_end_overlay,
             sync_difficulty_overlay,
@@ -2538,6 +2649,35 @@ mod tests {
         assert!(elevated_row_y(scale, 0.8) > flat);
         assert!(elevated_row_y(scale, -0.8) < flat);
         assert!((elevated_row_y(scale, 0.8) - flat) < 25.0);
+    }
+
+    #[test]
+    fn final_countdown_escalates_while_the_regular_timer_stays_steady() {
+        let normal = countdown_style(10.01, 0.0, true);
+        let paused = countdown_style(2.0, 0.1, false);
+        assert_eq!(normal.scale, 1.0);
+        assert_eq!(paused.scale, 1.0);
+
+        let early_peak = countdown_style(9.0, 0.25 / 3.4, true);
+        let late_peak = countdown_style(1.0, 0.25 / 6.6, true);
+        let late_dim = countdown_style(1.0, 0.75 / 6.6, true);
+        assert!(early_peak.scale > 1.0);
+        assert!(late_peak.scale > early_peak.scale);
+        assert!(late_peak.color.to_srgba().alpha > late_dim.color.to_srgba().alpha);
+    }
+
+    #[test]
+    fn rain_adds_a_subtle_cool_sheen_to_the_road() {
+        let (dry_a, dry_b, dry_dash) = asphalt_palette(1.0, 0.0);
+        let (wet_a, wet_b, wet_dash) = asphalt_palette(1.0, 1.0);
+        let dry_a = dry_a.to_linear();
+        let dry_b = dry_b.to_linear();
+        let wet_a = wet_a.to_linear();
+        let wet_b = wet_b.to_linear();
+
+        assert!(wet_a.blue - wet_b.blue > dry_a.blue - dry_b.blue);
+        assert!(wet_a.blue / wet_a.red > dry_a.blue / dry_a.red);
+        assert!(wet_dash.to_linear().red > dry_dash.to_linear().red);
     }
 
     #[test]
@@ -2659,11 +2799,22 @@ mod tests {
     }
 
     #[test]
-    fn headlight_cone_starts_at_the_car_and_widens_ahead() {
-        let (_, near, near_weight) = headlight_band_geometry(0);
-        let (_, far, far_weight) = headlight_band_geometry(VISIBILITY_BANDS - 1);
-        assert!(near.x < far.x);
-        assert!(near_weight < far_weight);
+    fn headlights_open_near_the_car_then_recede_with_perspective() {
+        let (near_center, near, near_weight) =
+            projected_headlight_geometry(1, 0, 80.0, -200.0, -180.0, row_scale(1));
+        let (_, middle, middle_weight) =
+            projected_headlight_geometry(7, 0, 80.0, -80.0, -55.0, row_scale(7));
+        let (far_center, far, far_weight) =
+            projected_headlight_geometry(24, 0, 80.0, 90.0, 100.0, row_scale(24));
+        let (_, inner, _) = projected_headlight_geometry(7, 1, 80.0, -80.0, -55.0, row_scale(7));
+
+        assert!(middle.x > near.x && middle.x > far.x);
+        assert!(inner.x < middle.x);
+        assert!(middle_weight > near_weight && middle_weight > far_weight);
+        assert!(
+            near_center.x < far_center.x,
+            "beam eases onto the road center"
+        );
     }
 
     #[test]

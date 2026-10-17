@@ -96,6 +96,19 @@ sox -R "$work_dir/crash_b.wav" "$work_dir/crash_bf.wav" highpass 90 lowpass 3600
   fade t 0.003 0.54 0.41
 mix_to_ogg "$output_dir/crash.ogg" "$work_dir/crash_a.wav" "$work_dir/crash_bf.wav"
 
+# Weather punctuation: a restrained chip-noise crack followed by a low PSG
+# rumble. Runtime schedules this sparsely inside rain slots.
+noise "$work_dir/thunder_rumble.wav" 1.8 brown -5
+sox -R "$work_dir/thunder_rumble.wav" "$work_dir/thunder_rumble_f.wav" \
+  highpass 45 lowpass 760 tremolo 7 32 fade t 0.01 1.8 0.65
+tone "$work_dir/thunder_tone.wav" 1.55 square 78-34 -15
+sox -R "$work_dir/thunder_tone.wav" "$work_dir/thunder_tone_p.wav" pad 0.08 0.17
+noise "$work_dir/thunder_crack.wav" 0.16 white -6
+sox -R "$work_dir/thunder_crack.wav" "$work_dir/thunder_crack_f.wav" \
+  highpass 360 lowpass 4600 fade t 0 0.16 0.11 pad 0 1.64
+mix_to_ogg "$output_dir/thunder.ogg" "$work_dir/thunder_rumble_f.wav" \
+  "$work_dir/thunder_tone_p.wav" "$work_dir/thunder_crack_f.wav"
+
 # Nitro rewards and ignition.
 tone "$work_dir/pickup_a.wav" 0.11 square 440 -13
 tone "$work_dir/pickup_b.wav" 0.11 square 660 -12
