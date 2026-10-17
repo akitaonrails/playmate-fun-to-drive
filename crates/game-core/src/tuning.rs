@@ -9,6 +9,10 @@ use crate::road::TrafficMotion;
 /// Lateral units: 1.0 == one half road width. Longitudinal: meters/seconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tuning {
+    /// Overall drivetrain/scroll scale per difficulty.
+    pub speed_easy_multiplier: f32,
+    pub speed_medium_multiplier: f32,
+    pub speed_hard_multiplier: f32,
     /// Drum scroll speeds (m/s) per gear.
     pub scroll_speed_low: f32,
     pub scroll_speed_high: f32,
@@ -104,6 +108,9 @@ pub struct Tuning {
 impl Default for Tuning {
     fn default() -> Self {
         Self {
+            speed_easy_multiplier: 0.80,
+            speed_medium_multiplier: 0.90,
+            speed_hard_multiplier: 1.00,
             scroll_speed_low: 12.0,
             scroll_speed_high: 24.0,
             shift_up_min_speed: 10.0,
@@ -179,6 +186,13 @@ impl Tuning {
     /// Sanity bounds — tuned values must stay playable; tested so a bad edit
     /// fails `make check` instead of shipping a regression.
     pub fn validate(&self) -> Result<(), &'static str> {
+        if !(0.5..=1.0).contains(&self.speed_easy_multiplier)
+            || !(self.speed_easy_multiplier..=1.0).contains(&self.speed_medium_multiplier)
+            || !(self.speed_medium_multiplier..=1.0).contains(&self.speed_hard_multiplier)
+            || self.speed_hard_multiplier != 1.0
+        {
+            return Err("difficulty speed multipliers must increase from Easy to Hard");
+        }
         if !(4.0..=40.0).contains(&self.scroll_speed_low) {
             return Err("scroll_speed_low out of [4, 40]");
         }
@@ -374,6 +388,27 @@ mod tests {
         let mut t = Tuning::default();
         t.scroll_speed_high = t.scroll_speed_low;
         assert!(t.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_incoherent_difficulty_speed_multipliers() {
+        for invalid in [
+            Tuning {
+                speed_easy_multiplier: 0.95,
+                speed_medium_multiplier: 0.90,
+                ..Tuning::default()
+            },
+            Tuning {
+                speed_hard_multiplier: 0.95,
+                ..Tuning::default()
+            },
+            Tuning {
+                speed_easy_multiplier: f32::NAN,
+                ..Tuning::default()
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
     }
 
     #[test]

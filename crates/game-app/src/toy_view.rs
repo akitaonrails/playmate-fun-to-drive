@@ -635,7 +635,7 @@ pub fn apply_body_dynamics(
             });
         }
     }
-    let speed_norm = (sim.0.speed / tuning.0.scroll_speed_high).clamp(0.0, 1.0);
+    let speed_norm = (sim.0.speed / sim.0.high_speed_target(&tuning.0)).clamp(0.0, 1.0);
     rig.0.step(
         frame.state.steer,
         speed_norm,

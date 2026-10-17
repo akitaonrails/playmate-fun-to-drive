@@ -340,7 +340,7 @@ fn update_mix(
     let target = mix_targets(MixInput {
         active,
         speed: sim.0.speed,
-        max_speed: tuning.0.scroll_speed_high,
+        max_speed: sim.0.high_speed_target(&tuning.0),
         gear: sim.0.gear(),
         overrev: sim.0.low_overrev(&tuning.0),
         rain: weather.rain,

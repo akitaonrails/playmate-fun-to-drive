@@ -9,6 +9,8 @@ full-body jolt (with gamepad rumble) when you crash.
 
 Choose a two-, six-, or ten-minute run. Drive cleanly and quickly to complete as many
 day/night cycles as possible, pass traffic, collect nitro, and avoid bumps.
+Easy runs at 80% of Hard's road speed, Medium at 90%, and Hard at full speed;
+gear thresholds scale with the selected difficulty.
 At time-up, enter three initials for the local top-10 leaderboard for that
 difficulty (top five shown on the toy screen). Easy, Medium, and Hard keep
 separate local top-10 boards.

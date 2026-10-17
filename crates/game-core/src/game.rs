@@ -297,6 +297,34 @@ impl Game {
         self.difficulty
     }
 
+    pub fn speed_multiplier(&self, tuning: &Tuning) -> f32 {
+        match self.difficulty {
+            Difficulty::Easy => tuning.speed_easy_multiplier,
+            Difficulty::Medium => tuning.speed_medium_multiplier,
+            Difficulty::Hard => tuning.speed_hard_multiplier,
+        }
+    }
+
+    pub fn low_speed_target(&self, tuning: &Tuning) -> f32 {
+        tuning.scroll_speed_low * self.speed_multiplier(tuning)
+    }
+
+    pub fn high_speed_target(&self, tuning: &Tuning) -> f32 {
+        tuning.scroll_speed_high * self.speed_multiplier(tuning)
+    }
+
+    pub fn shift_up_speed(&self, tuning: &Tuning) -> f32 {
+        tuning.shift_up_min_speed * self.speed_multiplier(tuning)
+    }
+
+    fn recovery_bog_speed(&self, tuning: &Tuning) -> f32 {
+        tuning.recovery_bog_speed * self.speed_multiplier(tuning)
+    }
+
+    fn downshift_safe_speed(&self, tuning: &Tuning) -> f32 {
+        tuning.downshift_safe_speed * self.speed_multiplier(tuning)
+    }
+
     pub fn traffic_motion(&self, tuning: &Tuning) -> TrafficMotion {
         match self.difficulty {
             Difficulty::Easy => tuning.traffic_easy,
@@ -320,8 +348,10 @@ impl Game {
         if self.gear != Gear::Low {
             return 0.0;
         }
-        ((self.speed - t.low_overrev_start) / (t.scroll_speed_low - t.low_overrev_start))
-            .clamp(0.0, 1.0)
+        let multiplier = self.speed_multiplier(t);
+        let start = t.low_overrev_start * multiplier;
+        let limit = t.scroll_speed_low * multiplier;
+        ((self.speed - start) / (limit - start)).clamp(0.0, 1.0)
     }
 
     pub fn loop_pos(&self) -> f32 {
@@ -461,7 +491,7 @@ impl Game {
     }
 
     fn update_recovery_readiness(&mut self, t: &Tuning) {
-        if self.recovery == Recovery::BuildSpeed && self.speed >= t.shift_up_min_speed {
+        if self.recovery == Recovery::BuildSpeed && self.speed >= self.shift_up_speed(t) {
             self.recovery = Recovery::ReadyForHigh;
         }
     }
@@ -474,7 +504,7 @@ impl Game {
             Gear::High => {
                 let recovery_allows =
                     matches!(self.recovery, Recovery::Normal | Recovery::ReadyForHigh);
-                if self.speed < t.shift_up_min_speed || !recovery_allows {
+                if self.speed < self.shift_up_speed(t) || !recovery_allows {
                     ev.high_rejected = true;
                     return;
                 }
@@ -488,7 +518,7 @@ impl Game {
                 });
             }
             Gear::Low => {
-                let severity = if self.speed <= t.downshift_safe_speed {
+                let severity = if self.speed <= self.downshift_safe_speed(t) {
                     self.speed *= t.downshift_safe_retention;
                     DownshiftSeverity::Normal
                 } else {
@@ -603,10 +633,10 @@ impl Game {
         off_road_bump: &mut bool,
     ) {
         let mut target = match self.recovery {
-            Recovery::NeedLow => t.recovery_bog_speed,
+            Recovery::NeedLow => self.recovery_bog_speed(t),
             _ => match self.gear {
-                Gear::Low => t.scroll_speed_low,
-                Gear::High => t.scroll_speed_high,
+                Gear::Low => self.low_speed_target(t),
+                Gear::High => self.high_speed_target(t),
             },
         };
         if bump_active && self.recovery != Recovery::NeedLow {
@@ -630,7 +660,7 @@ impl Game {
         if brake > 0.0
             && self.gear == Gear::High
             && self.recovery == Recovery::Normal
-            && self.speed < t.shift_up_min_speed
+            && self.speed < self.shift_up_speed(t)
         {
             self.recovery = Recovery::NeedLow;
         }
@@ -862,6 +892,37 @@ mod tests {
         run_seconds(&mut g2, 1.0, &idle(), &t2);
         assert!(v_high_after_1s > g2.speed, "HIGH must out-run LOW");
         assert!(v_high_after_1s <= t.scroll_speed_high * 1.001);
+    }
+
+    #[test]
+    fn difficulty_scales_speed_and_gear_thresholds_together() {
+        let t = Tuning::default();
+        let mut speeds = [0.0; 3];
+        let mut distances = [0.0; 3];
+        for (index, difficulty) in Difficulty::ALL.into_iter().enumerate() {
+            let mut game = Game::with_road(2, RoadLoop::straight(10_000.0, vec![]), difficulty, &t);
+            game.start_run(&t);
+            run_seconds(&mut game, 5.0, &idle(), &t);
+            speeds[index] = game.speed;
+            distances[index] = game.distance;
+
+            game.speed = game.shift_up_speed(&t);
+            let event = game.step(
+                &InputState {
+                    gear_request: Some(Gear::High),
+                    ..idle()
+                },
+                0.0,
+                &t,
+            );
+            assert!(!event.high_rejected);
+            assert_eq!(game.gear(), Gear::High);
+        }
+
+        assert!((speeds[0] / speeds[2] - 0.8).abs() < 0.001);
+        assert!((speeds[1] / speeds[2] - 0.9).abs() < 0.001);
+        assert!((distances[0] / distances[2] - 0.8).abs() < 0.001);
+        assert!((distances[1] / distances[2] - 0.9).abs() < 0.001);
     }
 
     #[test]

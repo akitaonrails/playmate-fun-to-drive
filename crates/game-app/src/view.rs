@@ -2212,7 +2212,7 @@ fn sync_instruments(
     }
     let hint_charging = matches!(sim.0.phase, Phase::Running)
         && sim.0.recovery() == game_core::Recovery::Normal
-        && low_shift_hint_active(sim.0.gear(), sim.0.speed, tuning.0.shift_up_min_speed);
+        && low_shift_hint_active(sim.0.gear(), sim.0.speed, sim.0.shift_up_speed(&tuning.0));
     if hint_charging {
         visuals.low_shift_hint_secs += time.delta_secs();
     } else {
@@ -2235,7 +2235,7 @@ fn sync_instruments(
     let (recovery_name, base_cue) = match sim.0.recovery() {
         game_core::Recovery::Normal => (
             "normal",
-            normal_recovery_cue(sim.0.gear(), sim.0.speed, tuning.0.shift_up_min_speed),
+            normal_recovery_cue(sim.0.gear(), sim.0.speed, sim.0.shift_up_speed(&tuning.0)),
         ),
         game_core::Recovery::NeedLow => ("need_low", "SELECT LOW"),
         game_core::Recovery::BuildSpeed => ("build_speed", "BUILD SPEED"),
