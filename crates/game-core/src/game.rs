@@ -113,14 +113,20 @@ impl SessionResult {
     }
 }
 
-/// Cycles dominate the ranking, passes distinguish similarly paced runs, and
-/// one collision cancels three clean passes. Wide signed arithmetic prevents
-/// either overflow or unsigned penalty underflow.
+pub const DAY_CYCLE_SCORE: u64 = 10_000;
+pub const CLEAN_PASS_SCORE: u64 = 100;
+pub const BUMP_PENALTY: u64 = 200;
+
+/// Cycles reward sustained pace, passes reward controlled aggression, and a
+/// collision creates a three-pass swing: the missed +100 pass plus a -200
+/// penalty. The physical speed loss remains an additional cost. Wide signed
+/// arithmetic prevents either overflow or unsigned penalty underflow.
 pub fn score_for(day_cycles: u64, cars_passed: u64, cars_bumped: u64) -> u64 {
     let positive = i128::from(day_cycles)
-        .saturating_mul(10_000)
-        .saturating_add(i128::from(cars_passed).saturating_mul(100));
-    let score = positive.saturating_sub(i128::from(cars_bumped).saturating_mul(300));
+        .saturating_mul(i128::from(DAY_CYCLE_SCORE))
+        .saturating_add(i128::from(cars_passed).saturating_mul(i128::from(CLEAN_PASS_SCORE)));
+    let score =
+        positive.saturating_sub(i128::from(cars_bumped).saturating_mul(i128::from(BUMP_PENALTY)));
     score.clamp(0, i128::from(u64::MAX)) as u64
 }
 
@@ -1692,7 +1698,12 @@ mod tests {
     #[test]
     fn score_clamps_and_has_expected_ordering_effects() {
         assert_eq!(score_for(0, 0, 1), 0);
-        assert_eq!(score_for(1, 3, 1), 10_000);
+        assert_eq!(score_for(1, 3, 1), 10_100);
+        assert_eq!(
+            score_for(1, 1, 0) - score_for(1, 0, 1),
+            CLEAN_PASS_SCORE + BUMP_PENALTY,
+            "a collision should swing three clean-pass values, before speed loss"
+        );
         assert!(score_for(2, 0, 0) > score_for(1, 99, 0));
         assert_eq!(score_for(u64::MAX, u64::MAX, 0), u64::MAX);
         assert_eq!(score_for(0, 0, u64::MAX), 0);
@@ -1874,6 +1885,48 @@ mod tests {
         run_seconds(&mut g, 1.0, &idle(), &t);
         assert!(g.speed > braked, "releasing LT must resume acceleration");
         assert_eq!(g.recovery(), Recovery::Normal);
+    }
+
+    #[test]
+    fn braking_trades_distance_for_a_wider_avoidance_window() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(
+            500.0,
+            vec![Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.0,
+                s: 18.0,
+            }],
+        );
+        let run = |steer: f32, brake: f32| {
+            let mut game = Game::with_road(70, road.clone(), Difficulty::Hard, &t);
+            game.start_run(&t);
+            game.gear = Gear::High;
+            game.speed = t.scroll_speed_high;
+            run_seconds(
+                &mut game,
+                2.0,
+                &InputState {
+                    steer,
+                    brake,
+                    ..idle()
+                },
+                &t,
+            );
+            game
+        };
+
+        let cautious = run(0.22, 0.55);
+        let precise = run(0.32, 0.0);
+        let failed_risk = run(0.22, 0.0);
+        assert_eq!((cautious.cars_passed, cautious.cars_bumped), (1, 0));
+        assert_eq!((precise.cars_passed, precise.cars_bumped), (1, 0));
+        assert_eq!((failed_risk.cars_passed, failed_risk.cars_bumped), (0, 1));
+        assert!(
+            precise.distance > cautious.distance * 1.15,
+            "a clean no-brake dodge should preserve meaningfully more race distance"
+        );
+        assert!(failed_risk.speed < cautious.speed);
     }
 
     #[test]

@@ -13,6 +13,8 @@ enum AmbientKind {
     Birds,
     ShootingStar,
     Hurricane,
+    HurricaneLeaves,
+    SakuraPetals,
     Ufo,
 }
 
@@ -27,12 +29,22 @@ pub(super) fn spawn(commands: &mut Commands) {
         (AmbientKind::Birds, 10),
         (AmbientKind::ShootingStar, 2),
         (AmbientKind::Hurricane, 6),
+        (AmbientKind::HurricaneLeaves, 14),
+        (AmbientKind::SakuraPetals, 18),
         (AmbientKind::Ufo, 3),
     ] {
         for index in 0..count {
+            let depth = if matches!(
+                kind,
+                AmbientKind::HurricaneLeaves | AmbientKind::SakuraPetals
+            ) {
+                0.62
+            } else {
+                -4.62
+            };
             commands.spawn((
                 Sprite::from_color(Color::WHITE, Vec2::ONE),
-                Transform::from_xyz(0.0, 0.0, -4.62),
+                Transform::from_xyz(0.0, 0.0, depth),
                 Visibility::Hidden,
                 AmbientPart { kind, index },
             ));
@@ -50,11 +62,12 @@ fn kind_for_slot(slot: u64, salt: u64) -> Option<AmbientKind> {
         1 => Some(AmbientKind::Hurricane),
         2..=4 => Some(AmbientKind::ShootingStar),
         5..=9 => Some(AmbientKind::Birds),
+        10..=13 => Some(AmbientKind::SakuraPetals),
         _ => None,
     }
 }
 
-fn event_at(t: f32, daylight: f32, salt: u64) -> Option<(AmbientKind, f32)> {
+fn event_at(t: f32, daylight: f32, spring: f32, salt: u64) -> Option<(AmbientKind, f32)> {
     const SLOT_SECS: f32 = 20.0;
     const EVENT_SECS: f32 = 5.0;
     let slot = (t.max(0.0) / SLOT_SECS).floor() as u64;
@@ -67,8 +80,13 @@ fn event_at(t: f32, daylight: f32, salt: u64) -> Option<(AmbientKind, f32)> {
         AmbientKind::Birds if daylight > 0.62 => Some((kind, progress)),
         AmbientKind::ShootingStar | AmbientKind::Ufo if daylight < 0.30 => Some((kind, progress)),
         AmbientKind::Hurricane => Some((kind, progress)),
+        AmbientKind::SakuraPetals if daylight > 0.45 && spring > 0.55 => Some((kind, progress)),
         _ => None,
     }
+}
+
+fn participates(part: AmbientKind, event: AmbientKind) -> bool {
+    part == event || (part == AmbientKind::HurricaneLeaves && event == AmbientKind::Hurricane)
 }
 
 pub(super) fn sync(
@@ -77,6 +95,7 @@ pub(super) fn sync(
     mut parts: Query<(&AmbientPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
     let daylight = game_core::environment::daylight(sim.0.environment_time);
+    let seasons = game_core::environment::season_weights(sim.0.environment_time);
     let salt = sim
         .0
         .road
@@ -84,16 +103,29 @@ pub(super) fn sync(
         .first()
         .map_or(0, |hazard| u64::from(hazard.s.to_bits()));
     let event = matches!(sim.0.phase, Phase::Running)
-        .then(|| event_at(sim.0.environment_time, daylight, salt))
+        .then(|| event_at(sim.0.environment_time, daylight, seasons[0], salt))
         .flatten();
 
     for (part, mut tf, mut sprite, mut visibility) in &mut parts {
-        let Some((kind, progress)) = event.filter(|(kind, _)| *kind == part.kind) else {
+        let Some((kind, progress)) = event.filter(|(kind, _)| participates(part.kind, *kind))
+        else {
             *visibility = Visibility::Hidden;
             continue;
         };
         *visibility = Visibility::Visible;
         let fade = (progress * 8.0).min(1.0) * ((1.0 - progress) * 8.0).min(1.0);
+        if part.kind == AmbientKind::HurricaneLeaves {
+            animate_hurricane_leaves(
+                part.index,
+                progress,
+                fade,
+                &time,
+                seasons,
+                &mut tf,
+                &mut sprite,
+            );
+            continue;
+        }
         match kind {
             AmbientKind::Birds => {
                 animate_birds(part.index, progress, fade, &time, &mut tf, &mut sprite)
@@ -103,6 +135,10 @@ pub(super) fn sync(
             }
             AmbientKind::Hurricane => {
                 animate_hurricane(part.index, progress, fade, &time, &mut tf, &mut sprite)
+            }
+            AmbientKind::HurricaneLeaves => unreachable!("debris accompanies the hurricane event"),
+            AmbientKind::SakuraPetals => {
+                animate_sakura_petals(part.index, progress, fade, &time, &mut tf, &mut sprite)
             }
             AmbientKind::Ufo => {
                 animate_ufo(part.index, progress, fade, &time, &mut tf, &mut sprite)
@@ -166,6 +202,54 @@ fn animate_hurricane(
     sprite.color = Color::srgba(0.22, 0.27, 0.34, fade * (0.36 + i * 0.035));
 }
 
+fn animate_sakura_petals(
+    index: usize,
+    progress: f32,
+    fade: f32,
+    time: &Time,
+    tf: &mut Transform,
+    sprite: &mut Sprite,
+) {
+    let phase = index as f32 * 1.73;
+    tf.translation.x = -540.0 + 1080.0 * progress + (index % 6) as f32 * 18.0;
+    tf.translation.y = 280.0 - progress * 170.0
+        + (index * 47 % 125) as f32
+        + (time.elapsed_secs() * 5.0 + phase).sin() * 18.0;
+    tf.rotation = Quat::from_rotation_z(time.elapsed_secs() * 3.8 + phase);
+    sprite.custom_size = Some(Vec2::new(7.0 + (index % 3) as f32 * 2.0, 3.0));
+    sprite.color = if index.is_multiple_of(3) {
+        Color::srgba(1.0, 0.76, 0.86, fade * 0.74)
+    } else {
+        Color::srgba(1.0, 0.48, 0.68, fade * 0.68)
+    };
+}
+
+#[allow(clippy::too_many_arguments)]
+fn animate_hurricane_leaves(
+    index: usize,
+    progress: f32,
+    fade: f32,
+    time: &Time,
+    seasons: [f32; 4],
+    tf: &mut Transform,
+    sprite: &mut Sprite,
+) {
+    let phase = index as f32 * 2.17;
+    let swirl = (time.elapsed_secs() * 7.0 + phase).sin();
+    tf.translation.x = -560.0 + 1120.0 * progress + (index % 5) as f32 * 24.0;
+    tf.translation.y = 70.0 + (index * 53 % 235) as f32 + swirl * (28.0 + (index % 4) as f32 * 7.0);
+    tf.rotation = Quat::from_rotation_z(time.elapsed_secs() * (5.0 + index as f32 * 0.12));
+    sprite.custom_size = Some(Vec2::new(9.0 + (index % 4) as f32 * 2.0, 4.0));
+    let color = if seasons[3] > 0.55 {
+        Color::srgba(0.78, 0.84, 0.88, fade * 0.72)
+    } else if seasons[2] > 0.35 {
+        Color::srgba(0.88, 0.46, 0.10, fade * 0.78)
+    } else {
+        Color::srgba(0.34, 0.58, 0.16, fade * 0.74)
+    };
+    sprite.color = color;
+}
+
 fn animate_ufo(
     index: usize,
     progress: f32,
@@ -205,18 +289,38 @@ mod tests {
             .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::Ufo))
             .expect("schedule should contain a UFO");
         let ufo_time = ufo_slot as f32 * 20.0 + 1.0;
-        assert_eq!(event_at(ufo_time, 1.0, salt), None);
+        assert_eq!(event_at(ufo_time, 1.0, 1.0, salt), None);
         assert!(matches!(
-            event_at(ufo_time, 0.0, salt),
+            event_at(ufo_time, 0.0, 1.0, salt),
             Some((AmbientKind::Ufo, _))
         ));
-        assert_eq!(event_at(ufo_time + 6.0, 0.0, salt), None);
+        assert_eq!(event_at(ufo_time + 6.0, 0.0, 1.0, salt), None);
 
         let birds_slot = (0..1024)
             .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::Birds))
             .expect("schedule should contain birds");
         let birds_time = birds_slot as f32 * 20.0 + 1.0;
-        assert!(event_at(birds_time, 1.0, salt).is_some());
-        assert_eq!(event_at(birds_time, 0.0, salt), None);
+        assert!(event_at(birds_time, 1.0, 1.0, salt).is_some());
+        assert_eq!(event_at(birds_time, 0.0, 1.0, salt), None);
+    }
+
+    #[test]
+    fn petals_are_occasional_spring_events_and_hurricane_debris_is_linked() {
+        let salt = 4321;
+        let petal_slot = (0..1024)
+            .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::SakuraPetals))
+            .expect("schedule should contain petals");
+        let petal_time = petal_slot as f32 * 20.0 + 1.0;
+        assert!(event_at(petal_time, 0.8, 1.0, salt).is_some());
+        assert_eq!(event_at(petal_time, 0.8, 0.0, salt), None);
+        assert_eq!(event_at(petal_time, 0.2, 1.0, salt), None);
+        assert!(participates(
+            AmbientKind::HurricaneLeaves,
+            AmbientKind::Hurricane
+        ));
+        assert!(!participates(
+            AmbientKind::HurricaneLeaves,
+            AmbientKind::Birds
+        ));
     }
 }

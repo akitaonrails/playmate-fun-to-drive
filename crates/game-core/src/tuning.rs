@@ -118,7 +118,7 @@ impl Default for Tuning {
             downshift_unsafe_retention: 0.82,
             low_overrev_start: 11.0,
             gear_ramp_secs: 0.6,
-            brake_ramp_secs: 1.2,
+            brake_ramp_secs: 1.05,
             curve_gain: 1.20,
             slope_speed_gain: 1.6,
             slope_speed_min_factor: 0.90,

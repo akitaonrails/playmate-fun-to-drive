@@ -6,6 +6,8 @@
 //! with flat sprites so it renders identically into the toy's screen.
 
 mod ambient;
+mod backdrop;
+mod shoulder;
 
 use bevy::prelude::*;
 use game_core::{Gear, Phase, WeatherKind, WeatherTransition};
@@ -666,6 +668,8 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, HORIZON_Y + 15.0, -4.55),
         HazeStrip,
     ));
+    backdrop::spawn(&mut commands);
+    shoulder::spawn(&mut commands);
     ambient::spawn(&mut commands);
     for k in 0..36 {
         let fx = -480.0 + (k * 53 % 960) as f32;
@@ -1319,6 +1323,10 @@ fn sync_hazards(
     mut pool: Query<(&HazardPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
     let lp = sim.0.loop_pos();
+    let prop_colors = roadside_prop_palette(
+        game_core::environment::season_weights(sim.0.environment_time),
+        game_core::environment::daylight(sim.0.environment_time),
+    );
     let mut parts = pool.iter_mut();
     let mut place = |kind: game_core::HazardKind, color_variant: usize, x: f32, y: f32, s: f32| {
         let (body_alpha, light_alpha) = traffic_visibility(s, *road_visibility);
@@ -1368,18 +1376,12 @@ fn sync_hazards(
                     17.0,
                     -2.55,
                 ),
-                (game_core::HazardKind::Tree, 1) => (
-                    Color::srgb(0.05, 0.30, 0.12),
-                    Vec2::new(35.0, 25.0),
-                    37.0,
-                    -2.45,
-                ),
-                (game_core::HazardKind::Tree, 2) => (
-                    Color::srgb(0.10, 0.48, 0.19),
-                    Vec2::new(25.0, 20.0),
-                    51.0,
-                    -2.42,
-                ),
+                (game_core::HazardKind::Tree, 1) => {
+                    (prop_colors.tree_dark, Vec2::new(35.0, 25.0), 37.0, -2.45)
+                }
+                (game_core::HazardKind::Tree, 2) => {
+                    (prop_colors.tree_light, Vec2::new(25.0, 20.0), 51.0, -2.42)
+                }
                 (game_core::HazardKind::Tree, _) => (
                     Color::srgba(0.02, 0.08, 0.03, 0.55),
                     Vec2::new(30.0, 6.0),
@@ -1387,13 +1389,13 @@ fn sync_hazards(
                     -2.62,
                 ),
                 (game_core::HazardKind::Billboard, 0) => (
-                    Color::srgb(0.95, 0.35, 0.12),
+                    prop_colors.billboard_frame,
                     Vec2::new(44.0, 27.0),
                     30.0,
                     -2.46,
                 ),
                 (game_core::HazardKind::Billboard, 1) => (
-                    Color::srgb(0.98, 0.90, 0.38),
+                    prop_colors.billboard_face,
                     Vec2::new(35.0, 18.0),
                     30.0,
                     -2.42,
@@ -2069,6 +2071,49 @@ fn traffic_car_color(variant: usize, alpha: f32) -> Color {
     Color::srgba(r, g, b, alpha)
 }
 
+#[derive(Clone, Copy)]
+struct RoadsidePropPalette {
+    tree_dark: Color,
+    tree_light: Color,
+    billboard_frame: Color,
+    billboard_face: Color,
+}
+
+fn roadside_prop_palette(seasons: [f32; 4], daylight: f32) -> RoadsidePropPalette {
+    let tree_dark = blend4(
+        [
+            Color::srgb(0.66, 0.28, 0.43),
+            Color::srgb(0.05, 0.30, 0.12),
+            Color::srgb(0.55, 0.20, 0.05),
+            Color::srgb(0.48, 0.56, 0.66),
+        ],
+        seasons,
+    );
+    let tree_light = blend4(
+        [
+            Color::srgb(1.0, 0.58, 0.76),
+            Color::srgb(0.10, 0.48, 0.19),
+            Color::srgb(0.94, 0.42, 0.08),
+            Color::srgb(0.90, 0.95, 1.0),
+        ],
+        seasons,
+    );
+    let night = 1.0 - daylight.clamp(0.0, 1.0);
+    let winter = seasons[3];
+    let billboard_frame = Color::srgb(0.95, 0.35, 0.12)
+        .mix(&Color::srgb(1.0, 0.10, 0.68), night * 0.72)
+        .mix(&Color::srgb(0.42, 0.72, 0.94), winter * 0.45);
+    let billboard_face = Color::srgb(0.98, 0.90, 0.38)
+        .mix(&Color::srgb(0.08, 0.92, 1.0), night * 0.70)
+        .mix(&Color::srgb(0.86, 0.94, 1.0), winter * 0.35);
+    RoadsidePropPalette {
+        tree_dark,
+        tree_light,
+        billboard_frame,
+        billboard_face,
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_environment(
     sim: Res<Sim>,
@@ -2593,6 +2638,8 @@ pub fn add_view_systems(app: &mut App) {
     app.add_systems(
         Update,
         (
+            backdrop::sync,
+            shoulder::sync,
             ambient::sync,
             sync_palms,
             sync_hazards,
@@ -2665,6 +2712,18 @@ mod tests {
         assert!(wet_a.blue - wet_b.blue > dry_a.blue - dry_b.blue);
         assert!(wet_a.blue / wet_a.red > dry_a.blue / dry_a.red);
         assert!(wet_dash.to_linear().red > dry_dash.to_linear().red);
+    }
+
+    #[test]
+    fn roadside_props_echo_season_and_night_palettes() {
+        let spring = roadside_prop_palette([1.0, 0.0, 0.0, 0.0], 1.0);
+        let summer = roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 1.0);
+        let winter = roadside_prop_palette([0.0, 0.0, 0.0, 1.0], 1.0);
+        let neon = roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 0.0);
+
+        assert!(spring.tree_light.to_srgba().red > summer.tree_light.to_srgba().red);
+        assert!(winter.tree_light.to_srgba().blue > 0.9);
+        assert!(neon.billboard_face.to_srgba().blue > summer.billboard_face.to_srgba().blue);
     }
 
     #[test]
