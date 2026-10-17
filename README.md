@@ -1,15 +1,15 @@
 # Fun to Drive — web
 
-[![Build, test, and deploy](https://github.com/akitaonrails/playmate-fun-to-drive-web/actions/workflows/ci.yml/badge.svg)](https://github.com/akitaonrails/playmate-fun-to-drive-web/actions/workflows/ci.yml)
+[![Build, test, and deploy](https://github.com/akitaonrails/playmate-fun-to-drive/actions/workflows/ci.yml/badge.svg)](https://github.com/akitaonrails/playmate-fun-to-drive/actions/workflows/ci.yml)
 
 <p align="center">
-  <a href="https://akitaonrails.github.io/playmate-fun-to-drive-web/">
+  <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
     <img src="docs/screenshots/v020-env-day.png" alt="Fun to Drive running inside its 3D dashboard toy" width="900">
   </a>
 </p>
 
 <p align="center">
-  <strong><a href="https://akitaonrails.github.io/playmate-fun-to-drive-web/">▶ Play in your browser</a></strong><br>
+  <strong><a href="https://akitaonrails.github.io/playmate-fun-to-drive/">▶ Play in your browser</a></strong><br>
   The hosted game includes a fullscreen button in its upper-right corner.
 </p>
 
