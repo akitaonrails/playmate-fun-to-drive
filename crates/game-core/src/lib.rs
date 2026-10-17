@@ -5,6 +5,7 @@
 //! consumes the structs and step functions exposed from this crate.
 
 pub mod dynamics;
+pub mod environment;
 pub mod game;
 pub mod input;
 pub mod rng;
@@ -12,6 +13,7 @@ pub mod road;
 pub mod tuning;
 
 pub use dynamics::BodyDynamics;
+pub use environment::{daylight, season_weights, DAY_SECS, SEASON_SECS, YEAR_SECS};
 pub use game::{EndReason, Game, Phase, StepEvents};
 pub use input::{Gear, InputState, KeyboardSteering};
 pub use rng::Rng;

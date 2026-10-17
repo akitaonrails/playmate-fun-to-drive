@@ -150,14 +150,17 @@ fn step_sim(
 }
 
 fn publish_state(
+    env: Res<crate::view::Env>,
+    time: Res<Time>,
     sim: Res<Sim>,
     frame: Res<FrameInput>,
     view: Res<toy_view::ViewState>,
     rig: Res<toy_view::BodyRig>,
 ) {
+    let env_time = time.elapsed_secs() * crate::view::ENV_TIME_SCALE;
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"paused\":{},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{:.3},\"speed\":{:.3},\"fuel\":{:.3},\"gear\":\"{}\",\"toy\":{},\"look\":{:.2},\"paused\":{},\"day\":{:.2},\"sea\":{:.2},\"laps\":{},\"lap_t\":{:.2},\"best\":{:.2},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -174,6 +177,8 @@ fn publish_state(
         view.mode == toy_view::ViewMode::Toy,
         view.toy_look,
         sim.0.paused,
+        env.daylight,
+        game_core::environment::season_index(env_time),
         sim.0.laps,
         sim.0.lap_time,
         sim.0.lap_best,

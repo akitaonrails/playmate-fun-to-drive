@@ -80,6 +80,26 @@ struct FuelBarFill;
 #[derive(Component)]
 pub struct ScoreText;
 
+/// backing panel behind an in-screen HUD block (contrast)
+#[derive(Component)]
+pub struct HudPanel;
+
+/// celestial sprites: sun disc, sun stripe, moon, stars
+#[derive(Component)]
+pub struct SkyObject;
+
+/// clouds (day-dimmed, night-invisible)
+#[derive(Component)]
+pub struct Cloud;
+
+/// horizon haze strip
+#[derive(Component)]
+pub struct HazeStrip;
+
+/// snow particles
+#[derive(Component)]
+pub struct SnowFlake;
+
 #[derive(Component)]
 pub struct GearText;
 
@@ -184,6 +204,7 @@ fn sky_colors() -> [(Color, f32); 6] {
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
+    commands.init_resource::<Env>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     // ---- sky gradient bands (static), sun, clouds, sea, sand ----
@@ -204,12 +225,12 @@ pub fn setup(mut commands: Commands) {
     commands.spawn((
         Sprite::from_color(Color::srgb(1.0, 0.85, 0.35), Vec2::new(64.0, 56.0)),
         Transform::from_xyz(-250.0, HORIZON_Y + 78.0, -4.9),
-        SkyBand,
+        SkyObject,
     ));
     commands.spawn((
         Sprite::from_color(Color::srgb(1.0, 0.62, 0.25), Vec2::new(88.0, 14.0)),
         Transform::from_xyz(-250.0, HORIZON_Y + 62.0, -4.8),
-        SkyBand,
+        SkyObject,
     ));
     for (cx, cy, w) in [
         (-60.0, 205.0, 90.0),
@@ -219,9 +240,47 @@ pub fn setup(mut commands: Commands) {
         commands.spawn((
             Sprite::from_color(Color::srgba(0.95, 0.96, 1.0, 0.85), Vec2::new(w, 12.0)),
             Transform::from_xyz(cx, cy, -4.8),
-            SkyBand,
+            Cloud,
         ));
     }
+    // moon + stars (alpha driven by night), haze strip, snow pool
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.9, 0.93, 0.98), Vec2::new(46.0, 46.0)),
+        Transform::from_xyz(240.0, HORIZON_Y + 82.0, -4.85),
+        SkyObject,
+    ));
+    for k in 0..14 {
+        let sx = -450.0 + (k * 71 % 917) as f32;
+        let sy = 200.0 + (k * 43 % 95) as f32;
+        commands.spawn((
+            Sprite::from_color(Color::srgb(1.0, 1.0, 0.95), Vec2::new(3.0, 3.0)),
+            Transform::from_xyz(sx, sy, -4.85),
+            SkyObject,
+        ));
+    }
+    commands.spawn((
+        Sprite {
+            color: Color::srgba(0.7, 0.78, 0.86, 0.0),
+            custom_size: Some(Vec2::new(960.0, 30.0)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, HORIZON_Y + 15.0, -4.55),
+        HazeStrip,
+    ));
+    for k in 0..36 {
+        let fx = -480.0 + (k * 53 % 960) as f32;
+        let fy = -300.0 + (k * 37 % 600) as f32;
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.95, 0.97, 1.0, 0.0),
+                custom_size: Some(Vec2::new(3.0, 3.0)),
+                ..default()
+            },
+            Transform::from_xyz(fx, fy, 1.4),
+            SnowFlake,
+        ));
+    }
+
     // sea + sand at the horizon
     commands.spawn((
         Sprite::from_color(Color::srgb(0.04, 0.52, 0.68), Vec2::new(960.0, 22.0)),
@@ -395,21 +454,38 @@ pub fn setup(mut commands: Commands) {
         FuelBarFill,
     ));
 
-    // HUD text
+    // in-screen HUD (Text2d => rendered INTO the game texture, so it shows
+    // on the toy screen itself) with dark backing panels for contrast
+    for (cx, w) in [(-330.0, 210.0), (0.0, 330.0), (332.0, 196.0)] {
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.02, 0.02, 0.04, 0.75),
+                custom_size: Some(Vec2::new(w, 40.0)),
+                ..default()
+            },
+            Transform::from_xyz(cx, 274.0, 1.0),
+            HudPanel,
+        ));
+    }
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: FontSize::Px(30.0),
+            font_size: FontSize::Px(24.0),
             ..default()
         },
-        TextColor(Color::srgb(0.98, 0.98, 0.92)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(14.0),
-            left: Val::Px(400.0),
-            ..default()
-        },
+        TextColor(Color::srgb(0.99, 0.99, 0.94)),
+        Transform::from_xyz(-330.0, 274.0, 1.1),
         ScoreText,
+    ));
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font_size: FontSize::Px(26.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.99, 0.95, 0.75)),
+        Transform::from_xyz(0.0, 274.0, 1.1),
+        LapText,
     ));
     commands.spawn((
         Text::new(""),
@@ -417,13 +493,8 @@ pub fn setup(mut commands: Commands) {
             font_size: FontSize::Px(20.0),
             ..default()
         },
-        TextColor(Color::srgb(0.75, 0.92, 0.98)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(54.0),
-            left: Val::Px(430.0),
-            ..default()
-        },
+        TextColor(Color::srgb(0.8, 0.93, 0.99)),
+        Transform::from_xyz(330.0, 254.0, 1.1),
         GearText,
     ));
     commands.spawn((
@@ -836,6 +907,176 @@ fn sync_hud(
     }
 }
 
+/// Environment state shared by the render systems (day/night + seasons).
+#[derive(Resource, Default)]
+pub struct Env {
+    pub daylight: f32,
+    pub weights: [f32; 4], // spring, summer, autumn, winter
+}
+
+/// QA speed-up for the day/night + season cycles (1.0 = real pacing:
+/// 100 s day/night, 5 min seasons, 3 cycles per season).
+pub const ENV_TIME_SCALE: f32 = 1.0;
+
+/// scalar multiply in linear space (dim for night)
+fn scale_color(c: Color, k: f32) -> Color {
+    let l = c.to_linear();
+    Color::LinearRgba(LinearRgba::rgb(l.red * k, l.green * k, l.blue * k))
+}
+
+fn blend4(cols: [Color; 4], w: [f32; 4]) -> Color {
+    let mut r = 0.0;
+    let mut g = 0.0;
+    let mut b = 0.0;
+    for i in 0..4 {
+        let LinearRgba {
+            red, green, blue, ..
+        } = cols[i].to_linear();
+        r += red * w[i];
+        g += green * w[i];
+        b += blue * w[i];
+    }
+    Color::LinearRgba(LinearRgba::rgb(r, g, b))
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn sync_environment(
+    time: Res<Time>,
+    mut env: ResMut<Env>,
+    mut colors: ResMut<Palette>,
+    mut sky: Query<&mut Sprite, (With<SkyBand>, Without<SkyObject>)>,
+    mut sky_objs: Query<&mut Sprite, (With<SkyObject>, Without<SkyBand>, Without<Cloud>)>,
+    mut clouds: Query<&mut Sprite, (With<Cloud>, Without<SkyBand>, Without<SkyObject>)>,
+    mut haze: Query<
+        &mut Sprite,
+        (
+            With<HazeStrip>,
+            Without<SkyBand>,
+            Without<SkyObject>,
+            Without<SnowFlake>,
+            Without<Cloud>,
+        ),
+    >,
+    mut snow: Query<
+        (&mut Transform, &mut Sprite),
+        (
+            With<SnowFlake>,
+            Without<HazeStrip>,
+            Without<SkyBand>,
+            Without<SkyObject>,
+            Without<Cloud>,
+        ),
+    >,
+) {
+    let t = time.elapsed_secs() * ENV_TIME_SCALE;
+    let day = game_core::environment::daylight(t);
+    let w = game_core::environment::season_weights(t);
+    env.daylight = day;
+    env.weights = w;
+
+    let winter = w[3];
+    let autumn = w[2];
+    let bright = 0.35 + 0.65 * day;
+
+    // ground colors across seasons, dimmed by night
+    let g1 = blend4(
+        [
+            Color::srgb(0.16, 0.55, 0.28),
+            Color::srgb(0.12, 0.58, 0.24),
+            Color::srgb(0.55, 0.38, 0.15),
+            Color::srgb(0.82, 0.85, 0.89),
+        ],
+        w,
+    );
+    let g2 = blend4(
+        [
+            Color::srgb(0.13, 0.47, 0.24),
+            Color::srgb(0.09, 0.50, 0.20),
+            Color::srgb(0.45, 0.30, 0.12),
+            Color::srgb(0.72, 0.76, 0.82),
+        ],
+        w,
+    );
+    colors.grass_a = scale_color(g1, bright);
+    colors.grass_b = scale_color(g2, bright);
+    colors.asphalt_a = scale_color(Color::srgb(0.34, 0.35, 0.40), bright);
+    colors.asphalt_b = scale_color(Color::srgb(0.30, 0.31, 0.36), bright);
+    // rumble goes snow-pale in deep winter
+    let rum_a = Color::srgb(0.85, 0.15, 0.12).mix(&Color::srgb(0.88, 0.9, 0.95), winter * 0.6);
+    let rum_b = Color::srgb(0.95, 0.95, 0.92).mix(&Color::srgb(0.7, 0.75, 0.85), winter * 0.5);
+    colors.rumble_red = scale_color(rum_a, bright);
+    colors.rumble_white = scale_color(rum_b, bright);
+    colors.dash = scale_color(Color::srgb(0.95, 0.95, 0.90), bright);
+
+    // sky: day bands blended toward a night palette; winter grays, autumn warms
+    let day_bands = sky_colors();
+    let night = [
+        Color::srgb(0.015, 0.02, 0.06),
+        Color::srgb(0.02, 0.03, 0.09),
+        Color::srgb(0.03, 0.05, 0.14),
+        Color::srgb(0.05, 0.07, 0.18),
+        Color::srgb(0.07, 0.10, 0.22),
+        Color::srgb(0.09, 0.12, 0.26),
+    ];
+    for (i, mut sp) in sky.iter_mut().enumerate() {
+        let mut c = day_bands[i].0.mix(&night[i], 1.0 - day);
+        // autumn: warm shift; winter: desaturated gray-blue
+        c = c.mix(&Color::srgb(0.9, 0.6, 0.35), autumn * 0.22);
+        c = c.mix(&Color::srgb(0.55, 0.6, 0.68), winter * 0.45);
+        sp.color = c;
+    }
+
+    // celestial: sun bright by day, moon + stars by night
+    let (sun, moon, star) = (
+        Color::srgb(1.0, 0.85, 0.35),
+        Color::srgb(0.88, 0.91, 0.97),
+        Color::srgb(1.0, 1.0, 0.95),
+    );
+    let mut objs = sky_objs.iter_mut();
+    if let Some(mut sp) = objs.next() {
+        // sun disc
+        sp.color = scale_color(sun, day.max(0.0));
+    }
+    if let Some(mut sp) = objs.next() {
+        // sun stripe
+        sp.color = scale_color(Color::srgb(1.0, 0.62, 0.25), day.max(0.0))
+            .mix(&Color::srgb(0.9, 0.6, 0.35), autumn * 0.3);
+    }
+    if let Some(mut sp) = objs.next() {
+        // moon
+        sp.color = scale_color(moon, 1.0 - day);
+    }
+    for mut sp in objs.by_ref() {
+        // stars
+        sp.color = scale_color(star, ((1.0 - day) * 0.9).max(0.0));
+    }
+    for mut sp in clouds.iter_mut() {
+        let a = (0.85 * (day * 1.2).clamp(0.0, 1.0)).min(0.85);
+        sp.color = Color::srgba(0.95, 0.96, 1.0, a);
+    }
+
+    // haze: denser in winter and at dawn/dusk
+    if let Ok(mut sp) = haze.single_mut() {
+        let haze_amt = (0.18 + winter * 0.35 + autumn * 0.18) * (0.65 + 0.35 * (1.0 - day));
+        let c = Color::srgb(0.75, 0.8, 0.88).mix(&Color::srgb(1.0, 1.0, 1.0), winter * 0.5);
+        sp.color = c.with_alpha(haze_amt.clamp(0.0, 0.75));
+    }
+
+    // snow: fall while winter holds weight
+    let fall = 90.0 + winter * 60.0;
+    let dt = time.delta_secs();
+    for (k, (mut tf, mut sp)) in snow.iter_mut().enumerate() {
+        let drift = ((k % 5) as f32 - 2.0) * 14.0;
+        tf.translation.y -= fall * dt;
+        tf.translation.x += drift * dt;
+        if tf.translation.y < -310.0 {
+            tf.translation.y = 310.0;
+            tf.translation.x = -480.0 + (k * 53 % 960) as f32;
+        }
+        sp.color = Color::srgba(0.95, 0.97, 1.0, (winter * 0.9).clamp(0.0, 1.0));
+    }
+}
+
 /// M10: scroll the drum bands with the drum and set overlay alpha by dial.
 #[allow(clippy::type_complexity)]
 fn sync_drum_overlays(
@@ -868,6 +1109,7 @@ pub fn add_view_systems(app: &mut App) {
     app.add_systems(
         Update,
         (
+            sync_environment,
             sync_roads,
             sync_palms,
             sync_hazards,

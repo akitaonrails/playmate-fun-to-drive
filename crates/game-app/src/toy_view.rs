@@ -240,14 +240,7 @@ pub fn toggle_mode(
     mut game_cam: Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
     mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
     mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
-    mut hud_texts: Query<
-        (
-            &mut Visibility,
-            Option<&crate::view::ScoreText>,
-            Option<&crate::view::GearText>,
-        ),
-        Without<ToyRoot>,
-    >,
+    mut hud_texts: Query<&mut Visibility, (With<crate::view::StatusText>, Without<ToyRoot>)>,
 ) {
     if keys.just_pressed(KeyCode::KeyT) {
         state.mode = match state.mode {
@@ -274,16 +267,10 @@ fn apply_mode(
     game_cam: &mut Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
     toy_cam: &mut Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
     toy_root: &mut Query<&mut Visibility, With<ToyRoot>>,
-    hud_texts: &mut Query<
-        (
-            &mut Visibility,
-            Option<&crate::view::ScoreText>,
-            Option<&crate::view::GearText>,
-        ),
-        Without<ToyRoot>,
-    >,
+    hud_texts: &mut Query<&mut Visibility, (With<crate::view::StatusText>, Without<ToyRoot>)>,
 ) {
     let toy = state.mode == ViewMode::Toy;
+    let _ = toy;
     if let Ok((entity, mut cam)) = game_cam.single_mut() {
         cam.is_active = true; // always renders: window in game mode, texture in toy mode
         let target = if toy {
@@ -306,15 +293,11 @@ fn apply_mode(
             Visibility::Hidden
         };
     }
-    // score/gear HUD only in flat game mode; the persistent status line
-    // stays visible in BOTH modes (it carries the controls hint)
-    for (mut vis, score, gear) in hud_texts.iter_mut() {
-        let is_status = score.is_none() && gear.is_none();
-        *vis = if toy && !is_status {
-            Visibility::Hidden
-        } else {
-            Visibility::Visible
-        };
+    // the lap/score/gear HUD is drawn INTO the game texture (Text2d), so
+    // it shows on the toy screen itself; the window-space status hint is
+    // always visible
+    for mut vis in hud_texts.iter_mut() {
+        *vis = Visibility::Visible;
     }
 }
 
@@ -335,7 +318,7 @@ pub fn animate_parts(
     let dt = time.delta_secs().min(0.05);
     // invert so turning LEFT rotates the wheel counter-clockwise as the
     // player sees it (positive local-Z rotation is CCW from the player side)
-    let wheel_target = -frame.state.steer * 2.1; // ~120 deg full lock
+    let wheel_target = -frame.state.steer * 1.35; // ~77 deg full lock, gentler
     let lever_target = match sim.0.gear() {
         Gear::Low => -0.30,
         Gear::High => 0.30,

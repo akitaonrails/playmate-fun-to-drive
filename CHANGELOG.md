@@ -5,6 +5,24 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.2.0-dev4 — in-screen HUD, softer toy motion, day/night + seasons (2026-10-16)
+
+- HUD moved INTO the game image (Text2d on dark panels): score top-left,
+  LAP + live time + best top-center, fuel/gear top-right — shows on the
+  toy screen itself; only the controls hint stays window-space.
+- Toy motion softened: body roll gain 0.09->0.045, shift halved, springs
+  softer (k 55/c 7.5), wheel full lock ~77 deg with a lazier spring.
+- Environment cycles (game-core::environment, unit-tested): day/night
+  every 100 s nested in 5-minute seasons (3 day cycles per season,
+  spring->summer->autumn->winter) — sky palette blends day->night, sun
+  swaps to moon + stars, clouds fade out; grass goes green->ochre->snow,
+  rumble strips pale in winter; horizon haze + falling snow in winter,
+  warm tint in autumn; everything dims at night.
+- Bug found via phase-locked captures: the bump flash never decayed after
+  the crash-phase removal — permanent white veil. Now decays every step.
+- QA tooling: env phase (day/season) published in the state JSON so
+  captures can wait for exact cycle phases; ENV_TIME_SCALE for fast QA.
+
 ### v0.2.0-dev3 — pseudo-3D OutRun renderer + square test track (2026-10-16)
 
 - Renderer rewritten classic-super-scaler style: 30 geometrically-spaced

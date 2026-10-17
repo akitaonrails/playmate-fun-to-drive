@@ -127,6 +127,9 @@ impl Game {
             }
             return ev;
         }
+        // the bump flash decays in every phase (bumps no longer stop the
+        // run, so nothing else would clear it)
+        self.flash = (self.flash - dt / t.crash_flash_secs).max(0.0);
 
         match self.phase {
             Phase::Ready => {
