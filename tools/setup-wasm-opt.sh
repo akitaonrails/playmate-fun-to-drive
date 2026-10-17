@@ -12,6 +12,7 @@ CACHE="$HOME/.cache/trunk/wasm-opt-version_131/bin"
 REAL="$CACHE/wasm-opt.real"
 WRAP="$CACHE/wasm-opt"
 URL="https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-x86_64-linux.tar.gz"
+SHA256="b5bf1f0eaf17c63ee588ff7a5954dc8f6ce2c26989051c66f24dfe9ece3e46db"
 
 if [[ -x "$REAL" ]]; then
   exit 0
@@ -22,6 +23,7 @@ mkdir -p "$CACHE"
 if [[ ! -x "$CACHE/wasm-opt" ]]; then
   TMP=$(mktemp -d)
   curl -fsSL "$URL" -o "$TMP/b.tar.gz"
+  echo "$SHA256  $TMP/b.tar.gz" | sha256sum --check --status
   tar -xzf "$TMP/b.tar.gz" -C "$TMP"
   cp "$TMP"/binaryen-version_131/bin/wasm-opt "$CACHE/wasm-opt"
   rm -rf "$TMP"

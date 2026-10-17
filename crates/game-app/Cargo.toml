@@ -12,7 +12,22 @@ webgpu = ["bevy/webgpu"]
 
 [dependencies]
 game-core = { workspace = true }
-bevy = "0.20"
+# Bevy's broad `3d` bundle enables KTX2/zstd and compressed tonemapping LUTs.
+# This game embeds an uncompressed GLB and does not load KTX2 assets, so keep
+# the rendering surface explicit and avoid shipping an unused decoder.
+bevy = { version = "0.20", default-features = false, features = [
+    "2d",
+    "ui",
+    "audio",
+    "bevy_light",
+    "bevy_mikktspace",
+    "morph_animation",
+    "morph",
+    "bevy_anti_alias",
+    "bevy_gltf",
+    "bevy_pbr",
+    "gltf_animation",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

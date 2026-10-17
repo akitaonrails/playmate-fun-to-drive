@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Removed the unused KTX2/zstd texture-decoding path from the web build and
+  switched the toy camera to shader-only ACES tonemapping, eliminating the
+  vulnerable transitive `ruzstd 0.8` decoder without vendoring or suppressing
+  its security advisory.
+- Pinned GitHub Actions and downloaded release-tool checksums in the Pages
+  pipeline so builds execute immutable, verified CI dependencies.
 - Reworked the looping rain ambience into a softer, lower-frequency four-second
   rainfall bed without the previous rapid, mechanical tremolo.
 - Turned the rare hurricane and nighttime UFO sightings into player assists:

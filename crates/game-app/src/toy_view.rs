@@ -189,7 +189,9 @@ pub fn setup(
             ..default()
         },
         Transform::from_xyz(0.0, 0.185, 0.275).looking_at(Vec3::new(0.0, 0.128, 0.02), Vec3::Y),
-        bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
+        // ACES is shader-only, preserving HDR-to-display contrast without the
+        // compressed LUT assets (and zstd decoder) required by TonyMcMapface.
+        bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
         ToyCamera,
     ));
     if quality.bloom {

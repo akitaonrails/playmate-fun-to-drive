@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Linux build dependencies
         run: |
@@ -42,7 +42,7 @@ jobs:
           rustup default stable
 
       - name: Cache Cargo builds
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -60,8 +60,7 @@ jobs:
           release="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}"
           curl --fail --silent --show-error --location \
             "$release/trunk-x86_64-unknown-linux-gnu.tar.gz" --output "$archive"
-          expected="$(curl --fail --silent --show-error --location \
-            "$release/trunk-x86_64-unknown-linux-gnu.tar.gz.sha256")"
+          expected="f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b"
           actual="$(sha256sum "$archive" | cut -d ' ' -f 1)"
           test "$actual" = "$expected"
           tar -xzf "$archive" -C "$RUNNER_TEMP"
@@ -73,11 +72,11 @@ jobs:
 
       - name: Configure GitHub Pages
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: crates/game-app/dist
 
@@ -99,4 +98,4 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
