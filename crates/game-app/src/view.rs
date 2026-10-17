@@ -42,10 +42,12 @@ fn elevated_row_y(scale: f32, relative_elevation: f32) -> f32 {
 const VIEW_TOP: f32 = 322.0;
 const PALM_POOL: usize = 10;
 const HAZARD_POOL: usize = 40;
+const HAZARD_PARTS: usize = 6;
 const NITRO_X_LEFT: f32 = 302.0;
 const NITRO_Y: f32 = 216.0;
 const RAIN_POOL: usize = 84;
 const SPEED_LINE_POOL: usize = 28;
+const VISIBILITY_BANDS: usize = 8;
 
 #[derive(Component)]
 struct SkyBand;
@@ -73,7 +75,16 @@ struct GrassRow;
 struct Apron;
 
 #[derive(Component)]
-struct HazardPart;
+struct HazardPart(u8);
+
+#[derive(Component)]
+struct NightShade;
+
+#[derive(Component)]
+struct RoadFogBand(usize);
+
+#[derive(Component)]
+struct HeadlightBand(usize);
 
 #[derive(Component)]
 struct NitroPickupPart(u8);
@@ -201,6 +212,16 @@ pub struct WeatherVisuals {
     pub cloudy: f32,
     pub rain: f32,
     pub rain_visible: f32,
+}
+
+/// Visibility envelope shared by the road overlays and distant traffic.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct RoadVisibilityVisuals {
+    pub night: f32,
+    pub rain: f32,
+    pub shade_alpha: f32,
+    pub fog_alpha: f32,
+    pub headlights: f32,
 }
 
 /// Shared eased envelope for nitro-only screen effects.
@@ -543,6 +564,7 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
     commands.init_resource::<WeatherVisuals>();
+    commands.init_resource::<RoadVisibilityVisuals>();
     commands.init_resource::<NitroVisuals>();
     commands.init_resource::<InstrumentVisuals>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
@@ -644,6 +666,27 @@ pub fn setup(mut commands: Commands) {
             Transform::from_xyz(0.0, 0.0, 0.68),
             Visibility::Hidden,
             NitroSpeedLine(k),
+        ));
+    }
+    // Visibility layers sit over the projected world but below the player,
+    // precipitation, and HUD. Distant traffic lamps are raised above these.
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.0, 0.0, 0.0, 0.0), Vec2::new(960.0, 600.0)),
+        Transform::from_xyz(0.0, 0.0, 0.10),
+        NightShade,
+    ));
+    for index in 0..VISIBILITY_BANDS {
+        let (y, size, _) = fog_band_geometry(index);
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.07, 0.09, 0.13, 0.0), size),
+            Transform::from_xyz(0.0, y, 0.14),
+            RoadFogBand(index),
+        ));
+        let (y, size, _) = headlight_band_geometry(index);
+        commands.spawn((
+            Sprite::from_color(Color::srgba(1.0, 0.88, 0.58, 0.0), size),
+            Transform::from_xyz(0.0, y, 0.20),
+            HeadlightBand(index),
         ));
     }
     // sea + sand at the horizon
@@ -766,7 +809,7 @@ pub fn setup(mut commands: Commands) {
 
     // ---- hazards (pooled composite sprites) ----
     for _ in 0..HAZARD_POOL {
-        for _ in 0..4 {
+        for part in 0..HAZARD_PARTS {
             commands.spawn((
                 Sprite {
                     custom_size: Some(Vec2::new(56.0, 24.0)),
@@ -774,7 +817,7 @@ pub fn setup(mut commands: Commands) {
                 },
                 Transform::from_xyz(0.0, CAR_Y, -2.5),
                 Visibility::Hidden,
-                HazardPart,
+                HazardPart(part as u8),
             ));
         }
     }
@@ -1237,39 +1280,52 @@ fn sync_hazards(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     proj: Res<Proj>,
-    mut pool: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<HazardPart>>,
+    road_visibility: Res<RoadVisibilityVisuals>,
+    mut pool: Query<(&HazardPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
     let lp = sim.0.loop_pos();
     let mut parts = pool.iter_mut();
-    let mut place = |kind: game_core::HazardKind, x: f32, y: f32, s: f32| {
-        for part in 0..4 {
-            let Some((mut tf, mut sp, mut vis)) = parts.next() else {
+    let mut place = |kind: game_core::HazardKind, color_variant: usize, x: f32, y: f32, s: f32| {
+        let (body_alpha, light_alpha) = traffic_visibility(s, *road_visibility);
+        for _ in 0..HAZARD_PARTS {
+            let Some((part, mut tf, mut sp, mut vis)) = parts.next() else {
                 return;
             };
+            let part = part.0 as usize;
+            if kind != game_core::HazardKind::Oncoming && part >= 4 {
+                *vis = Visibility::Hidden;
+                continue;
+            }
             let (color, size, dy, z) = match (kind, part) {
                 (game_core::HazardKind::Oncoming, 0) => (
-                    Color::srgb(0.93, 0.91, 0.85),
+                    traffic_car_color(color_variant, body_alpha),
                     Vec2::new(TRAFFIC_CAR_WIDTH_PX, TRAFFIC_CAR_WIDTH_PX * 0.42),
                     0.0,
                     -2.5,
                 ),
                 (game_core::HazardKind::Oncoming, 1) => (
-                    Color::srgb(0.15, 0.22, 0.35),
+                    Color::srgba(0.15, 0.22, 0.35, body_alpha),
                     Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.5, TRAFFIC_CAR_WIDTH_PX * 0.18),
                     TRAFFIC_CAR_WIDTH_PX * 0.12,
                     -2.4,
                 ),
                 (game_core::HazardKind::Oncoming, 2) => (
-                    Color::srgb(1.0, 0.9, 0.4),
+                    Color::srgba(1.0, 0.9, 0.4, body_alpha),
                     Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.9, TRAFFIC_CAR_WIDTH_PX * 0.09),
                     -TRAFFIC_CAR_WIDTH_PX * 0.18,
                     -2.4,
                 ),
-                (game_core::HazardKind::Oncoming, _) => (
-                    Color::srgb(0.06, 0.06, 0.07),
+                (game_core::HazardKind::Oncoming, 3) => (
+                    Color::srgba(0.06, 0.06, 0.07, body_alpha),
                     Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.95, TRAFFIC_CAR_WIDTH_PX * 0.1),
                     -TRAFFIC_CAR_WIDTH_PX * 0.24,
                     -2.6,
+                ),
+                (game_core::HazardKind::Oncoming, _) => (
+                    Color::srgba(1.0, 0.91, 0.54, light_alpha),
+                    Vec2::new(8.0, 7.0),
+                    -TRAFFIC_CAR_WIDTH_PX * 0.08,
+                    0.26,
                 ),
                 (game_core::HazardKind::Tree, 0) => (
                     Color::srgb(0.34, 0.18, 0.07),
@@ -1320,22 +1376,32 @@ fn sync_hazards(
                     -2.39,
                 ),
             };
-            tf.translation = Vec3::new(x, y + dy * s, z);
+            let light_x = if kind == game_core::HazardKind::Oncoming && part >= 4 {
+                let side = if part == 4 { -1.0 } else { 1.0 };
+                side * (TRAFFIC_CAR_WIDTH_PX * 0.29 * s).max(2.4)
+            } else {
+                0.0
+            };
+            tf.translation = Vec3::new(x + light_x, y + dy * s, z);
             sp.color = color;
-            sp.custom_size = Some(Vec2::new((size.x * s).max(1.5), (size.y * s).max(1.5)));
+            let min_size = if part >= 4 { 2.4 } else { 1.5 };
+            sp.custom_size = Some(Vec2::new(
+                (size.x * s).max(min_size),
+                (size.y * s).max(min_size),
+            ));
             *vis = Visibility::Visible;
         }
     };
 
-    for h in &sim.0.road.hazards {
+    for (hazard_index, h) in sim.0.road.hazards.iter().enumerate() {
         let ahead = (h.s - lp).rem_euclid(sim.0.road.length);
         let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) else {
             continue;
         };
         let x = (lat + sim.0.hazard_x_at(h, ahead, &tuning.0)) * HALF_ROAD_PX * s;
-        place(h.kind, x, y, s);
+        place(h.kind, hazard_index, x, y, s);
     }
-    for (_, _, mut vis) in parts.by_ref() {
+    for (_, _, _, mut vis) in parts.by_ref() {
         *vis = Visibility::Hidden;
     }
 }
@@ -1883,6 +1949,52 @@ fn rain_visibility(rain: f32, winter: f32) -> f32 {
     rain.clamp(0.0, 1.0) * (1.0 - winter.clamp(0.0, 1.0))
 }
 
+fn road_visibility(daylight: f32, rain: f32) -> RoadVisibilityVisuals {
+    let night = 1.0 - daylight.clamp(0.0, 1.0);
+    let rain = rain.clamp(0.0, 1.0);
+    RoadVisibilityVisuals {
+        night,
+        rain,
+        shade_alpha: (night * 0.18 + rain * 0.08).min(0.26),
+        fog_alpha: (night * 0.30 + rain * 0.38).min(0.58),
+        headlights: night.max(rain * 0.88),
+    }
+}
+
+fn fog_band_geometry(index: usize) -> (f32, Vec2, f32) {
+    let band_h = 435.0 / VISIBILITY_BANDS as f32;
+    let t = index as f32 / (VISIBILITY_BANDS - 1) as f32;
+    let y = -300.0 + band_h * (index as f32 + 0.5);
+    (y, Vec2::new(960.0, band_h + 1.0), 0.28 + t * 0.72)
+}
+
+fn headlight_band_geometry(index: usize) -> (f32, Vec2, f32) {
+    let t = index as f32 / (VISIBILITY_BANDS - 1) as f32;
+    let band_h = 300.0 / VISIBILITY_BANDS as f32;
+    let y = -205.0 + band_h * (index as f32 + 0.5);
+    let width = 410.0 + (72.0 - 410.0) * t;
+    (y, Vec2::new(width, band_h + 1.5), 1.0 - t * 0.58)
+}
+
+fn traffic_visibility(scale: f32, visibility: RoadVisibilityVisuals) -> (f32, f32) {
+    let near = ((scale - S_FAR) / (0.42 - S_FAR)).clamp(0.0, 1.0);
+    let distance = 1.0 - near;
+    let visibility_loss = (visibility.night * 0.78 + visibility.rain * 0.70).min(0.88);
+    let body_alpha = (1.0 - visibility_loss * distance).clamp(0.12, 1.0);
+    let light_alpha = visibility.headlights * (0.58 + distance * 0.42);
+    (body_alpha, light_alpha.clamp(0.0, 1.0))
+}
+
+fn traffic_car_color(variant: usize, alpha: f32) -> Color {
+    let [r, g, b] = match variant % 4 {
+        0 => [0.93, 0.91, 0.85],
+        1 => [0.90, 0.16, 0.12],
+        2 => [0.10, 0.65, 0.82],
+        _ => [0.72, 0.24, 0.78],
+    };
+    Color::srgba(r, g, b, alpha)
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_environment(
     sim: Res<Sim>,
@@ -1970,7 +2082,7 @@ fn sync_environment(
     visual_weather.rain = rain_amount;
     visual_weather.rain_visible = rain_visible;
     let weather_dim = 1.0 - cloudy * 0.12 - rain_amount * 0.22;
-    let bright = (0.35 + 0.65 * day) * weather_dim;
+    let bright = (0.24 + 0.76 * day) * weather_dim;
 
     // ground colors across seasons, dimmed by night
     let g1 = blend4(
@@ -2092,6 +2204,47 @@ fn sync_environment(
             tf.translation.x = -440.0 + (drop.0 * 67 % 940) as f32;
         }
         sp.color = Color::srgba(0.72, 0.88, 1.0, rain_visible * (0.34 + day * 0.18));
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_road_visibility(
+    sim: Res<Sim>,
+    mut visuals: ResMut<RoadVisibilityVisuals>,
+    mut shade: Query<
+        &mut Sprite,
+        (
+            With<NightShade>,
+            Without<RoadFogBand>,
+            Without<HeadlightBand>,
+        ),
+    >,
+    mut fog: Query<(&RoadFogBand, &mut Sprite), (Without<NightShade>, Without<HeadlightBand>)>,
+    mut headlights: Query<
+        (&HeadlightBand, &mut Sprite),
+        (Without<NightShade>, Without<RoadFogBand>),
+    >,
+) {
+    let daylight = game_core::environment::daylight(sim.0.environment_time);
+    let seasons = game_core::environment::season_weights(sim.0.environment_time);
+    let rain = weather_weights(sim.0.weather())[2];
+    *visuals = road_visibility(daylight, rain_visibility(rain, seasons[3]));
+
+    if let Ok(mut sprite) = shade.single_mut() {
+        sprite.color = Color::srgba(0.005, 0.008, 0.018, visuals.shade_alpha);
+    }
+    for (band, mut sprite) in &mut fog {
+        let (_, _, weight) = fog_band_geometry(band.0);
+        sprite.color = Color::srgba(
+            0.06 + visuals.rain * 0.08 - visuals.night * 0.02,
+            0.08 + visuals.rain * 0.10 - visuals.night * 0.02,
+            0.13 + visuals.rain * 0.12 - visuals.night * 0.02,
+            visuals.fog_alpha * weight,
+        );
+    }
+    for (band, mut sprite) in &mut headlights {
+        let (_, _, weight) = headlight_band_geometry(band.0);
+        sprite.color = Color::srgba(1.0, 0.88, 0.58, visuals.headlights * weight * 0.105);
     }
 }
 
@@ -2342,7 +2495,10 @@ pub fn add_view_systems(app: &mut App) {
             .chain()
             .in_set(crate::AppSet::View),
     );
-    app.add_systems(Update, sync_environment.in_set(ViewSet::Environment));
+    app.add_systems(
+        Update,
+        (sync_environment, sync_road_visibility).in_set(ViewSet::Environment),
+    );
     app.add_systems(Update, sync_roads.in_set(ViewSet::Projection));
     app.add_systems(Update, sync_nitro_visual_intensity.in_set(ViewSet::Effects));
     app.add_systems(
@@ -2481,6 +2637,54 @@ mod tests {
         assert_eq!(rain_visibility(1.0, 0.0), 1.0);
         assert_eq!(rain_visibility(1.0, 1.0), 0.0);
         assert!((rain_visibility(0.8, 0.25) - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn night_and_rain_reduce_visibility_without_blackout() {
+        let day = road_visibility(1.0, 0.0);
+        let night = road_visibility(0.0, 0.0);
+        let storm = road_visibility(1.0, 1.0);
+        assert_eq!(day.shade_alpha, 0.0);
+        assert!(night.shade_alpha > day.shade_alpha);
+        assert!(night.fog_alpha > day.fog_alpha);
+        assert!(storm.fog_alpha > night.fog_alpha);
+        assert!(night.headlights > 0.9);
+        assert!(storm.headlights > 0.8);
+        assert!(night.shade_alpha < 0.3 && storm.fog_alpha < 0.6);
+    }
+
+    #[test]
+    fn distant_car_bodies_fade_before_their_lights() {
+        let conditions = road_visibility(0.0, 0.0);
+        let (far_body, far_lights) = traffic_visibility(S_FAR, conditions);
+        let (near_body, near_lights) = traffic_visibility(0.42, conditions);
+        assert!(far_body < near_body);
+        assert!(far_lights > far_body);
+        assert!(far_lights > near_lights);
+    }
+
+    #[test]
+    fn headlight_cone_widens_toward_the_player() {
+        let (_, near, near_weight) = headlight_band_geometry(0);
+        let (_, far, far_weight) = headlight_band_geometry(VISIBILITY_BANDS - 1);
+        assert!(near.x > far.x);
+        assert!(near_weight > far_weight);
+    }
+
+    #[test]
+    fn traffic_palette_has_four_stable_variants() {
+        let variants = [
+            traffic_car_color(0, 1.0),
+            traffic_car_color(1, 1.0),
+            traffic_car_color(2, 1.0),
+            traffic_car_color(3, 1.0),
+        ];
+        for left in 0..variants.len() {
+            for right in left + 1..variants.len() {
+                assert_ne!(variants[left], variants[right]);
+            }
+        }
+        assert_eq!(traffic_car_color(0, 1.0), traffic_car_color(4, 1.0));
     }
 
     #[test]
