@@ -174,6 +174,10 @@ struct DifficultyOverlayRoot;
 struct DifficultyCard(usize);
 #[derive(Component)]
 struct DifficultyCardText(usize);
+#[derive(Component)]
+struct DifficultyLeaderboard;
+#[derive(Component)]
+struct CrtMenuText;
 
 #[derive(Resource, Default)]
 pub struct InstrumentVisuals {
@@ -400,7 +404,7 @@ fn normal_recovery_cue(gear: Gear, speed: f32, shift_threshold: f32) -> &'static
     if gear == Gear::Low && speed >= shift_threshold {
         "SHIFT HIGH"
     } else {
-        "LB LOW | RB HIGH"
+        "A/LB LOW | X/RB HIGH"
     }
 }
 
@@ -488,7 +492,7 @@ fn spawn_instruments(commands: &mut Commands) {
         ));
     }
     commands.spawn((
-        Text2d::new("LB LOW | RB HIGH"),
+        Text2d::new("A/LB LOW | X/RB HIGH"),
         TextFont {
             font_size: FontSize::Px(13.0),
             ..default()
@@ -537,7 +541,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
             parent.spawn((
                 Sprite::from_color(
                     Color::srgba(0.025, 0.07, 0.14, 0.98),
-                    Vec2::new(780.0, 390.0),
+                    Vec2::new(920.0, 510.0),
                 ),
                 Transform::from_xyz(0.0, 0.0, 0.1),
             ));
@@ -548,17 +552,17 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.50, 0.95, 1.0)),
-                Transform::from_xyz(0.0, 135.0, 0.3),
+                Transform::from_xyz(-145.0, 205.0, 0.3),
             ));
             for (index, x, title, duration) in [
-                (0, -230.0, "EASY", "2:00"),
-                (1, 0.0, "MEDIUM", "6:00"),
-                (2, 230.0, "HARD", "10:00"),
+                (0, -355.0, "EASY", "2:00"),
+                (1, -155.0, "MEDIUM", "6:00"),
+                (2, 45.0, "HARD", "10:00"),
             ] {
                 parent.spawn((
                     Sprite::from_color(
                         Color::srgba(0.06, 0.16, 0.27, 0.96),
-                        Vec2::new(200.0, 150.0),
+                        Vec2::new(180.0, 150.0),
                     ),
                     Transform::from_xyz(x, 5.0, 0.2),
                     DifficultyCard(index),
@@ -575,13 +579,33 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                 ));
             }
             parent.spawn((
+                Text2d::new("LOCAL TOP 5 — MEDIUM\n#  TAG  SCORE   CYC PASS BUMP\n1  ---  ------   --  ---  ---\n2  ---  ------   --  ---  ---\n3  ---  ------   --  ---  ---\n4  ---  ------   --  ---  ---\n5  ---  ------   --  ---  ---"),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.72, 0.90, 1.0)),
+                Transform::from_xyz(285.0, 22.0, 0.3),
+                DifficultyLeaderboard,
+            ));
+            parent.spawn((
+                Text2d::new("CRT DISPLAY: ON   [ C / X TO TOGGLE ]"),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 1.0, 0.74)),
+                Transform::from_xyz(-145.0, -112.0, 0.3),
+                CrtMenuText,
+            ));
+            parent.spawn((
                 Text2d::new("<   ARROWS / LEFT STICK   >"),
                 TextFont {
                     font_size: FontSize::Px(18.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.72, 0.90, 1.0)),
-                Transform::from_xyz(0.0, -112.0, 0.3),
+                Transform::from_xyz(-145.0, -158.0, 0.3),
             ));
             parent.spawn((
                 Text2d::new("ENTER / A / START TO BEGIN"),
@@ -590,7 +614,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.88, 0.45)),
-                Transform::from_xyz(0.0, -153.0, 0.3),
+                Transform::from_xyz(-145.0, -205.0, 0.3),
             ));
         });
 }
@@ -1817,7 +1841,18 @@ fn sync_hud(
         sprite.color = Color::srgba(1.0, 0.84, 0.24, if selected { 0.65 * fade } else { 0.0 });
     }
     if let Ok(mut text) = status.single_mut() {
-        let next = if audio.muted {
+        let volume_notice = format!(
+            "{} {:03}%  |  [ ] music  - = effects",
+            audio.level_notice,
+            if audio.level_notice == "MUSIC" {
+                audio.music_gain * 100.0
+            } else {
+                audio.effects_gain * 100.0
+            }
+        );
+        let next = if audio.level_notice_secs > 0.0 {
+            volume_notice.as_str()
+        } else if audio.muted {
             "SOUND OFF | M to unmute"
         } else if sim.0.paused {
             "PAUSED | Start/P resume | Select/R restart"
@@ -2577,13 +2612,25 @@ fn sync_instruments(
     visuals.cue = cue;
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_difficulty_overlay(
     end: Res<crate::EndSession>,
+    leaderboard: Res<crate::LeaderboardState>,
+    display: Res<crate::DisplaySettings>,
     mut root: Query<&mut Visibility, With<DifficultyOverlayRoot>>,
     mut cards: Query<(&DifficultyCard, &mut Sprite)>,
-    mut texts: Query<(&DifficultyCardText, &mut TextColor)>,
+    mut texts: Query<(&DifficultyCardText, &mut TextColor), Without<CrtMenuText>>,
+    mut board: Query<&mut Text2d, (With<DifficultyLeaderboard>, Without<CrtMenuText>)>,
+    mut crt: Query<
+        (&mut Text2d, &mut TextColor),
+        (
+            With<CrtMenuText>,
+            Without<DifficultyLeaderboard>,
+            Without<DifficultyCardText>,
+        ),
+    >,
 ) {
-    if !end.is_changed() {
+    if !end.is_changed() && !leaderboard.is_changed() && !display.is_changed() {
         return;
     }
     if let Ok(mut visibility) = root.single_mut() {
@@ -2607,6 +2654,45 @@ fn sync_difficulty_overlay(
             Color::srgb(0.78, 0.92, 0.98)
         };
     }
+    let difficulty = game_core::Difficulty::ALL[end.0.difficulty_index];
+    if let Ok(mut text) = board.single_mut() {
+        text.0 = difficulty_menu_leaderboard_table(&leaderboard.entries, difficulty);
+    }
+    if let Ok((mut text, mut color)) = crt.single_mut() {
+        let (label, tint) = if display.crt_enabled {
+            ("ON", Color::srgb(0.55, 1.0, 0.74))
+        } else {
+            ("OFF", Color::srgb(1.0, 0.62, 0.38))
+        };
+        text.0 = format!("CRT DISPLAY: {label}   [ C / X TO TOGGLE ]");
+        color.0 = tint;
+    }
+}
+
+fn difficulty_menu_leaderboard_table(
+    entries: &[game_core::LeaderboardEntry],
+    difficulty: game_core::Difficulty,
+) -> String {
+    let mut lines = vec![
+        format!("LOCAL TOP 5 — {}", difficulty.label()),
+        "#  TAG  SCORE   CYC PASS BUMP".to_string(),
+    ];
+    let mut ranked = game_core::leaderboard_for(entries, difficulty);
+    for rank in 1..=5 {
+        if let Some(entry) = ranked.next() {
+            lines.push(format!(
+                "{rank}  {}  {:06}   {:02}  {:03}  {:03}",
+                entry.initials_str(),
+                entry.result.score,
+                entry.result.day_cycles,
+                entry.result.cars_passed,
+                entry.result.cars_bumped
+            ));
+        } else {
+            lines.push(format!("{rank}  ---  ------   --  ---  ---"));
+        }
+    }
+    lines.join("\n")
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -2761,13 +2847,26 @@ mod tests {
     fn normal_low_cue_requests_high_at_shift_threshold() {
         assert_eq!(
             normal_recovery_cue(Gear::Low, 9.99, 10.0),
-            "LB LOW | RB HIGH"
+            "A/LB LOW | X/RB HIGH"
         );
         assert_eq!(normal_recovery_cue(Gear::Low, 10.0, 10.0), "SHIFT HIGH");
         assert_eq!(
             normal_recovery_cue(Gear::High, 24.0, 10.0),
-            "LB LOW | RB HIGH"
+            "A/LB LOW | X/RB HIGH"
         );
+    }
+
+    #[test]
+    fn difficulty_menu_board_filters_and_fills_exactly_five_rows() {
+        let entries = vec![
+            game_core::LeaderboardEntry::new("EZY", game_core::Difficulty::Easy, 2, 12, 1).unwrap(),
+            game_core::LeaderboardEntry::new("HRD", game_core::Difficulty::Hard, 8, 50, 0).unwrap(),
+        ];
+        let table = difficulty_menu_leaderboard_table(&entries, game_core::Difficulty::Easy);
+        assert!(table.starts_with("LOCAL TOP 5 — EASY\n"));
+        assert!(table.contains("1  EZY"));
+        assert!(!table.contains("HRD"));
+        assert_eq!(table.lines().count(), 7, "title + header + five ranks");
     }
 
     #[test]

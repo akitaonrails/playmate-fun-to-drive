@@ -25,6 +25,7 @@ impl Plugin for ArcadeAudioPlugin {
                 (
                     unlock_on_input,
                     toggle_mute,
+                    adjust_volume,
                     update_mix,
                     schedule_weather_cues,
                     play_cues,
@@ -95,6 +96,10 @@ impl AudioEvents {
 pub(crate) struct AudioState {
     pub(crate) unlocked: bool,
     pub(crate) muted: bool,
+    pub(crate) music_gain: f32,
+    pub(crate) effects_gain: f32,
+    pub(crate) level_notice: &'static str,
+    pub(crate) level_notice_secs: f32,
     pub(crate) engine_low: f32,
     pub(crate) engine_high: f32,
     pub(crate) wind: f32,
@@ -117,6 +122,10 @@ impl AudioState {
         Self {
             unlocked: false,
             muted,
+            music_gain: 1.0,
+            effects_gain: 1.0,
+            level_notice: "",
+            level_notice_secs: 0.0,
             engine_low: 0.0,
             engine_high: 0.0,
             wind: 0.0,
@@ -137,6 +146,41 @@ impl AudioState {
 
     pub(crate) fn unlock(&mut self) {
         self.unlocked = true;
+    }
+}
+
+const VOLUME_STEP: f32 = 0.1;
+const MAX_USER_GAIN: f32 = 1.5;
+
+fn stepped_gain(current: f32, down: bool, up: bool) -> f32 {
+    match (down, up) {
+        (true, false) => (current - VOLUME_STEP).max(0.0),
+        (false, true) => (current + VOLUME_STEP).min(MAX_USER_GAIN),
+        _ => current,
+    }
+}
+
+fn adjust_volume(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut state: ResMut<AudioState>) {
+    state.level_notice_secs = (state.level_notice_secs - time.delta_secs()).max(0.0);
+    let music = stepped_gain(
+        state.music_gain,
+        keys.just_pressed(KeyCode::BracketLeft),
+        keys.just_pressed(KeyCode::BracketRight),
+    );
+    let effects = stepped_gain(
+        state.effects_gain,
+        keys.just_pressed(KeyCode::Minus),
+        keys.just_pressed(KeyCode::Equal),
+    );
+    if music != state.music_gain {
+        state.music_gain = music;
+        state.level_notice = "MUSIC";
+        state.level_notice_secs = 1.4;
+    }
+    if effects != state.effects_gain {
+        state.effects_gain = effects;
+        state.level_notice = "SFX";
+        state.level_notice_secs = 1.4;
     }
 }
 
@@ -408,7 +452,13 @@ fn update_mix(
             AudioLayer::MusicNeon => state.music_neon,
             AudioLayer::MusicDawn => state.music_dawn,
         };
-        sink.set_volume(Volume::Linear(volume));
+        let user_gain = match layer {
+            AudioLayer::MusicSunset | AudioLayer::MusicNeon | AudioLayer::MusicDawn => {
+                state.music_gain
+            }
+            _ => state.effects_gain,
+        };
+        sink.set_volume(Volume::Linear(volume * user_gain));
         match layer {
             AudioLayer::EngineLow => sink.set_speed(state.engine_pitch),
             AudioLayer::EngineHigh => sink.set_speed((state.engine_pitch * 1.03).min(1.52)),
@@ -484,7 +534,8 @@ fn play_cues(
         if state.unlocked && !state.muted {
             commands.spawn((
                 AudioPlayer::new(assets.source(cue)),
-                PlaybackSettings::DESPAWN.with_volume(Volume::Linear(cue.volume())),
+                PlaybackSettings::DESPAWN
+                    .with_volume(Volume::Linear(cue.volume() * state.effects_gain)),
             ));
         }
     }
@@ -628,6 +679,15 @@ mod tests {
         assert_eq!(quiet.overrev, 0.0);
         assert!(early_warning.overrev > 0.0);
         assert!((warning.overrev - early_warning.overrev * 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn user_volume_steps_are_clamped_and_conflicts_are_ignored() {
+        assert!((stepped_gain(1.0, true, false) - 0.9).abs() < f32::EPSILON);
+        assert!((stepped_gain(1.0, false, true) - 1.1).abs() < f32::EPSILON);
+        assert_eq!(stepped_gain(0.0, true, false), 0.0);
+        assert_eq!(stepped_gain(MAX_USER_GAIN, false, true), MAX_USER_GAIN);
+        assert_eq!(stepped_gain(0.7, true, true), 0.7);
     }
 
     #[test]

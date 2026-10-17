@@ -71,6 +71,11 @@ pub(crate) struct LeaderboardState {
     pub(crate) qa_mode: bool,
 }
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct DisplaySettings {
+    pub(crate) crt_enabled: bool,
+}
+
 /// Nitro can remain numerically charged on the terminal fixed step, so every
 /// cosmetic consumer must also require a live running phase.
 pub(crate) fn nitro_effects_active(game: &Game) -> bool {
@@ -235,6 +240,7 @@ fn main() {
     };
     let mut app = App::new();
     let audio_muted = bridge::load_local(audio::STORAGE_KEY).0.as_deref() == Some("muted");
+    let crt_enabled = bridge::load_local(toy_view::CRT_STORAGE_KEY).0.as_deref() != Some("off");
 
     app.add_plugins(
         DefaultPlugins
@@ -254,6 +260,7 @@ fn main() {
                 ..default()
             }),
     )
+    .add_plugins(MaterialPlugin::<toy_view::CrtScreenMaterial>::default())
     .add_plugins(audio::ArcadeAudioPlugin)
     .insert_resource(ClearColor(Color::srgb(0.008, 0.011, 0.022)))
     .insert_resource(TuningRes(tuning))
@@ -265,6 +272,7 @@ fn main() {
         persistent,
         qa_mode,
     })
+    .insert_resource(DisplaySettings { crt_enabled })
     .insert_resource(Sim({
         // Seeded technical loop: mixed-radius corners, rolling elevation,
         // traffic, and collidable roadside scenery.
@@ -396,6 +404,16 @@ fn gather_input(
             frame.state.nitro = true;
             frame.pad_seen = true;
         }
+        // Xbox face-button aliases: X shifts up, A shifts down. They are
+        // handled only during gameplay, so A remains menu confirmation.
+        if pad.just_pressed(GamepadButton::West) {
+            high_requested = true;
+            frame.pad_seen = true;
+        }
+        if pad.just_pressed(GamepadButton::South) {
+            low_requested = true;
+            frame.pad_seen = true;
+        }
     }
 
     low_requested |= low_bumper_down && !frame.low_bumper_down;
@@ -446,6 +464,7 @@ fn handle_end_input(
     config: Res<RunConfig>,
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
+    mut display: ResMut<DisplaySettings>,
     mut frame: ResMut<FrameInput>,
     mut audio_events: ResMut<audio::AudioEvents>,
 ) {
@@ -473,6 +492,14 @@ fn handle_end_input(
                     .any(|pad| pad.just_pressed(GamepadButton::DPadRight));
             end.0.difficulty_index = menu_index_after_input(end.0.difficulty_index, left, right);
             if end.0.difficulty_index != previous_index {
+                audio_events.emit(audio::AudioCue::MenuMove);
+            }
+            let toggle_crt = keys.just_pressed(KeyCode::KeyC)
+                || pads.iter().any(|pad| pad.just_pressed(GamepadButton::West));
+            if toggle_crt {
+                display.crt_enabled = !display.crt_enabled;
+                let value = if display.crt_enabled { "on" } else { "off" };
+                let _ = bridge::save_local(toy_view::CRT_STORAGE_KEY, value);
                 audio_events.emit(audio::AudioCue::MenuMove);
             }
             let confirm = keys.just_pressed(KeyCode::Enter)

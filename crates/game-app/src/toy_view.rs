@@ -8,11 +8,18 @@ use bevy::camera::RenderTarget;
 use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::post_process::bloom::{Bloom, BloomPrefilter};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+use bevy::reflect::TypePath;
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, TextureDimension, TextureFormat, TextureUsages,
+};
+use bevy::shader::ShaderRef;
 use bevy::world_serialization::WorldAssetRoot;
 use game_core::Gear;
 
 use crate::Sim;
+
+pub const CRT_STORAGE_KEY: &str = "fun-to-drive.crt.v1";
+const CRT_SHADER_PATH: &str = "shaders/crt_screen.wesl";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -54,10 +61,27 @@ impl Default for ViewState {
     }
 }
 
-/// Handle of the StandardMaterial on the toy screen (M8 pipeline, kept for
-/// the M10 warm-lamp tint dial).
+/// Single-pass CRT material. The deliberately inexpensive Lottes-style pass
+/// combines tube warp, scanlines, an RGB grille, vignette, and a rolling beam.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct CrtScreenMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    source: Handle<Image>,
+    /// x=enabled, y=time, z=look strength, w=backlight exposure
+    #[uniform(2)]
+    params: Vec4,
+}
+
+impl Material for CrtScreenMaterial {
+    fn fragment_shader() -> ShaderRef {
+        CRT_SHADER_PATH.into()
+    }
+}
+
+/// Handle of the live material on the toy screen.
 #[derive(Resource, Default)]
-pub struct ScreenMatHandle(pub Option<Handle<StandardMaterial>>);
+pub struct ScreenMatHandle(pub Option<Handle<CrtScreenMaterial>>);
 
 #[derive(Resource, Default)]
 pub struct ScreenPaintState {
@@ -275,6 +299,20 @@ pub fn setup_diorama(
     commands
         .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
         .with_children(|parent| {
+            // The tube is a real local light source, not just a bright pixel
+            // surface. Its cool spill catches the inner black bezel, wheel,
+            // and controls while the material itself remains dark plastic.
+            parent.spawn((
+                PointLight {
+                    color: Color::srgb(0.45, 0.72, 1.0),
+                    intensity: 88.0,
+                    range: 0.38,
+                    radius: 0.035,
+                    shadow_maps_enabled: false,
+                    ..default()
+                },
+                Transform::from_xyz(0.0, 0.177, 0.074),
+            ));
             parent
                 .spawn((
                     Transform::from_xyz(0.048, 0.0815, 0.050)
@@ -529,10 +567,13 @@ pub fn spawn_toy(
 /// M8/M10: put the live game texture on the toy's screen quad via the
 /// rolling-tube material (toy_look dial in `update_screen_mat`).
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 pub fn paint_screen(
     mut commands: Commands,
     game_image: Res<GameImage>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut crt_materials: ResMut<Assets<CrtScreenMaterial>>,
+    display: Res<crate::DisplaySettings>,
     mut mat_handle: ResMut<ScreenMatHandle>,
     mut paint_state: ResMut<ScreenPaintState>,
     screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
@@ -556,18 +597,14 @@ pub fn paint_screen(
                 .insert(ScreenPainted);
             paint_state.bezel = true;
         } else if name.as_str().starts_with("Screen") && !paint_state.screen {
-            let mat = materials.add(StandardMaterial {
-                base_color_texture: Some(game_image.0.clone()),
-                // the game image itself is the light source: backlit drum
-                emissive_texture: Some(game_image.0.clone()),
-                emissive: LinearRgba::new(0.9, 0.8, 0.62, 1.0),
-                // NOT unlit: unlit skips the emissive pass, which is the
-                // whole backlight — the screen must be a lit emitter
-                ..default()
+            let mat = crt_materials.add(CrtScreenMaterial {
+                source: game_image.0.clone(),
+                params: Vec4::new(if display.crt_enabled { 1.0 } else { 0.0 }, 0.0, 0.5, 1.22),
             });
             mat_handle.0 = Some(mat.clone());
             commands
                 .entity(entity)
+                .remove::<MeshMaterial3d<StandardMaterial>>()
                 .insert(MeshMaterial3d(mat))
                 .insert(ScreenPainted);
             paint_state.screen = true;
@@ -579,10 +616,11 @@ pub fn paint_screen(
 /// (0.0 -> 0.5 -> 1.0 -> 0.0) for manual comparison.
 pub fn update_screen_mat(
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    display: Res<crate::DisplaySettings>,
     mut view: ResMut<ViewState>,
     mat_handle: Res<ScreenMatHandle>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut applied_look: Local<Option<f32>>,
+    mut materials: ResMut<Assets<CrtScreenMaterial>>,
 ) {
     if keys.just_pressed(KeyCode::KeyL) {
         view.toy_look = match view.toy_look {
@@ -594,18 +632,13 @@ pub fn update_screen_mat(
     let Some(handle) = mat_handle.0.as_ref() else {
         return;
     };
-    if *applied_look == Some(view.toy_look) {
-        return;
-    }
-    *applied_look = Some(view.toy_look);
     if let Some(mut mat) = materials.get_mut(handle) {
-        // rolling-tube approximation on the proven StandardMaterial path:
-        // warm lamp tint + emissive backlit glow scale with the dial (band
-        // overlays live in the 2D drum view; see view.rs)
-        let look = view.toy_look;
-        mat.base_color = Color::srgb(1.0, 1.0, 1.0).mix(&Color::srgb(0.92, 0.85, 0.70), look * 0.6);
-        let backlight = 1.12 + look * 0.30;
-        mat.emissive = LinearRgba::new(backlight, backlight * 0.88, backlight * 0.68, 1.0);
+        mat.params = Vec4::new(
+            if display.crt_enabled { 1.0 } else { 0.0 },
+            time.elapsed_secs(),
+            view.toy_look,
+            1.22 + view.toy_look * 0.16,
+        );
     }
 }
 
