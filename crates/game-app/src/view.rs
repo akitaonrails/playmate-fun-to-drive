@@ -6,7 +6,7 @@
 //! with flat sprites so it renders identically into the toy's screen.
 
 use bevy::prelude::*;
-use game_core::{EndReason, Gear, Phase, WeatherKind, WeatherTransition};
+use game_core::{Gear, Phase, WeatherKind, WeatherTransition};
 
 use crate::{Sim, TuningRes};
 
@@ -101,9 +101,6 @@ struct NitroMeterHalo;
 struct RainStreak(usize);
 
 #[derive(Component)]
-struct RoadSheen;
-
-#[derive(Component)]
 pub struct ScoreText;
 
 /// backing panel behind an in-screen HUD block (contrast)
@@ -137,6 +134,21 @@ pub struct SessionText;
 
 #[derive(Component)]
 pub struct TrafficText;
+
+#[derive(Component)]
+struct EndOverlayRoot;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndTextKind {
+    Summary,
+    Prompt,
+    Initial(u8),
+    Table,
+    Footer,
+}
+
+#[derive(Component)]
+struct EndOverlayText(EndTextKind);
 
 /// Resolved visual weather weights are published for deterministic QA.
 #[derive(Resource, Default)]
@@ -350,14 +362,6 @@ pub fn setup(mut commands: Commands) {
             NitroSpeedLine(k),
         ));
     }
-    for y in [-190.0, -145.0, -95.0, -38.0] {
-        commands.spawn((
-            Sprite::from_color(Color::srgba(0.55, 0.78, 0.92, 0.0), Vec2::new(250.0, 3.0)),
-            Transform::from_xyz(0.0, y, -3.65),
-            RoadSheen,
-        ));
-    }
-
     // sea + sand at the horizon
     commands.spawn((
         Sprite::from_color(Color::srgb(0.04, 0.52, 0.68), Vec2::new(960.0, 22.0)),
@@ -663,6 +667,98 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.0, 2.0),
         FlashOverlay,
     ));
+
+    // Session-end presentation is rendered into the same 960x600 texture as
+    // gameplay, so it remains legible in both flat and toy-screen views.
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, 20.0),
+            Visibility::Hidden,
+            EndOverlayRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.01, 0.02, 0.05, 0.78),
+                    Vec2::new(960.0, 600.0),
+                ),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.025, 0.07, 0.14, 0.98),
+                    Vec2::new(720.0, 500.0),
+                ),
+                Transform::from_xyz(0.0, 0.0, 0.1),
+            ));
+            parent.spawn((
+                Sprite::from_color(Color::srgba(0.10, 0.86, 1.0, 0.95), Vec2::new(724.0, 4.0)),
+                Transform::from_xyz(0.0, 248.0, 0.2),
+            ));
+            parent.spawn((
+                Text2d::new("RUN COMPLETE"),
+                TextFont {
+                    font_size: FontSize::Px(36.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.50, 0.95, 1.0)),
+                Transform::from_xyz(0.0, 195.0, 0.3),
+            ));
+            for (kind, size, color, y) in [
+                (
+                    EndTextKind::Summary,
+                    23.0,
+                    Color::srgb(1.0, 0.93, 0.60),
+                    137.0,
+                ),
+                (
+                    EndTextKind::Prompt,
+                    17.0,
+                    Color::srgb(0.75, 0.92, 1.0),
+                    91.0,
+                ),
+                (
+                    EndTextKind::Table,
+                    17.0,
+                    Color::srgb(0.84, 0.94, 1.0),
+                    -92.0,
+                ),
+                (
+                    EndTextKind::Footer,
+                    15.0,
+                    Color::srgb(0.55, 0.82, 0.92),
+                    -218.0,
+                ),
+            ] {
+                parent.spawn((
+                    Text2d::new(""),
+                    TextFont {
+                        font_size: FontSize::Px(size),
+                        ..default()
+                    },
+                    TextColor(color),
+                    Transform::from_xyz(0.0, y, 0.3),
+                    EndOverlayText(kind),
+                ));
+            }
+            for index in 0..3u8 {
+                let x = (index as f32 - 1.0) * 78.0;
+                parent.spawn((
+                    Sprite::from_color(Color::srgba(0.08, 0.62, 0.78, 0.48), Vec2::new(62.0, 62.0)),
+                    Transform::from_xyz(x, 37.0, 0.2),
+                ));
+                parent.spawn((
+                    Text2d::new("_"),
+                    TextFont {
+                        font_size: FontSize::Px(38.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.88, 1.0, 1.0)),
+                    Transform::from_xyz(x, 37.0, 0.3),
+                    EndOverlayText(EndTextKind::Initial(index)),
+                ));
+            }
+        });
 
     // M10 drum bands + recess shading (alpha driven by toy_look)
     for i in 0..5 {
@@ -1025,22 +1121,32 @@ fn sync_nitro_exhaust(
     }
 }
 
-fn speed_line_geometry(index: usize, elapsed: f32, intensity: f32) -> (Vec2, Vec2, f32) {
+fn speed_line_geometry(
+    index: usize,
+    elapsed: f32,
+    intensity: f32,
+    road_center: f32,
+) -> (Vec2, Vec2, f32) {
     let side = if index.is_multiple_of(2) { -1.0 } else { 1.0 };
     let speed = 1.35 + (index % 5) as f32 * 0.11;
     let phase = (elapsed * speed + index as f32 * 0.618_034).fract();
-    let x = side * (270.0 + phase * 210.0);
+    let scale = S_FAR + phase * (1.0 - S_FAR);
+    let x = road_center + side * HALF_ROAD_PX * scale * 1.04;
     let lane = (index % 7) as f32 - 3.0;
-    let y = 220.0 - phase * 520.0 + lane * 5.0;
+    let y = scale_to_y(scale) + lane * (2.0 + scale * 3.0);
     let size = Vec2::new(
         1.5 + intensity * 1.5,
-        (34.0 + phase * 34.0) * (0.58 + intensity * 0.42),
+        (18.0 + scale * 52.0) * (0.58 + intensity * 0.42),
     );
-    (Vec2::new(x, y), size, side * 0.34)
+    // A vertical sprite rotated with this sign is parallel to the projected
+    // left/right road border: both sides converge toward the horizon.
+    let border_angle = side * ((HALF_ROAD_PX * (1.0 - S_FAR)) / (HORIZON_Y - CAR_Y)).atan();
+    (Vec2::new(x, y), size, border_angle)
 }
 
 fn sync_nitro_speed_lines(
     visuals: Res<NitroVisuals>,
+    proj: Res<Proj>,
     time: Res<Time>,
     mut lines: Query<(
         &NitroSpeedLine,
@@ -1056,13 +1162,21 @@ fn sync_nitro_speed_lines(
         return;
     }
     for (line, mut transform, mut sprite, mut visibility) in &mut lines {
-        let (position, size, angle) =
-            speed_line_geometry(line.0, time.elapsed_secs(), visuals.intensity);
+        let phase = (time.elapsed_secs() * (1.35 + (line.0 % 5) as f32 * 0.11)
+            + line.0 as f32 * 0.618_034)
+            .fract();
+        let row = (((1.0 - phase) * (ROWS - 1) as f32).round() as usize).min(ROWS - 1);
+        let (position, size, angle) = speed_line_geometry(
+            line.0,
+            time.elapsed_secs(),
+            visuals.intensity,
+            proj.rows_x[row],
+        );
         transform.translation.x = position.x;
         transform.translation.y = position.y;
         transform.rotation = Quat::from_rotation_z(angle);
         sprite.custom_size = Some(size);
-        let edge_strength = ((position.x.abs() - 250.0) / 230.0).clamp(0.0, 1.0);
+        let edge_strength = ((position.y - HORIZON_Y).abs() / (HORIZON_Y - CAR_Y)).clamp(0.0, 1.0);
         sprite.color = Color::srgba(
             0.72,
             0.94,
@@ -1257,9 +1371,7 @@ fn sync_hud(
                     "ARROWS drive | G gear | Y nitro | R restart | T flat | L toy look".to_string()
                 }
                 Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
-                Phase::GameOver { reason } => match reason {
-                    EndReason::Time => "TIME UP | R to restart".to_string(),
-                },
+                Phase::GameOver { .. } => String::new(),
             }
         } else {
             match &sim.0.phase {
@@ -1267,12 +1379,74 @@ fn sync_hud(
                     "ARROWS steer | G gear | Y nitro | R restart | T toy | L toy look".to_string()
                 }
                 Phase::Running => String::new(),
-                Phase::GameOver { reason } => match reason {
-                    EndReason::Time => "TIME UP | R to restart".to_string(),
-                },
+                Phase::GameOver { .. } => String::new(),
             }
         };
     }
+}
+
+fn sync_end_overlay(
+    sim: Res<Sim>,
+    end: Res<crate::EndSession>,
+    leaderboard: Res<crate::LeaderboardState>,
+    mut root: Query<&mut Visibility, With<EndOverlayRoot>>,
+    mut texts: Query<(&EndOverlayText, &mut Text2d)>,
+) {
+    if let Ok(mut visibility) = root.single_mut() {
+        *visibility = if end.0.mode == crate::session::EndMode::Playing {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+    }
+    let result = sim.0.result().copied().unwrap_or_else(|| {
+        game_core::SessionResult::new(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped)
+    });
+    let table = leaderboard_table(&leaderboard.entries);
+    for (marker, mut text) in &mut texts {
+        text.0 = match marker.0 {
+            EndTextKind::Summary => format!(
+                "SCORE {:06}   CYCLES {:02}   PASSED {:03}   BUMPED {:03}",
+                result.score, result.day_cycles, result.cars_passed, result.cars_bumped
+            ),
+            EndTextKind::Prompt => match end.0.mode {
+                crate::session::EndMode::NameEntry => {
+                    "TYPE YOUR 3-LETTER NAME  •  ENTER TO SUBMIT".to_string()
+                }
+                crate::session::EndMode::Leaderboard => "LOCAL TOP 5".to_string(),
+                crate::session::EndMode::Playing => String::new(),
+            },
+            EndTextKind::Initial(index) => end.0.initials.cell(index as usize).to_string(),
+            EndTextKind::Table => table.clone(),
+            EndTextKind::Footer => match end.0.mode {
+                crate::session::EndMode::NameEntry => {
+                    "A-Z enters letters  •  BACKSPACE edits".to_string()
+                }
+                crate::session::EndMode::Leaderboard => "R or ENTER starts a new run".to_string(),
+                crate::session::EndMode::Playing => String::new(),
+            },
+        };
+    }
+}
+
+fn leaderboard_table(entries: &[game_core::LeaderboardEntry]) -> String {
+    let mut lines = vec!["#   TAG    SCORE    CYC   PASS   BUMP".to_string()];
+    for rank in 0..5 {
+        if let Some(entry) = entries.get(rank) {
+            lines.push(format!(
+                "{}   {}   {:06}    {:02}    {:03}    {:03}",
+                rank + 1,
+                entry.initials_str(),
+                entry.result.score,
+                entry.result.day_cycles,
+                entry.result.cars_passed,
+                entry.result.cars_bumped
+            ));
+        } else {
+            lines.push(format!("{}   ---   ------    --    ---    ---", rank + 1));
+        }
+    }
+    lines.join("\n")
 }
 
 fn nitro_pickup_pulse(remaining: f32) -> f32 {
@@ -1338,7 +1512,6 @@ fn sync_environment(
             Without<HazeStrip>,
             Without<SnowFlake>,
             Without<RainStreak>,
-            Without<RoadSheen>,
         ),
     >,
     mut sky_objs: Query<
@@ -1350,7 +1523,6 @@ fn sync_environment(
             Without<HazeStrip>,
             Without<SnowFlake>,
             Without<RainStreak>,
-            Without<RoadSheen>,
         ),
     >,
     mut clouds: Query<
@@ -1362,7 +1534,6 @@ fn sync_environment(
             Without<HazeStrip>,
             Without<SnowFlake>,
             Without<RainStreak>,
-            Without<RoadSheen>,
         ),
     >,
     mut haze: Query<
@@ -1374,7 +1545,6 @@ fn sync_environment(
             Without<SnowFlake>,
             Without<Cloud>,
             Without<RainStreak>,
-            Without<RoadSheen>,
         ),
     >,
     mut snow: Query<
@@ -1386,7 +1556,6 @@ fn sync_environment(
             Without<SkyObject>,
             Without<Cloud>,
             Without<RainStreak>,
-            Without<RoadSheen>,
         ),
     >,
     mut rain: Query<
@@ -1397,19 +1566,6 @@ fn sync_environment(
             Without<Cloud>,
             Without<HazeStrip>,
             Without<SnowFlake>,
-            Without<RoadSheen>,
-        ),
-    >,
-    mut sheen: Query<
-        &mut Sprite,
-        (
-            With<RoadSheen>,
-            Without<SkyBand>,
-            Without<SkyObject>,
-            Without<Cloud>,
-            Without<HazeStrip>,
-            Without<SnowFlake>,
-            Without<RainStreak>,
         ),
     >,
 ) {
@@ -1551,9 +1707,6 @@ fn sync_environment(
         }
         sp.color = Color::srgba(0.72, 0.88, 1.0, rain_visible * (0.34 + day * 0.18));
     }
-    for mut sp in &mut sheen {
-        sp.color = Color::srgba(0.55, 0.78, 0.92, rain_visible * 0.20);
-    }
 }
 
 /// M10: scroll the drum bands with the drum and set overlay alpha by dial.
@@ -1599,6 +1752,7 @@ pub fn add_view_systems(app: &mut App) {
             sync_flash,
             sync_drum_overlays,
             sync_hud,
+            sync_end_overlay,
         )
             .chain(),
     );
@@ -1668,13 +1822,20 @@ mod tests {
     }
 
     #[test]
-    fn speed_lines_stay_edge_biased_and_scale_with_intensity() {
-        for index in 0..SPEED_LINE_POOL {
-            let (position, _, _) = speed_line_geometry(index, 1.25, 1.0);
-            assert!(position.x.abs() >= 270.0);
-        }
-        let (_, faint, _) = speed_line_geometry(3, 1.25, 0.1);
-        let (_, strong, _) = speed_line_geometry(3, 1.25, 1.0);
+    fn speed_lines_converge_with_road_borders_and_scale_with_intensity() {
+        let (far_left, _, left_angle) = speed_line_geometry(0, 0.0, 1.0, 0.0);
+        let (far_right, _, right_angle) = speed_line_geometry(1, -0.618_034 / 1.46, 1.0, 0.0);
+        assert!(far_left.x < 0.0 && far_right.x > 0.0);
+        assert!(left_angle < 0.0 && right_angle > 0.0);
+        assert!((left_angle + right_angle).abs() < 1e-6);
+
+        let (near, _, _) = speed_line_geometry(0, 0.7, 1.0, 0.0);
+        assert!(
+            near.x.abs() > far_left.x.abs(),
+            "border widens toward player"
+        );
+        let (_, faint, _) = speed_line_geometry(3, 1.25, 0.1, 0.0);
+        let (_, strong, _) = speed_line_geometry(3, 1.25, 1.0, 0.0);
         assert!(strong.y > faint.y);
     }
 }

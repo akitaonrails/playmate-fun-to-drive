@@ -22,6 +22,9 @@ pub struct Tuning {
     pub off_road_limit: f32,
     /// Seconds of grace off-road before crashing.
     pub off_road_grace: f32,
+    /// Speed retained at maximum lateral excursion. Between the road edge
+    /// and the excursion clamp, drag increases smoothly toward this factor.
+    pub off_road_min_speed_factor: f32,
     /// Player car half-width in half-road-width units.
     pub car_half_width: f32,
     /// Hazard half-width in half-road-width units.
@@ -79,6 +82,7 @@ impl Default for Tuning {
             steer_rate: 2.0,
             off_road_limit: 1.02,
             off_road_grace: 0.45,
+            off_road_min_speed_factor: 0.42,
             car_half_width: 0.13,
             hazard_half_width: 0.14,
             collision_forgiveness: 0.35,
@@ -142,6 +146,9 @@ impl Tuning {
         }
         if !(0.0..=2.0).contains(&self.off_road_grace) {
             return Err("off_road_grace out of [0, 2]");
+        }
+        if !(0.2..=0.9).contains(&self.off_road_min_speed_factor) {
+            return Err("off_road_min_speed_factor out of [0.2, 0.9]");
         }
         if !(0.05..=0.4).contains(&self.car_half_width) {
             return Err("car_half_width out of [0.05, 0.4]");
@@ -236,6 +243,15 @@ mod tests {
     fn rejects_steering_weaker_than_drift() {
         let mut t = Tuning::default();
         t.steer_rate = t.drift_rate * t.curve_gain;
+        assert!(t.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_extreme_off_road_drag() {
+        let t = Tuning {
+            off_road_min_speed_factor: 0.0,
+            ..Default::default()
+        };
         assert!(t.validate().is_err());
     }
 }

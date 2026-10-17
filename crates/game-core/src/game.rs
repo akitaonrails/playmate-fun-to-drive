@@ -333,6 +333,7 @@ impl Game {
         if self.nitro_t > 0.0 {
             target *= t.nitro_speed_multiplier;
         }
+        target *= off_road_speed_factor(self.road_x, t);
         let k = 1.0 - (-dt / t.gear_ramp_secs).exp();
         self.speed += (target - self.speed) * k;
 
@@ -450,6 +451,14 @@ fn crossings_between(start: f32, end: f32, hazard_s: f32, loop_length: f32) -> u
     let first = ((start - hazard_s) / loop_length).floor() as i64 + 1;
     let last = ((end - hazard_s) / loop_length).floor() as i64;
     last.saturating_sub(first).saturating_add(1).max(0) as u64
+}
+
+fn off_road_speed_factor(road_x: f32, t: &Tuning) -> f32 {
+    const MAX_EXCURSION: f32 = 1.35;
+    let excursion =
+        ((road_x.abs() - t.off_road_limit) / (MAX_EXCURSION - t.off_road_limit)).clamp(0.0, 1.0);
+    let smooth = excursion * excursion * (3.0 - 2.0 * excursion);
+    1.0 + (t.off_road_min_speed_factor - 1.0) * smooth
 }
 
 #[cfg(test)]
@@ -1319,5 +1328,37 @@ mod tests {
             .position(|entry| entry.initials_str() == "BBB")
             .unwrap();
         assert!(aaa < bbb, "equal entries retain insertion order");
+    }
+
+    #[test]
+    fn off_road_drag_is_progressive_and_leaves_on_road_speed_untouched() {
+        let t = Tuning::default();
+        assert_eq!(off_road_speed_factor(0.0, &t), 1.0);
+        assert_eq!(off_road_speed_factor(t.off_road_limit, &t), 1.0);
+        let near = off_road_speed_factor(t.off_road_limit + 0.08, &t);
+        let far = off_road_speed_factor(1.34, &t);
+        assert!(near < 1.0 && far < near);
+        assert!((off_road_speed_factor(1.35, &t) - t.off_road_min_speed_factor).abs() < 1e-6);
+    }
+
+    #[test]
+    fn off_road_speed_eases_down_and_recovers_after_returning_to_road() {
+        let t = Tuning {
+            off_road_grace: 2.0,
+            ..Default::default()
+        };
+        let mut g = Game::with_road(56, RoadLoop::straight(10_000.0, vec![]), &t);
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        g.road_x = 1.34;
+        g.step(&idle(), 0.3, &t);
+        let dragged = g.speed;
+        assert!(dragged < t.scroll_speed_low);
+
+        g.road_x = 0.0;
+        g.off_road = 0.0;
+        g.step(&idle(), 0.6, &t);
+        assert!(g.speed > dragged, "speed should recover smoothly on-road");
+        assert!(g.speed <= t.scroll_speed_low);
     }
 }

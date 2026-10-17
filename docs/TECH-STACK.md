@@ -49,7 +49,7 @@ runner-up (everything else in the plan stays the same shape).
 | Tweening/easing lib | A handful of easing fns + spring integrator; trivially ours. |
 | Input-mapping framework | Two devices, ~6 actions; a thin `InputState` adapter is smaller than any framework's config surface. |
 | Audio lib (early) | Engine built-in audio suffices until M13; decide then if engine-hum loops need more. |
-| UI/widget lib | HUD is a score, fuel bar, gear flag — sprites/canvas text. |
+| UI/widget lib | HUD and end-of-run leaderboard are lightweight Bevy sprites/Text2d. |
 | Random/noise crates beyond `rand` (and maybe a small seeded value-noise for paper grain) | Keep RNG seeded and centralized. |
 
 Policy going forward: any new dependency must name the wheel it avoids, be

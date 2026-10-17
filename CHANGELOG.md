@@ -5,6 +5,27 @@ milestone (docs/PLAN.md).
 
 ## [0.1.0-dev] — unreleased
 
+### v0.3.0-dev3 — timed challenge and local leaderboard (2026-10-17)
+
+- Ten-minute challenge mode now ends on one authoritative countdown and ranks
+  completed day/night cycles, clean traffic passes, and car bumps using
+  `max(0, cycles*10000 + passed*100 - bumped*300)`.
+- Time-up opens an in-screen RUN COMPLETE panel with three-letter uppercase
+  name entry and a local top-five table. Valid top-10 results persist in
+  browser localStorage; corrupt or unavailable storage safely falls back to
+  the current in-memory board without blocking play.
+- Added deterministic `?qa_session_secs=1..600` browser override and published
+  end mode, initials, leaderboard, score, session, weather, traffic, glow, and
+  toy-pose state for repeatable browser assertions. QA mode is explicitly
+  ephemeral and never reads or writes the normal local leaderboard.
+- Added deterministic clear/cloudy/rain weather, performance-driven day/night
+  progress, aligned safe-area HUD panels, nitro pickup/meter glow, exhaust and
+  road-border perspective streaks, and an eased lean-back/toward-player boost
+  pose. Removed the rain road-sheen bars that obscured the road and car.
+- Going beyond the road edge now adds progressive drag, increasing smoothly
+  with excursion and easing away after recovery; the existing grace window and
+  toy-like bump remain intact.
+
 ### v0.2.0-dev5 — collectible nitro boost (2026-10-17)
 
 - Deterministic cyan nitro canisters now appear in road lanes often enough

@@ -87,11 +87,31 @@ exceeds the limit (off-road, with grace) or an oncoming hazard crosses the
 car band. Verified live: deterministic crash at the same meterage for the
 same seed+input (regression-friendly).
 
-## D8 — Score = mileage (toy-authentic)
+## D8 — Score = mileage (toy-authentic; superseded by D11)
 
 Tomy's trip counter IS the score, so `score = distance (m)`; HIGH gear
 scores faster by covering more ground. The planned `score_rate` multiplier
 was dropped as double-bookkeeping.
+
+## D11 — Ten-minute local challenge and derived ranking
+
+**Context**: the requested game mode replaces fuel/best-lap racing with a
+fixed ten-minute challenge whose result reflects environmental progress,
+traffic skill, and collisions.
+
+**Decision**: the pure core owns the 600-second clock, performance-driven
+environment time, counters, immutable result, and score formula
+`max(0, cycles*10000 + passed*100 - bumped*300)`. The app owns exactly-three
+uppercase initials and a browser-local, versioned top-10 board; stored scores
+are always recomputed from validated totals. No account or user identity is
+read or stored. A 1–600 second query override exists only as a durable QA
+affordance; while active it uses an empty ephemeral board and never accesses
+production leaderboard storage. Stored totals are additionally bounded to
+100 cycles and 100,000 passes/bumps, generous ceilings for any 600-second run.
+
+**Consequences**: runs are directly comparable without an online service;
+localStorage failure loses persistence but never blocks play. D8 remains a
+historical record of the earlier mode and no longer describes current scoring.
 
 ## D9 — Ship the glb embedded in the binary (no HTTP asset serving)
 

@@ -5,12 +5,14 @@
 //! publishes state for the Playwright harness.
 
 mod bridge;
+mod session;
 mod toy_view;
 mod view;
 
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use game_core::{Game, InputState, KeyboardSteering, Tuning};
+use session::{EndFlow, EndMode};
 
 const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
 
@@ -19,6 +21,16 @@ struct Sim(pub Game);
 
 #[derive(Resource)]
 struct TuningRes(pub Tuning);
+
+#[derive(Resource, Default)]
+pub(crate) struct EndSession(pub(crate) EndFlow);
+
+#[derive(Resource)]
+pub(crate) struct LeaderboardState {
+    pub(crate) entries: Vec<game_core::LeaderboardEntry>,
+    pub(crate) persistent: bool,
+    pub(crate) qa_mode: bool,
+}
 
 /// Nitro can remain numerically charged on the terminal fixed step, so every
 /// cosmetic consumer must also require a live running phase.
@@ -43,7 +55,24 @@ struct FrameInput {
 }
 
 fn main() {
-    let tuning = Tuning::default();
+    let mut tuning = Tuning::default();
+    let qa_parameter = bridge::query_param("qa_session_secs");
+    let (qa_mode, qa_duration) = session::qa_mode_and_duration(qa_parameter.as_deref());
+    if let Some(duration) = qa_duration {
+        tuning.session_secs = duration;
+    }
+    let (leaderboard, persistent) = if qa_mode {
+        (Vec::new(), false)
+    } else {
+        let (stored_board, persistent) = bridge::load_local(session::STORAGE_KEY);
+        (
+            stored_board
+                .as_deref()
+                .map(session::decode_board)
+                .unwrap_or_default(),
+            persistent,
+        )
+    };
     let mut app = App::new();
 
     app.add_plugins(
@@ -65,6 +94,11 @@ fn main() {
     )
     .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
     .insert_resource(TuningRes(tuning))
+    .insert_resource(LeaderboardState {
+        entries: leaderboard,
+        persistent,
+        qa_mode,
+    })
     .insert_resource(Sim({
         // square feel-test track: straights + 4 constant corners (user req)
         let mut rng = game_core::Rng::new(20261015);
@@ -74,6 +108,7 @@ fn main() {
     }))
     .init_resource::<FrameInput>()
     .init_resource::<VisualEffects>()
+    .init_resource::<EndSession>()
     .add_systems(
         Startup,
         (view::setup, toy_view::setup, toy_view::setup_diorama),
@@ -82,6 +117,8 @@ fn main() {
         Update,
         (
             tick_visual_effects,
+            sync_end_flow,
+            handle_end_input,
             gather_input,
             toy_view::spawn_toy,
             toy_view::paint_screen,
@@ -111,7 +148,15 @@ fn gather_input(
     mut frame: ResMut<FrameInput>,
     tuning: Res<TuningRes>,
     time: Res<Time>,
+    end: Res<EndSession>,
 ) {
+    if end.0.mode != EndMode::Playing {
+        frame.state.steer = 0.0;
+        frame.state.gear_up = false;
+        frame.state.pause = false;
+        frame.state.nitro = false;
+        return;
+    }
     // keyboard short/long-press shaping (M6, logic tested in game-core)
     let mut steer = frame.kb.update(
         keys.pressed(KeyCode::ArrowLeft),
@@ -161,6 +206,94 @@ fn gather_input(
     }
 }
 
+fn sync_end_flow(sim: Res<Sim>, mut end: ResMut<EndSession>) {
+    match sim.0.phase {
+        game_core::Phase::GameOver { .. }
+            if end.0.mode == EndMode::Playing && sim.0.result().is_some() =>
+        {
+            end.0.begin_entry();
+        }
+        game_core::Phase::Ready | game_core::Phase::Running
+            if end.0.mode == EndMode::Leaderboard =>
+        {
+            end.0.mode = EndMode::Playing;
+            end.0.initials = session::Initials::default();
+        }
+        _ => {}
+    }
+}
+
+fn handle_end_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    sim: Res<Sim>,
+    mut end: ResMut<EndSession>,
+    mut leaderboard: ResMut<LeaderboardState>,
+    mut frame: ResMut<FrameInput>,
+) {
+    match end.0.mode {
+        EndMode::Playing => {}
+        EndMode::NameEntry => {
+            if keys.just_pressed(KeyCode::Backspace) {
+                end.0.initials.pop();
+            } else if let Some(letter) = just_pressed_letter(&keys) {
+                end.0.initials.push(letter);
+            }
+            if keys.just_pressed(KeyCode::Enter) {
+                let Some(result) = sim.0.result().copied() else {
+                    return;
+                };
+                if let Some(entry) = end.0.submit(result) {
+                    leaderboard.entries.push(entry);
+                    game_core::rank_leaderboard(&mut leaderboard.entries);
+                    if !leaderboard.qa_mode {
+                        let encoded = session::encode_board(&leaderboard.entries);
+                        leaderboard.persistent = bridge::save_local(session::STORAGE_KEY, &encoded);
+                    }
+                }
+            }
+        }
+        EndMode::Leaderboard => {
+            if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
+                frame.state.reset = true;
+            }
+        }
+    }
+}
+
+fn just_pressed_letter(keys: &ButtonInput<KeyCode>) -> Option<char> {
+    const LETTERS: [(KeyCode, char); 26] = [
+        (KeyCode::KeyA, 'A'),
+        (KeyCode::KeyB, 'B'),
+        (KeyCode::KeyC, 'C'),
+        (KeyCode::KeyD, 'D'),
+        (KeyCode::KeyE, 'E'),
+        (KeyCode::KeyF, 'F'),
+        (KeyCode::KeyG, 'G'),
+        (KeyCode::KeyH, 'H'),
+        (KeyCode::KeyI, 'I'),
+        (KeyCode::KeyJ, 'J'),
+        (KeyCode::KeyK, 'K'),
+        (KeyCode::KeyL, 'L'),
+        (KeyCode::KeyM, 'M'),
+        (KeyCode::KeyN, 'N'),
+        (KeyCode::KeyO, 'O'),
+        (KeyCode::KeyP, 'P'),
+        (KeyCode::KeyQ, 'Q'),
+        (KeyCode::KeyR, 'R'),
+        (KeyCode::KeyS, 'S'),
+        (KeyCode::KeyT, 'T'),
+        (KeyCode::KeyU, 'U'),
+        (KeyCode::KeyV, 'V'),
+        (KeyCode::KeyW, 'W'),
+        (KeyCode::KeyX, 'X'),
+        (KeyCode::KeyY, 'Y'),
+        (KeyCode::KeyZ, 'Z'),
+    ];
+    LETTERS
+        .iter()
+        .find_map(|(key, letter)| keys.just_pressed(*key).then_some(*letter))
+}
+
 fn step_sim(
     mut sim: ResMut<Sim>,
     mut frame: ResMut<FrameInput>,
@@ -207,6 +340,9 @@ fn publish_state(
     nitro_pose: Res<toy_view::NitroPose>,
     weather_visuals: Res<view::WeatherVisuals>,
     nitro_visuals: Res<view::NitroVisuals>,
+    end: Res<EndSession>,
+    leaderboard: Res<LeaderboardState>,
+    tuning: Res<TuningRes>,
 ) {
     let weather = sim.0.weather();
     let score = game_core::score_for(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped);
@@ -217,14 +353,21 @@ fn publish_state(
         ),
         None => "null".to_string(),
     };
+    let leaderboard_json = session::entries_json(&leaderboard.entries, 10);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_current\":\"{}\",\"weather_next\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
             game_core::Phase::GameOver { .. } => "gameover",
         },
+        end.0.mode.as_str(),
+        end.0.initials.as_str(),
+        leaderboard_json,
+        leaderboard.persistent,
+        leaderboard.qa_mode,
+        tuning.0.session_secs,
         score,
         sim.0.speed,
         sim.0.session_remaining,
@@ -267,7 +410,6 @@ fn publish_state(
         rig.0.roll,
         frame.pad_seen,
     );
-    #[cfg(target_arch = "wasm32")]
     bridge::publish_state(&payload);
 }
 
