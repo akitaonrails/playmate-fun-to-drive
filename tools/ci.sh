@@ -5,4 +5,5 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 make check
 make build-wasm
+make verify-web
 echo "ci: OK"

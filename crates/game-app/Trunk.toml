@@ -1,5 +1,12 @@
 # binaryen (any release trunk ships) rejects our bulk-memory ops with
 # bare -O; tools/setup-wasm-opt.sh installs a flag-appending wrapper for
 # this version in the trunk cache. make build-wasm runs it first.
+trunk-version = "=0.21.14"
+
+[build]
+# Relative asset URLs work both at localhost / and at a GitHub Pages project
+# path such as /playmate-fun-to-drive-web/.
+public_url = "./"
+
 [tools]
 wasm_opt = "version_131"

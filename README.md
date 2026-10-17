@@ -1,5 +1,18 @@
 # Fun to Drive — web
 
+[![Build, test, and deploy](https://github.com/akitaonrails/playmate-fun-to-drive-web/actions/workflows/ci.yml/badge.svg)](https://github.com/akitaonrails/playmate-fun-to-drive-web/actions/workflows/ci.yml)
+
+<p align="center">
+  <a href="https://akitaonrails.github.io/playmate-fun-to-drive-web/">
+    <img src="docs/screenshots/v020-env-day.png" alt="Fun to Drive running inside its 3D dashboard toy" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="https://akitaonrails.github.io/playmate-fun-to-drive-web/">▶ Play in your browser</a></strong><br>
+  The hosted game includes a fullscreen button in its upper-right corner.
+</p>
+
 A web/WASM recreation of the 80s/90s electromechanical dashboard driving
 toys (Tomy Turnin' Turbo Dashboard 1983, **Playmates Fun-to-Drive Corvette
 Dashboard 1985**, Tectoy Turbo Video Driver 1991): the 2D drum game plays
@@ -45,6 +58,11 @@ make shots        # Playwright screenshot/state harness (needs make serve)
 make package      # release wasm bundle -> release/fun-to-drive-web.zip
 make build-wasm-webgpu  # WebGPU-capable build (falls back to WebGL2)
 ```
+
+`make ci` runs the same native and production-WASM checks as GitHub Actions.
+Pushes to `main` publish the validated web bundle through GitHub Pages. After
+creating the repository, select **GitHub Actions** once under
+**Settings → Pages → Build and deployment → Source**.
 
 - Game logic: `crates/game-core` (pure, seeded, deterministic unit tests).
 - Presentation: `crates/game-app` (Bevy 0.20, wasm32 via trunk).

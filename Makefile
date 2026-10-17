@@ -1,6 +1,6 @@
 SERVE_PORT ?= 8080
 
-.PHONY: serve check test build-native build-wasm build-wasm-webgpu package shots ci clean
+.PHONY: serve check test build-native build-wasm build-wasm-webgpu verify-web package shots ci clean
 
 serve: ## build + serve with auto-reload (waits for the port, prints the URL)
 	SERVE_PORT=$(SERVE_PORT) tools/serve.sh
@@ -20,6 +20,9 @@ build-native: ## native release binary
 build-wasm: ## wasm release bundle via trunk
 	tools/setup-wasm-opt.sh
 	cd crates/game-app && env -u NO_COLOR trunk build --release
+
+verify-web: ## validate the production web bundle and Pages-compatible URLs
+	tools/verify-web-dist.sh
 
 build-wasm-webgpu: ## WebGPU-capable wasm bundle (falls back to WebGL2)
 	tools/setup-wasm-opt.sh

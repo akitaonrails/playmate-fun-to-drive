@@ -1,0 +1,102 @@
+name: Build, test, and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TRUNK_VERSION: 0.21.14
+
+jobs:
+  build:
+    name: Native and web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            g++ \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            pkg-config
+
+      - name: Configure Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component clippy,rustfmt --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: Cache Cargo builds
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-rust-stable-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-stable-
+
+      - name: Install pinned Trunk
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/trunk.tar.gz"
+          release="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}"
+          curl --fail --silent --show-error --location \
+            "$release/trunk-x86_64-unknown-linux-gnu.tar.gz" --output "$archive"
+          expected="$(curl --fail --silent --show-error --location \
+            "$release/trunk-x86_64-unknown-linux-gnu.tar.gz.sha256")"
+          actual="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          test "$actual" = "$expected"
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/trunk" "$HOME/.cargo/bin/trunk"
+          trunk --version | grep --fixed-strings "trunk ${TRUNK_VERSION}"
+
+      - name: Run full CI
+        run: env -u NO_COLOR make ci
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: crates/game-app/dist
+
+  deploy:
+    name: Deploy GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
