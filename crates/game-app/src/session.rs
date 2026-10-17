@@ -1,4 +1,4 @@
-use game_core::{rank_leaderboard, LeaderboardEntry, SessionResult};
+use game_core::{rank_leaderboard, Difficulty, LeaderboardEntry, SessionResult};
 use serde::{Deserialize, Serialize};
 
 pub const STORAGE_KEY: &str = "fun-to-drive.leaderboard.v1";
@@ -89,6 +89,7 @@ impl EndFlow {
         }
         let entry = LeaderboardEntry::new(
             self.initials.as_str(),
+            result.difficulty,
             result.day_cycles,
             result.cars_passed,
             result.cars_bumped,
@@ -109,6 +110,8 @@ struct StoredBoard {
 #[serde(deny_unknown_fields)]
 struct StoredEntry {
     initials: String,
+    #[serde(default)]
+    difficulty: Option<String>,
     day_cycles: u64,
     cars_passed: u64,
     cars_bumped: u64,
@@ -131,6 +134,12 @@ pub fn decode_board(raw: &str) -> Vec<LeaderboardEntry> {
         }
         let Some(valid) = LeaderboardEntry::new(
             &entry.initials,
+            match entry.difficulty.as_deref() {
+                None | Some("hard") => Difficulty::Hard,
+                Some("medium") => Difficulty::Medium,
+                Some("easy") => Difficulty::Easy,
+                Some(_) => return Vec::new(),
+            },
             entry.day_cycles,
             entry.cars_passed,
             entry.cars_bumped,
@@ -151,6 +160,7 @@ pub fn encode_board(entries: &[LeaderboardEntry]) -> String {
             .take(game_core::LEADERBOARD_CAPACITY)
             .map(|entry| StoredEntry {
                 initials: entry.initials_str().to_owned(),
+                difficulty: Some(difficulty_name(entry.result.difficulty).to_owned()),
                 day_cycles: entry.result.day_cycles,
                 cars_passed: entry.result.cars_passed,
                 cars_bumped: entry.result.cars_bumped,
@@ -160,13 +170,15 @@ pub fn encode_board(entries: &[LeaderboardEntry]) -> String {
     serde_json::to_string(&board).expect("leaderboard schema is serializable")
 }
 
-pub fn entries_json(entries: &[LeaderboardEntry], limit: usize) -> String {
+pub fn entries_json(entries: &[LeaderboardEntry], difficulty: Difficulty, limit: usize) -> String {
     let rows: Vec<_> = entries
         .iter()
+        .filter(|entry| entry.result.difficulty == difficulty)
         .take(limit)
         .map(|entry| {
             serde_json::json!({
                 "initials": entry.initials_str(),
+                "difficulty": difficulty_name(entry.result.difficulty),
                 "day_cycles": entry.result.day_cycles,
                 "cars_passed": entry.result.cars_passed,
                 "cars_bumped": entry.result.cars_bumped,
@@ -175,6 +187,14 @@ pub fn entries_json(entries: &[LeaderboardEntry], limit: usize) -> String {
         })
         .collect();
     serde_json::to_string(&rows).expect("leaderboard rows are serializable")
+}
+
+pub const fn difficulty_name(difficulty: Difficulty) -> &'static str {
+    match difficulty {
+        Difficulty::Easy => "easy",
+        Difficulty::Medium => "medium",
+        Difficulty::Hard => "hard",
+    }
 }
 
 pub fn validated_session_secs(raw: &str) -> Option<f32> {
@@ -206,7 +226,7 @@ mod tests {
 
     #[test]
     fn submit_requires_complete_name_and_happens_once() {
-        let result = SessionResult::new(2, 12, 1);
+        let result = SessionResult::new(Difficulty::Hard, 2, 12, 1);
         let mut flow = EndFlow::default();
         flow.begin_entry();
         flow.initials.push('A');
@@ -221,11 +241,16 @@ mod tests {
 
     #[test]
     fn storage_round_trip_recomputes_score_and_rejects_corruption() {
-        let entries = vec![LeaderboardEntry::new("AAA", 3, 20, 2).unwrap()];
+        let entries = vec![LeaderboardEntry::new("AAA", Difficulty::Medium, 3, 20, 2).unwrap()];
         let raw = encode_board(&entries);
         let decoded = decode_board(&raw);
         assert_eq!(decoded, entries);
+        assert_eq!(decoded[0].result.difficulty, Difficulty::Medium);
         assert_eq!(decoded[0].result.score, game_core::score_for(3, 20, 2));
+        let legacy = decode_board(
+            r#"{"version":1,"entries":[{"initials":"OLD","day_cycles":1,"cars_passed":2,"cars_bumped":3}]}"#,
+        );
+        assert_eq!(legacy[0].result.difficulty, Difficulty::Hard);
         assert!(decode_board("not json").is_empty());
         assert!(decode_board(r#"{"version":1,"entries":[{"initials":"bad","day_cycles":1,"cars_passed":2,"cars_bumped":3}]}"#).is_empty());
         assert!(decode_board(r#"{"version":2,"entries":[]}"#).is_empty());

@@ -9,21 +9,23 @@ full-body jolt (with gamepad rumble) when you crash.
 
 Each run lasts ten minutes. Drive cleanly and quickly to complete as many
 day/night cycles as possible, pass traffic, collect nitro, and avoid bumps.
-At time-up, enter three initials for the local top-10 leaderboard (top five
-shown on the toy screen).
+At time-up, enter three initials for the local top-10 leaderboard for that
+difficulty (top five shown on the toy screen). The current app starts Hard
+(ten-minute) runs; Easy and Medium are available in the core for the upcoming
+difficulty selector.
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | Arrow Left/Right | Steer (tap = light nudge, hold = full lock ramp) |
-| G | Gear LOW ⇄ HIGH (turbo lamp lights) |
+| F / G | Select LOW / HIGH gear (HIGH unlocks at speed 10) |
 | Y | Use one collected nitro charge (five-second boost) |
 | A-Z / Backspace / Enter | Enter and submit three initials after time-up |
 | R / Enter | Start / restart from the leaderboard |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
-| Gamepad | Left stick steers, South/RTZ shifts, North uses nitro, rumble on bumps |
+| Gamepad | Left stick steers, South selects LOW, RTZ selects HIGH, North uses nitro, rumble on bumps |
 
 ## Run it
 

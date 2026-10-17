@@ -18,10 +18,11 @@ pub use environment::{
     SEASON_SECS, WEATHER_FADE_SECS, WEATHER_SLOT_SECS, YEAR_SECS,
 };
 pub use game::{
-    rank_leaderboard, score_for, EndReason, Game, LeaderboardEntry, Phase, SessionResult,
-    StepEvents, LEADERBOARD_CAPACITY,
+    leaderboard_for, rank_leaderboard, score_for, Difficulty, DownshiftSeverity, EndReason, Game,
+    LeaderboardEntry, Phase, Recovery, SessionResult, StepEvents, LEADERBOARD_CAPACITY,
+    LEADERBOARD_CAPACITY_PER_DIFFICULTY,
 };
-pub use input::{Gear, InputState, KeyboardSteering};
+pub use input::{gear_request, Gear, InputState, KeyboardSteering};
 pub use rng::Rng;
 pub use road::{Hazard, HazardKind, RoadLoop};
 pub use tuning::Tuning;

@@ -113,6 +113,26 @@ production leaderboard storage. Stored totals are additionally bounded to
 localStorage failure loses persistence but never blocks play. D8 remains a
 historical record of the earlier mode and no longer describes current scoring.
 
+## D12 — Explicit drivetrain recovery and difficulty-scoped competition
+
+**Context**: a toggle gearbox hid player intent and offered no recovery arc
+after bumps. Comparing runs of different lengths in one table was also unfair.
+
+**Decision**: core accepts explicit LOW/HIGH requests. LOW targets 12 m/s,
+HIGH targets 24 m/s and unlocks at 10 m/s. A HIGH-gear bump enters `NeedLow`
+and bogs toward 4.5 m/s until LOW is selected; recovery then progresses through
+`BuildSpeed` and `ReadyForHigh`. Downshifts retain 94% speed at or below 12 m/s
+and 82% above it. Nitro runs for five seconds and then has a three-second
+cooldown. `Difficulty::{Easy, Medium, Hard}` fixes standard run durations at
+120/360/600 seconds and is frozen into each result.
+
+**Consequences**: ignored/idempotent shift and nitro requests spend nothing;
+pause and terminal states freeze cooldown. Leaderboards keep and rank ten
+entries per difficulty, while legacy v1 entries remain readable as Hard.
+Running integration splits at boost/bump timer boundaries and integrates the
+exponential speed ramp analytically, preventing a coarse terminal boost step
+from losing acceleration or failing to age leftover cooldown time.
+
 ## D9 — Ship the glb embedded in the binary (no HTTP asset serving)
 
 **Context**: trunk 0.21 removed public-dir copying; its post-build hooks are

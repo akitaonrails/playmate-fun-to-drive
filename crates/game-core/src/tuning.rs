@@ -10,6 +10,12 @@ pub struct Tuning {
     /// Drum scroll speeds (m/s) per gear.
     pub scroll_speed_low: f32,
     pub scroll_speed_high: f32,
+    pub shift_up_min_speed: f32,
+    pub recovery_bog_speed: f32,
+    pub downshift_safe_speed: f32,
+    pub downshift_safe_retention: f32,
+    pub downshift_unsafe_retention: f32,
+    pub low_overrev_start: f32,
     /// Time constant of the speed ramp between gears (seconds).
     pub gear_ramp_secs: f32,
     /// How strongly the printed curve pulls the road aside at the car row.
@@ -31,12 +37,11 @@ pub struct Tuning {
     pub hazard_half_width: f32,
     /// Near-miss forgiveness factor shrinks the hit band.
     pub collision_forgiveness: f32,
-    /// Competitive session duration in seconds.
-    pub session_secs: f32,
     /// Nitro pickup spacing and boost behavior.
     pub nitro_pickup_first_m: f32,
     pub nitro_pickup_interval_m: f32,
     pub nitro_duration_secs: f32,
+    pub nitro_cooldown_secs: f32,
     pub nitro_speed_multiplier: f32,
     /// Duration of the crash flash / crashed phase.
     pub crash_flash_secs: f32,
@@ -75,7 +80,13 @@ impl Default for Tuning {
     fn default() -> Self {
         Self {
             scroll_speed_low: 12.0,
-            scroll_speed_high: 22.0,
+            scroll_speed_high: 24.0,
+            shift_up_min_speed: 10.0,
+            recovery_bog_speed: 4.5,
+            downshift_safe_speed: 12.0,
+            downshift_safe_retention: 0.94,
+            downshift_unsafe_retention: 0.82,
+            low_overrev_start: 11.0,
             gear_ramp_secs: 0.6,
             curve_gain: 1.05,
             drift_rate: 0.75,
@@ -86,10 +97,10 @@ impl Default for Tuning {
             car_half_width: 0.13,
             hazard_half_width: 0.14,
             collision_forgiveness: 0.35,
-            session_secs: 600.0,
             nitro_pickup_first_m: 90.0,
             nitro_pickup_interval_m: 180.0,
             nitro_duration_secs: 5.0,
+            nitro_cooldown_secs: 3.0,
             nitro_speed_multiplier: 1.30,
             crash_flash_secs: 0.9,
             body_k: 55.0,
@@ -126,6 +137,23 @@ impl Tuning {
         if self.scroll_speed_high > self.scroll_speed_low * 3.0 {
             return Err("HIGH gear unreasonably faster than LOW");
         }
+        if !(0.0..self.scroll_speed_low).contains(&self.shift_up_min_speed) {
+            return Err("shift_up_min_speed must be below LOW target");
+        }
+        if !(0.0..self.shift_up_min_speed).contains(&self.recovery_bog_speed) {
+            return Err("recovery_bog_speed must be below shift threshold");
+        }
+        if self.downshift_safe_speed != self.scroll_speed_low {
+            return Err("downshift safe speed must equal LOW target");
+        }
+        if !(0.0..=1.0).contains(&self.downshift_safe_retention)
+            || !(0.0..self.downshift_safe_retention).contains(&self.downshift_unsafe_retention)
+        {
+            return Err("downshift retention factors invalid");
+        }
+        if !(0.0..self.scroll_speed_low).contains(&self.low_overrev_start) {
+            return Err("low_overrev_start must be below LOW target");
+        }
         if !(0.1..=2.0).contains(&self.gear_ramp_secs) {
             return Err("gear_ramp_secs out of [0.1, 2.0]");
         }
@@ -159,9 +187,6 @@ impl Tuning {
         if !(0.0..=0.5).contains(&self.collision_forgiveness) {
             return Err("collision_forgiveness out of [0, 0.5]");
         }
-        if !(1.0..=3600.0).contains(&self.session_secs) {
-            return Err("session_secs out of [1, 3600]");
-        }
         if !(30.0..=300.0).contains(&self.nitro_pickup_first_m) {
             return Err("nitro_pickup_first_m out of [30, 300]");
         }
@@ -170,6 +195,9 @@ impl Tuning {
         }
         if !(2.0..=8.0).contains(&self.nitro_duration_secs) {
             return Err("nitro_duration_secs out of [2, 8]");
+        }
+        if !(1.0..=8.0).contains(&self.nitro_cooldown_secs) {
+            return Err("nitro_cooldown_secs out of [1, 8]");
         }
         if !(1.05..=1.75).contains(&self.nitro_speed_multiplier) {
             return Err("nitro_speed_multiplier out of [1.05, 1.75]");
@@ -250,6 +278,27 @@ mod tests {
     fn rejects_extreme_off_road_drag() {
         let t = Tuning {
             off_road_min_speed_factor: 0.0,
+            ..Default::default()
+        };
+        assert!(t.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_incoherent_drivetrain_and_cooldown_values() {
+        let t = Tuning {
+            shift_up_min_speed: Tuning::default().scroll_speed_low,
+            ..Default::default()
+        };
+        assert!(t.validate().is_err());
+
+        let t = Tuning {
+            downshift_unsafe_retention: Tuning::default().downshift_safe_retention,
+            ..Default::default()
+        };
+        assert!(t.validate().is_err());
+
+        let t = Tuning {
+            nitro_cooldown_secs: 0.0,
             ..Default::default()
         };
         assert!(t.validate().is_err());

@@ -24,6 +24,49 @@ pub enum Phase {
     GameOver { reason: EndReason },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Difficulty {
+    Easy,
+    Medium,
+    #[default]
+    Hard,
+}
+
+impl Difficulty {
+    pub const ALL: [Self; 3] = [Self::Easy, Self::Medium, Self::Hard];
+
+    pub const fn duration_secs(self) -> f32 {
+        match self {
+            Self::Easy => 120.0,
+            Self::Medium => 360.0,
+            Self::Hard => 600.0,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Easy => "EASY",
+            Self::Medium => "MEDIUM",
+            Self::Hard => "HARD",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Recovery {
+    #[default]
+    Normal,
+    NeedLow,
+    BuildSpeed,
+    ReadyForHigh,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownshiftSeverity {
+    Normal,
+    Unsafe,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct StepEvents {
     pub started: bool,
@@ -33,10 +76,14 @@ pub struct StepEvents {
     pub game_over: bool,
     pub nitro_collected: bool,
     pub nitro_started: bool,
+    pub high_rejected: bool,
+    pub downshifted: bool,
+    pub downshift_severity: Option<DownshiftSeverity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionResult {
+    pub difficulty: Difficulty,
     pub day_cycles: u64,
     pub cars_passed: u64,
     pub cars_bumped: u64,
@@ -44,8 +91,14 @@ pub struct SessionResult {
 }
 
 impl SessionResult {
-    pub fn new(day_cycles: u64, cars_passed: u64, cars_bumped: u64) -> Self {
+    pub fn new(
+        difficulty: Difficulty,
+        day_cycles: u64,
+        cars_passed: u64,
+        cars_bumped: u64,
+    ) -> Self {
         Self {
+            difficulty,
             day_cycles,
             cars_passed,
             cars_bumped,
@@ -65,7 +118,8 @@ pub fn score_for(day_cycles: u64, cars_passed: u64, cars_bumped: u64) -> u64 {
     score.clamp(0, i128::from(u64::MAX)) as u64
 }
 
-pub const LEADERBOARD_CAPACITY: usize = 10;
+pub const LEADERBOARD_CAPACITY_PER_DIFFICULTY: usize = 10;
+pub const LEADERBOARD_CAPACITY: usize = LEADERBOARD_CAPACITY_PER_DIFFICULTY * 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeaderboardEntry {
@@ -76,6 +130,7 @@ pub struct LeaderboardEntry {
 impl LeaderboardEntry {
     pub fn new(
         initials: &str,
+        difficulty: Difficulty,
         day_cycles: u64,
         cars_passed: u64,
         cars_bumped: u64,
@@ -86,7 +141,7 @@ impl LeaderboardEntry {
         }
         Some(Self {
             initials: [bytes[0], bytes[1], bytes[2]],
-            result: SessionResult::new(day_cycles, cars_passed, cars_bumped),
+            result: SessionResult::new(difficulty, day_cycles, cars_passed, cars_bumped),
         })
     }
 
@@ -98,14 +153,30 @@ impl LeaderboardEntry {
 
 pub fn rank_leaderboard(entries: &mut Vec<LeaderboardEntry>) {
     entries.sort_by(|a, b| {
-        b.result
-            .score
-            .cmp(&a.result.score)
-            .then_with(|| b.result.day_cycles.cmp(&a.result.day_cycles))
-            .then_with(|| b.result.cars_passed.cmp(&a.result.cars_passed))
-            .then_with(|| a.result.cars_bumped.cmp(&b.result.cars_bumped))
+        a.result.difficulty.cmp(&b.result.difficulty).then_with(|| {
+            b.result
+                .score
+                .cmp(&a.result.score)
+                .then_with(|| b.result.day_cycles.cmp(&a.result.day_cycles))
+                .then_with(|| b.result.cars_passed.cmp(&a.result.cars_passed))
+                .then_with(|| a.result.cars_bumped.cmp(&b.result.cars_bumped))
+        })
     });
-    entries.truncate(LEADERBOARD_CAPACITY);
+    let mut counts = [0usize; 3];
+    entries.retain(|entry| {
+        let index = entry.result.difficulty as usize;
+        counts[index] += 1;
+        counts[index] <= LEADERBOARD_CAPACITY_PER_DIFFICULTY
+    });
+}
+
+pub fn leaderboard_for(
+    entries: &[LeaderboardEntry],
+    difficulty: Difficulty,
+) -> impl Iterator<Item = &LeaderboardEntry> {
+    entries
+        .iter()
+        .filter(move |entry| entry.result.difficulty == difficulty)
 }
 
 #[derive(Debug, Clone)]
@@ -115,7 +186,7 @@ pub struct Game {
     pub road: RoadLoop,
     /// Current drum speed, m/s (ramps between gear targets).
     pub speed: f32,
-    /// Total distance traveled, meters (== the mileage score).
+    /// Total distance traveled in meters; score is derived from run statistics.
     pub distance: f32,
     /// Road-center lateral offset at the car row, in half-widths. Car is at 0.
     pub road_x: f32,
@@ -139,25 +210,43 @@ pub struct Game {
     pub nitro_charges: u8,
     /// Seconds remaining in the active boost.
     pub nitro_t: f32,
+    /// Seconds before another charge may be activated.
+    pub nitro_cooldown: f32,
     /// Absolute course distance of the next pickup.
     pub next_nitro_distance: f32,
     /// Lane of the next pickup, relative to road center.
     pub next_nitro_lane: f32,
     nitro_pickup_index: u32,
     gear: Gear,
+    recovery: Recovery,
+    difficulty: Difficulty,
+    session_duration: f32,
     weather: WeatherSchedule,
     result: Option<SessionResult>,
 }
 
 impl Game {
-    pub fn new(seed: u64, t: &Tuning) -> Self {
+    pub fn new(seed: u64, difficulty: Difficulty, t: &Tuning) -> Self {
         let mut rng = Rng::new(seed);
         let road = RoadLoop::generate(&mut rng);
-        Self::with_road(seed, road, t)
+        Self::with_road(seed, road, difficulty, t)
     }
 
     /// Build a game on an explicit course (tests, attract mode).
-    pub fn with_road(seed: u64, road: RoadLoop, t: &Tuning) -> Self {
+    pub fn with_road(seed: u64, road: RoadLoop, difficulty: Difficulty, t: &Tuning) -> Self {
+        Self::with_road_for_duration(seed, road, difficulty, difficulty.duration_secs(), t)
+    }
+
+    /// Build a run with an explicit duration for short-lived QA sessions.
+    /// Difficulty remains part of the result/ranking contract.
+    pub fn with_road_for_duration(
+        seed: u64,
+        road: RoadLoop,
+        difficulty: Difficulty,
+        duration_secs: f32,
+        t: &Tuning,
+    ) -> Self {
+        assert!(duration_secs.is_finite() && duration_secs > 0.0);
         Game {
             seed,
             phase: Phase::Ready,
@@ -165,7 +254,7 @@ impl Game {
             speed: 0.0,
             distance: 0.0,
             road_x: 0.0,
-            session_remaining: t.session_secs,
+            session_remaining: duration_secs,
             environment_time: 0.0,
             day_cycles: 0,
             cars_passed: 0,
@@ -177,10 +266,14 @@ impl Game {
             bump_dir: 0.0,
             nitro_charges: 0,
             nitro_t: 0.0,
+            nitro_cooldown: 0.0,
             next_nitro_distance: t.nitro_pickup_first_m,
             next_nitro_lane: Self::nitro_lane(seed, 0),
             nitro_pickup_index: 0,
             gear: Gear::Low,
+            recovery: Recovery::Normal,
+            difficulty,
+            session_duration: duration_secs,
             weather: WeatherSchedule::new(seed),
             result: None,
         }
@@ -188,6 +281,27 @@ impl Game {
 
     pub fn gear(&self) -> Gear {
         self.gear
+    }
+
+    pub fn recovery(&self) -> Recovery {
+        self.recovery
+    }
+
+    pub fn difficulty(&self) -> Difficulty {
+        self.difficulty
+    }
+
+    pub fn session_duration(&self) -> f32 {
+        self.session_duration
+    }
+
+    /// Normalized LOW-gear over-rev warning in [0, 1].
+    pub fn low_overrev(&self, t: &Tuning) -> f32 {
+        if self.gear != Gear::Low {
+            return 0.0;
+        }
+        ((self.speed - t.low_overrev_start) / (t.scroll_speed_low - t.low_overrev_start))
+            .clamp(0.0, 1.0)
     }
 
     pub fn loop_pos(&self) -> f32 {
@@ -255,19 +369,23 @@ impl Game {
 
         match self.phase {
             Phase::Ready => {
-                if input.reset || input.gear_up || input.steer != 0.0 {
+                if input.reset || input.gear_request.is_some() || input.steer != 0.0 {
                     self.start_run(t);
                     ev.started = true;
+                    if let Some(request) = input.gear_request {
+                        self.select_gear(request, t, &mut ev);
+                    }
                 }
             }
             Phase::Running => {
-                if input.gear_up {
-                    self.gear = self.gear.toggle();
-                }
                 if input.reset {
                     self.start_run(t);
                     ev.started = true;
                     return ev;
+                }
+                self.update_recovery_readiness(t);
+                if let Some(request) = input.gear_request {
+                    self.select_gear(request, t, &mut ev);
                 }
                 self.step_running(input, active_dt, t, &mut ev);
             }
@@ -286,7 +404,7 @@ impl Game {
         self.speed = 0.0;
         self.distance = 0.0;
         self.road_x = 0.0;
-        self.session_remaining = t.session_secs;
+        self.session_remaining = self.session_duration;
         self.environment_time = 0.0;
         self.day_cycles = 0;
         self.cars_passed = 0;
@@ -297,48 +415,183 @@ impl Game {
         self.bump_dir = 0.0;
         self.nitro_charges = 0;
         self.nitro_t = 0.0;
+        self.nitro_cooldown = 0.0;
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
         self.next_nitro_lane = Self::nitro_lane(self.seed, 0);
         self.result = None;
+        self.gear = Gear::Low;
+        self.recovery = Recovery::Normal;
+    }
+
+    /// Begin a fresh standard-duration run at the selected difficulty.
+    pub fn restart_with_difficulty(&mut self, difficulty: Difficulty, t: &Tuning) {
+        self.difficulty = difficulty;
+        self.session_duration = difficulty.duration_secs();
+        self.start_run(t);
+    }
+
+    fn update_recovery_readiness(&mut self, t: &Tuning) {
+        if self.recovery == Recovery::BuildSpeed && self.speed >= t.shift_up_min_speed {
+            self.recovery = Recovery::ReadyForHigh;
+        }
+    }
+
+    fn select_gear(&mut self, request: Gear, t: &Tuning, ev: &mut StepEvents) {
+        if request == self.gear {
+            return;
+        }
+        match request {
+            Gear::High => {
+                let recovery_allows =
+                    matches!(self.recovery, Recovery::Normal | Recovery::ReadyForHigh);
+                if self.speed < t.shift_up_min_speed || !recovery_allows {
+                    ev.high_rejected = true;
+                    return;
+                }
+                self.gear = Gear::High;
+                if self.recovery == Recovery::ReadyForHigh {
+                    self.recovery = Recovery::Normal;
+                }
+            }
+            Gear::Low => {
+                let severity = if self.speed <= t.downshift_safe_speed {
+                    self.speed *= t.downshift_safe_retention;
+                    DownshiftSeverity::Normal
+                } else {
+                    self.speed *= t.downshift_unsafe_retention;
+                    DownshiftSeverity::Unsafe
+                };
+                self.gear = Gear::Low;
+                if self.recovery == Recovery::NeedLow {
+                    self.recovery = Recovery::BuildSpeed;
+                }
+                ev.downshifted = true;
+                ev.downshift_severity = Some(severity);
+            }
+        }
     }
 
     fn step_running(&mut self, input: &InputState, dt: f32, t: &Tuning, ev: &mut StepEvents) {
         let dt = dt.max(0.0).min(self.session_remaining);
         if dt <= 0.0 {
-            self.finish_session(ev);
+            if self.session_remaining <= 0.0 {
+                self.finish_session(ev);
+            }
             return;
         }
-        if input.nitro && self.nitro_t <= 0.0 && self.nitro_charges > 0 {
+        if input.nitro
+            && self.recovery == Recovery::Normal
+            && self.nitro_t <= 0.0
+            && self.nitro_cooldown <= 0.0
+            && self.nitro_charges > 0
+        {
             self.nitro_charges -= 1;
             self.nitro_t = t.nitro_duration_secs;
             ev.nitro_started = true;
         }
-        if self.nitro_t > 0.0 {
-            self.nitro_t = (self.nitro_t - dt).max(0.0);
+
+        // Timer boundaries split one outer fixed step into constant-target
+        // intervals. The active boost therefore applies for its complete five
+        // seconds, and any time remaining after expiry ages the cooldown.
+        let mut remaining = dt;
+        let mut car_collision = false;
+        let mut car_bump_dir = 1.0;
+        let mut off_road_bump = false;
+        while remaining > 0.0 {
+            let nitro_active = self.nitro_t > 0.0;
+            let bump_active = self.bump_t > 0.0;
+            let mut interval = remaining;
+            if nitro_active {
+                interval = interval.min(self.nitro_t);
+            }
+            if bump_active {
+                interval = interval.min(self.bump_t);
+            }
+
+            self.integrate_running_interval(
+                input,
+                interval,
+                t,
+                ev,
+                nitro_active,
+                bump_active,
+                &mut car_collision,
+                &mut car_bump_dir,
+                &mut off_road_bump,
+            );
+
+            if nitro_active {
+                self.nitro_t = (self.nitro_t - interval).max(0.0);
+                if self.nitro_t <= f32::EPSILON {
+                    self.nitro_t = 0.0;
+                    self.nitro_cooldown = t.nitro_cooldown_secs;
+                }
+            } else if self.nitro_cooldown > 0.0 {
+                self.nitro_cooldown = (self.nitro_cooldown - interval).max(0.0);
+            }
+            if bump_active {
+                self.bump_t = (self.bump_t - interval).max(0.0);
+                if self.bump_t <= f32::EPSILON {
+                    self.bump_t = 0.0;
+                }
+            }
+            remaining = (remaining - interval).max(0.0);
         }
-        // bump slow-down window
-        if self.bump_t > 0.0 {
-            self.bump_t = (self.bump_t - dt).max(0.0);
+
+        // Preserve the outer fixed-step contract: all encounters are counted,
+        // but collectively cause at most one impulse, with car-over-off-road
+        // precedence even when a timer boundary split the integration.
+        if car_collision {
+            self.bump(ev, t, car_bump_dir);
+        } else if off_road_bump {
+            self.bump(ev, t, self.road_x.signum());
         }
-        // speed ramps toward the gear target (exponential smoothing), capped
-        // while the bump rings out
-        let mut target = match self.gear {
-            Gear::Low => t.scroll_speed_low,
-            Gear::High => t.scroll_speed_high,
+
+        self.session_remaining = (self.session_remaining - dt).max(0.0);
+        if self.session_remaining <= 0.0 {
+            self.finish_session(ev);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn integrate_running_interval(
+        &mut self,
+        input: &InputState,
+        dt: f32,
+        t: &Tuning,
+        ev: &mut StepEvents,
+        nitro_active: bool,
+        bump_active: bool,
+        car_collision: &mut bool,
+        car_bump_dir: &mut f32,
+        off_road_bump: &mut bool,
+    ) {
+        let mut target = match self.recovery {
+            Recovery::NeedLow => t.recovery_bog_speed,
+            _ => match self.gear {
+                Gear::Low => t.scroll_speed_low,
+                Gear::High => t.scroll_speed_high,
+            },
         };
-        if self.bump_t > 0.0 {
+        if bump_active && self.recovery != Recovery::NeedLow {
             target *= 0.35;
         }
-        if self.nitro_t > 0.0 {
+        if nitro_active && self.recovery == Recovery::Normal {
             target *= t.nitro_speed_multiplier;
         }
         target *= off_road_speed_factor(self.road_x, t);
-        let k = 1.0 - (-dt / t.gear_ramp_secs).exp();
-        self.speed += (target - self.speed) * k;
+        let initial_speed = self.speed;
+        let decay = (-dt / t.gear_ramp_secs).exp();
+        self.speed = target + (initial_speed - target) * decay;
+        self.update_recovery_readiness(t);
 
         let previous_distance = self.distance;
-        let distance_delta = self.speed * dt;
+        // Exact integral of the exponential speed ramp for a constant target.
+        // This makes distance identical whether an interval is stepped whole
+        // or partitioned by callers.
+        let distance_delta =
+            target * dt + (initial_speed - target) * t.gear_ramp_secs * (1.0 - decay);
         self.distance += distance_delta;
         self.environment_time += distance_delta / t.scroll_speed_low;
         self.day_cycles = (self.environment_time / DAY_SECS).floor().max(0.0) as u64;
@@ -374,17 +627,16 @@ impl Game {
         } else {
             self.off_road = (self.off_road - 2.0 * dt).max(0.0);
         }
-        let off_road_bump = self.off_road > t.off_road_grace;
+        *off_road_bump |= self.off_road > t.off_road_grace;
 
         // Fixed-step traffic contract: account every oncoming crossing in
         // (previous_distance, distance], including repeated-loop encounters.
-        // All crossings in this tick use the tick's resolved road offset.
+        // Crossings use the resolved road offset for their timer-bounded
+        // interval.
         // Passed and bumped are mutually exclusive per encounter; roadside
         // scenery never affects either counter, and collisions collectively
         // produce at most one physical impulse below.
         let hit_band = (t.car_half_width + t.hazard_half_width) * (1.0 - t.collision_forgiveness);
-        let mut car_collision = false;
-        let mut car_bump_dir = 1.0;
         for h in &self.road.hazards {
             if h.kind == HazardKind::Oncoming {
                 let crossings =
@@ -395,22 +647,12 @@ impl Game {
                 let x_eff = h.x + self.road_x;
                 if x_eff.abs() < hit_band {
                     self.cars_bumped = self.cars_bumped.saturating_add(crossings);
-                    car_collision = true;
-                    car_bump_dir = -x_eff.signum();
+                    *car_collision = true;
+                    *car_bump_dir = -x_eff.signum();
                 } else {
                     self.cars_passed = self.cars_passed.saturating_add(crossings);
                 }
             }
-        }
-        if car_collision {
-            self.bump(ev, t, car_bump_dir);
-        } else if off_road_bump {
-            self.bump(ev, t, self.road_x.signum());
-        }
-
-        self.session_remaining = (self.session_remaining - dt).max(0.0);
-        if self.session_remaining <= 0.0 {
-            self.finish_session(ev);
         }
     }
 
@@ -423,6 +665,7 @@ impl Game {
             reason: EndReason::Time,
         };
         self.result = Some(SessionResult::new(
+            self.difficulty,
             self.day_cycles,
             self.cars_passed,
             self.cars_bumped,
@@ -439,6 +682,10 @@ impl Game {
         self.off_road = 0.0;
         self.road_x = (self.road_x + d * 0.38).clamp(-1.35, 1.35);
         self.speed *= 0.45;
+        self.recovery = match self.gear {
+            Gear::High => Recovery::NeedLow,
+            Gear::Low => Recovery::BuildSpeed,
+        };
         self.flash = 0.35;
         ev.bumped = true;
     }
@@ -470,7 +717,7 @@ mod tests {
 
     fn game(seed: u64) -> (Game, Tuning) {
         let t = Tuning::default();
-        (Game::new(seed, &t), t)
+        (Game::new(seed, Difficulty::Hard, &t), t)
     }
 
     trait Validated {
@@ -529,16 +776,16 @@ mod tests {
             DT,
             &t,
         );
+        run_seconds(&mut g, 1.2, &idle(), &t);
 
         let high = InputState {
-            gear: Gear::High,
-            gear_up: true,
+            gear_request: Some(Gear::High),
             ..Default::default()
         };
         g.step(&high, DT, &t);
         let v_high_after_1s = {
             let input = InputState {
-                gear: Gear::High,
+                gear_request: None,
                 ..Default::default()
             };
             run_seconds(&mut g, 1.0, &input, &t);
@@ -659,7 +906,7 @@ mod tests {
     #[test]
     fn bump_resets_off_road_grace_so_recovery_is_possible() {
         let t = Tuning::default();
-        let mut g = Game::with_road(40, RoadLoop::straight(500.0, vec![]), &t);
+        let mut g = Game::with_road(40, RoadLoop::straight(500.0, vec![]), Difficulty::Hard, &t);
         g.step(
             &InputState {
                 steer: 0.001,
@@ -689,7 +936,12 @@ mod tests {
             x: 0.0,
             s: 20.0,
         };
-        let mut g = Game::with_road(1, RoadLoop::straight(60.0, vec![hazard]), &t);
+        let mut g = Game::with_road(
+            1,
+            RoadLoop::straight(60.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
         g.step(
             &InputState {
                 steer: 0.001,
@@ -717,7 +969,12 @@ mod tests {
             x: 0.62,
             s: 20.0,
         };
-        let mut g = Game::with_road(1, RoadLoop::straight(60.0, vec![hazard]), &t);
+        let mut g = Game::with_road(
+            1,
+            RoadLoop::straight(60.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
         g.step(
             &InputState {
                 steer: 0.001,
@@ -738,7 +995,7 @@ mod tests {
         let t = Tuning::default();
         let mut road = RoadLoop::generate(&mut Rng::new(11));
         road.hazards.clear();
-        let mut g = Game::with_road(11, road, &t);
+        let mut g = Game::with_road(11, road, Difficulty::Hard, &t);
         g.step(
             &InputState {
                 steer: 0.001,
@@ -766,11 +1023,14 @@ mod tests {
 
     #[test]
     fn session_clock_ends_once_and_freezes_result() {
-        let t = Tuning {
-            session_secs: 2.0,
-            ..Default::default()
-        };
-        let mut g = Game::with_road(6, RoadLoop::straight(60.0, vec![]), &t);
+        let t = Tuning::default();
+        let mut g = Game::with_road_for_duration(
+            6,
+            RoadLoop::straight(60.0, vec![]),
+            Difficulty::Hard,
+            2.0,
+            &t,
+        );
         g.step(
             &InputState {
                 steer: 0.001,
@@ -833,7 +1093,7 @@ mod tests {
         assert!(ev.started);
         assert_eq!(g.phase, Phase::Running);
         assert_eq!(g.distance, 0.0);
-        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.session_remaining, g.session_duration());
         assert_eq!(g.environment_time, 0.0);
         assert_eq!(g.result(), None);
         // same seed => same course
@@ -842,7 +1102,7 @@ mod tests {
     }
 
     #[test]
-    fn gear_up_in_running_toggles() {
+    fn explicit_high_request_selects_high_once_ready() {
         let (mut g, t) = game(9);
         g.step(
             &InputState {
@@ -853,9 +1113,10 @@ mod tests {
             &t,
         );
         assert_eq!(g.gear(), Gear::Low);
+        run_seconds(&mut g, 1.2, &idle(), &t);
         g.step(
             &InputState {
-                gear_up: true,
+                gear_request: Some(Gear::High),
                 ..Default::default()
             },
             DT,
@@ -936,14 +1197,10 @@ mod tests {
 
     #[test]
     fn faster_driving_completes_more_environment_cycles() {
-        let t = Tuning {
-            session_secs: 200.0,
-            ..Default::default()
-        }
-        .validated();
+        let t = Tuning::default().validated();
         let road = RoadLoop::straight(10_000.0, vec![]);
-        let mut low = Game::with_road(23, road.clone(), &t);
-        let mut high = Game::with_road(23, road, &t);
+        let mut low = Game::with_road_for_duration(23, road.clone(), Difficulty::Hard, 200.0, &t);
+        let mut high = Game::with_road_for_duration(23, road, Difficulty::Hard, 200.0, &t);
         low.step(
             &InputState {
                 steer: 0.001,
@@ -960,9 +1217,18 @@ mod tests {
             DT,
             &t,
         );
+        run_seconds(&mut high, 1.2, &idle(), &t);
         high.step(
             &InputState {
-                gear_up: true,
+                gear_request: Some(Gear::High),
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        high.step(
+            &InputState {
+                gear_request: Some(Gear::High),
                 ..Default::default()
             },
             DT,
@@ -995,7 +1261,7 @@ mod tests {
     fn nitro_pickup_collects_in_lane_and_caps_at_three() {
         let t = Tuning::default();
         let road = RoadLoop::straight(1000.0, vec![]);
-        let mut g = Game::with_road(31, road, &t);
+        let mut g = Game::with_road(31, road, Difficulty::Hard, &t);
         g.step(
             &InputState {
                 steer: 0.001,
@@ -1024,7 +1290,7 @@ mod tests {
     fn missed_nitro_pickup_advances_to_the_next_spawn() {
         let t = Tuning::default();
         let road = RoadLoop::straight(1000.0, vec![]);
-        let mut g = Game::with_road(32, road, &t);
+        let mut g = Game::with_road(32, road, Difficulty::Hard, &t);
         g.step(
             &InputState {
                 steer: 0.001,
@@ -1049,8 +1315,8 @@ mod tests {
     fn nitro_spends_one_charge_boosts_and_expires_in_five_seconds() {
         let t = Tuning::default();
         let road = RoadLoop::straight(2000.0, vec![]);
-        let mut boosted = Game::with_road(33, road.clone(), &t);
-        let mut normal = Game::with_road(33, road, &t);
+        let mut boosted = Game::with_road(33, road.clone(), Difficulty::Hard, &t);
+        let mut normal = Game::with_road(33, road, Difficulty::Hard, &t);
         for g in [&mut boosted, &mut normal] {
             g.step(
                 &InputState {
@@ -1118,11 +1384,8 @@ mod tests {
 
     #[test]
     fn at_least_four_nitro_pickups_appear_per_light_cycle_at_low_speed() {
-        let t = Tuning {
-            session_secs: 600.0,
-            ..Default::default()
-        };
-        let mut g = Game::with_road(35, RoadLoop::straight(3000.0, vec![]), &t);
+        let t = Tuning::default();
+        let mut g = Game::with_road(35, RoadLoop::straight(3000.0, vec![]), Difficulty::Hard, &t);
         g.step(
             &InputState {
                 steer: 0.001,
@@ -1150,7 +1413,7 @@ mod tests {
     fn ready_pause_and_reset_freeze_or_restore_all_session_clocks() {
         let (mut g, t) = game(50);
         g.step(&idle(), 5.0, &t);
-        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.session_remaining, g.session_duration());
         assert_eq!(g.environment_time, 0.0);
 
         g.step(
@@ -1184,7 +1447,7 @@ mod tests {
             DT,
             &t,
         );
-        assert_eq!(g.session_remaining, t.session_secs);
+        assert_eq!(g.session_remaining, g.session_duration());
         assert_eq!(g.environment_time, 0.0);
         assert_eq!(g.day_cycles, 0);
     }
@@ -1192,7 +1455,12 @@ mod tests {
     #[test]
     fn terminal_step_uses_only_remaining_active_time_even_when_dt_overshoots() {
         let t = Tuning::default();
-        let mut exact = Game::with_road(51, RoadLoop::straight(10_000.0, vec![]), &t);
+        let mut exact = Game::with_road(
+            51,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
         exact.start_run(&t);
         exact.speed = t.scroll_speed_low;
         exact.session_remaining = 0.25;
@@ -1210,8 +1478,8 @@ mod tests {
     fn environment_and_weather_are_timestep_partition_invariant_at_constant_speed() {
         let t = Tuning::default();
         let road = RoadLoop::straight(10_000.0, vec![]);
-        let mut whole = Game::with_road(52, road.clone(), &t);
-        let mut split = Game::with_road(52, road, &t);
+        let mut whole = Game::with_road(52, road.clone(), Difficulty::Hard, &t);
+        let mut split = Game::with_road(52, road, Difficulty::Hard, &t);
         for g in [&mut whole, &mut split] {
             g.start_run(&t);
             g.speed = t.scroll_speed_low;
@@ -1245,7 +1513,7 @@ mod tests {
                 s: 1.0,
             },
         ];
-        let mut g = Game::with_road(53, RoadLoop::straight(10.0, hazards), &t);
+        let mut g = Game::with_road(53, RoadLoop::straight(10.0, hazards), Difficulty::Hard, &t);
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         let ev = g.step(&idle(), 0.1, &t);
@@ -1263,7 +1531,12 @@ mod tests {
             x: 0.0,
             s: 1.0,
         };
-        let mut g = Game::with_road(54, RoadLoop::straight(2.0, vec![hazard]), &t);
+        let mut g = Game::with_road(
+            54,
+            RoadLoop::straight(2.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         g.step(&idle(), 0.5, &t);
@@ -1279,7 +1552,12 @@ mod tests {
             x: -1.0,
             s: 1.0,
         };
-        let mut g = Game::with_road(55, RoadLoop::straight(100.0, vec![hazard]), &t);
+        let mut g = Game::with_road(
+            55,
+            RoadLoop::straight(100.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         g.road_x = 1.1;
@@ -1303,21 +1581,21 @@ mod tests {
     }
 
     #[test]
-    fn leaderboard_validates_initials_sorts_stably_and_caps_at_ten() {
-        assert!(LeaderboardEntry::new("abC", 1, 0, 0).is_none());
-        assert!(LeaderboardEntry::new("TOOLONG", 1, 0, 0).is_none());
+    fn leaderboard_validates_initials_sorts_stably_and_caps_per_difficulty() {
+        assert!(LeaderboardEntry::new("abC", Difficulty::Hard, 1, 0, 0).is_none());
+        assert!(LeaderboardEntry::new("TOOLONG", Difficulty::Hard, 1, 0, 0).is_none());
         let mut entries = vec![
-            LeaderboardEntry::new("AAA", 1, 3, 1).unwrap(),
-            LeaderboardEntry::new("BBB", 1, 3, 1).unwrap(),
-            LeaderboardEntry::new("CCC", 2, 0, 0).unwrap(),
-            LeaderboardEntry::new("DDD", 1, 4, 0).unwrap(),
+            LeaderboardEntry::new("AAA", Difficulty::Hard, 1, 3, 1).unwrap(),
+            LeaderboardEntry::new("BBB", Difficulty::Hard, 1, 3, 1).unwrap(),
+            LeaderboardEntry::new("CCC", Difficulty::Hard, 2, 0, 0).unwrap(),
+            LeaderboardEntry::new("DDD", Difficulty::Hard, 1, 4, 0).unwrap(),
         ];
         for n in 0..9 {
             let name = format!("Z{}A", (b'A' + n as u8) as char);
-            entries.push(LeaderboardEntry::new(&name, 0, n, 0).unwrap());
+            entries.push(LeaderboardEntry::new(&name, Difficulty::Hard, 0, n, 0).unwrap());
         }
         rank_leaderboard(&mut entries);
-        assert_eq!(entries.len(), LEADERBOARD_CAPACITY);
+        assert_eq!(entries.len(), LEADERBOARD_CAPACITY_PER_DIFFICULTY);
         assert_eq!(entries[0].initials_str(), "CCC");
         let aaa = entries
             .iter()
@@ -1347,7 +1625,12 @@ mod tests {
             off_road_grace: 2.0,
             ..Default::default()
         };
-        let mut g = Game::with_road(56, RoadLoop::straight(10_000.0, vec![]), &t);
+        let mut g = Game::with_road(
+            56,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         g.road_x = 1.34;
@@ -1360,5 +1643,353 @@ mod tests {
         g.step(&idle(), 0.6, &t);
         assert!(g.speed > dragged, "speed should recover smoothly on-road");
         assert!(g.speed <= t.scroll_speed_low);
+    }
+
+    #[test]
+    fn shift_threshold_is_exact_and_same_gear_is_idempotent() {
+        let (mut g, t) = game(60);
+        g.start_run(&t);
+        assert_eq!(g.gear(), Gear::Low);
+        g.speed = t.shift_up_min_speed - 0.001;
+        let rejected = g.step(
+            &InputState {
+                gear_request: Some(Gear::High),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(rejected.high_rejected);
+        assert_eq!(g.gear(), Gear::Low);
+
+        g.speed = t.shift_up_min_speed;
+        let accepted = g.step(
+            &InputState {
+                gear_request: Some(Gear::High),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(!accepted.high_rejected);
+        assert_eq!(g.gear(), Gear::High);
+        let same = g.step(
+            &InputState {
+                gear_request: Some(Gear::High),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(!same.high_rejected);
+        assert!(!same.downshifted);
+        assert_eq!(g.gear(), Gear::High);
+    }
+
+    #[test]
+    fn downshift_reports_severity_and_retains_tuned_speed() {
+        let (mut normal, t) = game(61);
+        normal.start_run(&t);
+        normal.speed = t.downshift_safe_speed;
+        normal.gear = Gear::High;
+        let ev = normal.step(
+            &InputState {
+                gear_request: Some(Gear::Low),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(ev.downshifted);
+        assert_eq!(ev.downshift_severity, Some(DownshiftSeverity::Normal));
+        assert!((normal.speed - 12.0 * 0.94).abs() < 0.001);
+
+        let (mut unsafe_shift, _) = game(62);
+        unsafe_shift.start_run(&t);
+        unsafe_shift.speed = 18.0;
+        unsafe_shift.gear = Gear::High;
+        let ev = unsafe_shift.step(
+            &InputState {
+                gear_request: Some(Gear::Low),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert_eq!(ev.downshift_severity, Some(DownshiftSeverity::Unsafe));
+        assert!((unsafe_shift.speed - 18.0 * 0.82).abs() < 0.001);
+        assert!(unsafe_shift.low_overrev(&t) > 0.0);
+    }
+
+    #[test]
+    fn bump_recovery_requires_low_then_speed_then_high() {
+        let (mut g, t) = game(63);
+        g.start_run(&t);
+        g.gear = Gear::High;
+        g.speed = 20.0;
+        let mut bump_ev = StepEvents::default();
+        g.bump(&mut bump_ev, &t, 1.0);
+        assert!(bump_ev.bumped);
+        assert_eq!(g.recovery(), Recovery::NeedLow);
+        let after_bump = g.speed;
+        g.step(&idle(), 0.5, &t);
+        assert!(g.speed < after_bump, "HIGH must bog until LOW is selected");
+        g.nitro_charges = 1;
+        let charge = g.nitro_charges;
+        g.step(
+            &InputState {
+                nitro: true,
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        assert_eq!(g.nitro_charges, charge);
+
+        g.step(
+            &InputState {
+                gear_request: Some(Gear::Low),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert_eq!(g.recovery(), Recovery::BuildSpeed);
+        g.speed = t.shift_up_min_speed - 0.001;
+        let early = g.step(
+            &InputState {
+                gear_request: Some(Gear::High),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(early.high_rejected);
+        g.speed = t.shift_up_min_speed;
+        let ready = g.step(
+            &InputState {
+                gear_request: Some(Gear::High),
+                ..idle()
+            },
+            0.000_001,
+            &t,
+        );
+        assert!(!ready.high_rejected);
+        assert_eq!(g.recovery(), Recovery::Normal);
+        assert_eq!(g.gear(), Gear::High);
+
+        g.bump(&mut StepEvents::default(), &t, -1.0);
+        g.bump(&mut StepEvents::default(), &t, 1.0);
+        assert_eq!(g.recovery(), Recovery::NeedLow);
+    }
+
+    #[test]
+    fn low_gear_bump_builds_speed_before_high_is_ready() {
+        let (mut g, t) = game(64);
+        g.start_run(&t);
+        g.speed = 11.0;
+        g.bump(&mut StepEvents::default(), &t, 1.0);
+        assert_eq!(g.recovery(), Recovery::BuildSpeed);
+        g.speed = t.shift_up_min_speed;
+        g.step(&idle(), 0.0, &t);
+        assert_eq!(g.recovery(), Recovery::ReadyForHigh);
+    }
+
+    #[test]
+    fn nitro_cooldown_starts_at_expiry_freezes_and_resets() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(
+            65,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+        g.nitro_charges = 2;
+        let started = g.step(
+            &InputState {
+                nitro: true,
+                ..idle()
+            },
+            0.1,
+            &t,
+        );
+        assert!(started.nitro_started);
+        assert_eq!(g.nitro_charges, 1);
+        g.step(&idle(), t.nitro_duration_secs - 0.1, &t);
+        assert_eq!(g.nitro_t, 0.0);
+        assert_eq!(g.nitro_cooldown, t.nitro_cooldown_secs);
+        let ignored = g.step(
+            &InputState {
+                nitro: true,
+                ..idle()
+            },
+            0.1,
+            &t,
+        );
+        assert!(!ignored.nitro_started);
+        assert_eq!(g.nitro_charges, 1);
+
+        g.step(
+            &InputState {
+                pause: true,
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        let frozen = g.nitro_cooldown;
+        g.step(&idle(), 1.0, &t);
+        assert_eq!(g.nitro_cooldown, frozen);
+        g.step(
+            &InputState {
+                pause: true,
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        g.step(&idle(), frozen, &t);
+        assert_eq!(g.nitro_cooldown, 0.0);
+        let charges_before_restart = g.nitro_charges;
+        let restarted = g.step(
+            &InputState {
+                nitro: true,
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        assert!(restarted.nitro_started);
+        assert_eq!(g.nitro_charges, charges_before_restart - 1);
+
+        g.nitro_t = 0.0;
+        g.nitro_cooldown = 1.0;
+        let terminal_frozen = g.nitro_cooldown;
+        g.phase = Phase::GameOver {
+            reason: EndReason::Time,
+        };
+        g.step(&idle(), 1.0, &t);
+        assert_eq!(g.nitro_cooldown, terminal_frozen);
+        g.step(
+            &InputState {
+                reset: true,
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        assert_eq!(g.nitro_cooldown, 0.0);
+    }
+
+    #[test]
+    fn nitro_uses_the_full_five_second_interval_before_cooldown() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(
+            67,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        g.nitro_charges = 1;
+
+        let ev = g.step(
+            &InputState {
+                nitro: true,
+                ..idle()
+            },
+            t.nitro_duration_secs,
+            &t,
+        );
+        let target = t.scroll_speed_low * t.nitro_speed_multiplier;
+        let decay = (-t.nitro_duration_secs / t.gear_ramp_secs).exp();
+        let expected_speed = target + (t.scroll_speed_low - target) * decay;
+        let expected_distance = target * t.nitro_duration_secs
+            + (t.scroll_speed_low - target) * t.gear_ramp_secs * (1.0 - decay);
+
+        assert!(ev.nitro_started);
+        assert!((g.speed - expected_speed).abs() < 0.0001);
+        assert!((g.distance - expected_distance).abs() < 0.0001);
+        assert_eq!(g.nitro_t, 0.0);
+        assert_eq!(g.nitro_cooldown, t.nitro_cooldown_secs);
+    }
+
+    #[test]
+    fn nitro_expiry_is_timestep_partition_invariant() {
+        let t = Tuning::default();
+        let road = RoadLoop::straight(
+            10_000.0,
+            vec![Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.8,
+                s: 50.0,
+            }],
+        );
+        let mut coarse = Game::with_road(68, road.clone(), Difficulty::Hard, &t);
+        let mut split = Game::with_road(68, road, Difficulty::Hard, &t);
+        for game in [&mut coarse, &mut split] {
+            game.start_run(&t);
+            game.speed = t.scroll_speed_low;
+            game.nitro_charges = 1;
+        }
+        let activate = InputState {
+            nitro: true,
+            ..idle()
+        };
+        coarse.step(&activate, 6.25, &t);
+        split.step(&activate, 0.7, &t);
+        for dt in [0.55, 1.1, 0.4, 1.35, 0.8, 1.35] {
+            split.step(&idle(), dt, &t);
+        }
+
+        assert_eq!(coarse.nitro_t, split.nitro_t);
+        assert!((coarse.nitro_cooldown - split.nitro_cooldown).abs() < 0.0001);
+        assert!((coarse.speed - split.speed).abs() < 0.0001);
+        assert!((coarse.distance - split.distance).abs() < 0.001);
+        assert!((coarse.environment_time - split.environment_time).abs() < 0.0001);
+        assert_eq!(coarse.cars_passed, split.cars_passed);
+        assert_eq!(coarse.cars_bumped, split.cars_bumped);
+        assert_eq!(coarse.day_cycles, split.day_cycles);
+    }
+
+    #[test]
+    fn difficulties_define_immutable_run_results_and_isolated_rankings() {
+        assert_eq!(Difficulty::Easy.duration_secs(), 120.0);
+        assert_eq!(Difficulty::Medium.duration_secs(), 360.0);
+        assert_eq!(Difficulty::Hard.duration_secs(), 600.0);
+        assert_eq!(Difficulty::Medium.label(), "MEDIUM");
+
+        let t = Tuning::default();
+        let mut g = Game::with_road_for_duration(
+            66,
+            RoadLoop::straight(100.0, vec![]),
+            Difficulty::Easy,
+            0.1,
+            &t,
+        );
+        g.start_run(&t);
+        g.step(&idle(), 0.1, &t);
+        let result = *g.result().unwrap();
+        assert_eq!(result.difficulty, Difficulty::Easy);
+        g.restart_with_difficulty(Difficulty::Hard, &t);
+        assert_eq!(result.difficulty, Difficulty::Easy);
+        assert_eq!(g.session_remaining, 600.0);
+
+        let mut entries = Vec::new();
+        for difficulty in Difficulty::ALL {
+            for n in 0..11 {
+                let initials = format!("{}AA", (b'A' + n) as char);
+                entries.push(
+                    LeaderboardEntry::new(&initials, difficulty, 0, u64::from(n), 0).unwrap(),
+                );
+            }
+        }
+        rank_leaderboard(&mut entries);
+        assert_eq!(entries.len(), LEADERBOARD_CAPACITY);
+        for difficulty in Difficulty::ALL {
+            assert_eq!(leaderboard_for(&entries, difficulty).count(), 10);
+        }
     }
 }

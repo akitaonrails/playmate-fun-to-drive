@@ -12,12 +12,13 @@ pub enum Gear {
     High,
 }
 
-impl Gear {
-    pub fn toggle(self) -> Self {
-        match self {
-            Gear::Low => Gear::High,
-            Gear::High => Gear::Low,
-        }
+/// Resolve two edge-triggered selector inputs. Contradictory requests are
+/// deliberately ignored rather than depending on adapter polling order.
+pub fn gear_request(low: bool, high: bool) -> Option<Gear> {
+    match (low, high) {
+        (true, false) => Some(Gear::Low),
+        (false, true) => Some(Gear::High),
+        _ => None,
     }
 }
 
@@ -26,9 +27,8 @@ impl Gear {
 pub struct InputState {
     /// Steering in [-1, 1]; negative = left, positive = right.
     pub steer: f32,
-    pub gear: Gear,
-    /// Edge-triggered: gear toggle request this tick.
-    pub gear_up: bool,
+    /// Edge-triggered, explicit selector request. `None` preserves the gear.
+    pub gear_request: Option<Gear>,
     /// Edge-triggered: restart request this tick.
     pub reset: bool,
     /// Edge-triggered: pause/resume toggle this tick.
@@ -159,8 +159,10 @@ mod tests {
     }
 
     #[test]
-    fn gear_toggles_low_high() {
-        assert_eq!(Gear::Low.toggle(), Gear::High);
-        assert_eq!(Gear::High.toggle(), Gear::Low);
+    fn gear_requests_are_explicit_and_mutually_exclusive() {
+        assert_eq!(gear_request(true, false), Some(Gear::Low));
+        assert_eq!(gear_request(false, true), Some(Gear::High));
+        assert_eq!(gear_request(false, false), None);
+        assert_eq!(gear_request(true, true), None);
     }
 }

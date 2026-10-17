@@ -1368,7 +1368,8 @@ fn sync_hud(
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS drive | G gear | Y nitro | R restart | T flat | L toy look".to_string()
+                    "ARROWS drive | F low / G high | Y nitro | R restart | T flat | L toy look"
+                        .to_string()
                 }
                 Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
                 Phase::GameOver { .. } => String::new(),
@@ -1376,7 +1377,8 @@ fn sync_hud(
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS steer | G gear | Y nitro | R restart | T toy | L toy look".to_string()
+                    "ARROWS steer | F low / G high | Y nitro | R restart | T toy | L toy look"
+                        .to_string()
                 }
                 Phase::Running => String::new(),
                 Phase::GameOver { .. } => String::new(),
@@ -1400,9 +1402,14 @@ fn sync_end_overlay(
         };
     }
     let result = sim.0.result().copied().unwrap_or_else(|| {
-        game_core::SessionResult::new(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped)
+        game_core::SessionResult::new(
+            sim.0.difficulty(),
+            sim.0.day_cycles,
+            sim.0.cars_passed,
+            sim.0.cars_bumped,
+        )
     });
-    let table = leaderboard_table(&leaderboard.entries);
+    let table = leaderboard_table(&leaderboard.entries, sim.0.difficulty());
     for (marker, mut text) in &mut texts {
         text.0 = match marker.0 {
             EndTextKind::Summary => format!(
@@ -1429,10 +1436,14 @@ fn sync_end_overlay(
     }
 }
 
-fn leaderboard_table(entries: &[game_core::LeaderboardEntry]) -> String {
+fn leaderboard_table(
+    entries: &[game_core::LeaderboardEntry],
+    difficulty: game_core::Difficulty,
+) -> String {
     let mut lines = vec!["#   TAG    SCORE    CYC   PASS   BUMP".to_string()];
+    let mut ranked = game_core::leaderboard_for(entries, difficulty);
     for rank in 0..5 {
-        if let Some(entry) = entries.get(rank) {
+        if let Some(entry) = ranked.next() {
             lines.push(format!(
                 "{}   {}   {:06}    {:02}    {:03}    {:03}",
                 rank + 1,

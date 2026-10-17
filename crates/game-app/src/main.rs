@@ -11,7 +11,7 @@ mod view;
 
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
-use game_core::{Game, InputState, KeyboardSteering, Tuning};
+use game_core::{Difficulty, Game, InputState, KeyboardSteering, Tuning};
 use session::{EndFlow, EndMode};
 
 const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
@@ -55,12 +55,9 @@ struct FrameInput {
 }
 
 fn main() {
-    let mut tuning = Tuning::default();
+    let tuning = Tuning::default();
     let qa_parameter = bridge::query_param("qa_session_secs");
     let (qa_mode, qa_duration) = session::qa_mode_and_duration(qa_parameter.as_deref());
-    if let Some(duration) = qa_duration {
-        tuning.session_secs = duration;
-    }
     let (leaderboard, persistent) = if qa_mode {
         (Vec::new(), false)
     } else {
@@ -104,7 +101,11 @@ fn main() {
         let mut rng = game_core::Rng::new(20261015);
         let mut road = game_core::RoadLoop::generate(&mut rng);
         road.apply_square_curve();
-        Game::with_road(20261015, road, &tuning)
+        if let Some(duration) = qa_duration {
+            Game::with_road_for_duration(20261015, road, Difficulty::Hard, duration, &tuning)
+        } else {
+            Game::with_road(20261015, road, Difficulty::Hard, &tuning)
+        }
     }))
     .init_resource::<FrameInput>()
     .init_resource::<VisualEffects>()
@@ -152,7 +153,7 @@ fn gather_input(
 ) {
     if end.0.mode != EndMode::Playing {
         frame.state.steer = 0.0;
-        frame.state.gear_up = false;
+        frame.state.gear_request = None;
         frame.state.pause = false;
         frame.state.nitro = false;
         return;
@@ -165,6 +166,8 @@ fn gather_input(
         &tuning.0,
     );
 
+    let mut low_requested = keys.just_pressed(KeyCode::KeyF);
+    let mut high_requested = keys.just_pressed(KeyCode::KeyG);
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
         let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
@@ -172,9 +175,12 @@ fn gather_input(
             steer = x; // analog stick overrides the keyboard shape
             frame.pad_seen = true;
         }
-        if pad.just_pressed(GamepadButton::South) || pad.just_pressed(GamepadButton::RightTrigger2)
-        {
-            frame.state.gear_up = true;
+        if pad.just_pressed(GamepadButton::South) {
+            low_requested = true;
+            frame.pad_seen = true;
+        }
+        if pad.just_pressed(GamepadButton::RightTrigger2) {
+            high_requested = true;
             frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::Start) {
@@ -192,9 +198,7 @@ fn gather_input(
     }
 
     frame.state.steer = steer.clamp(-1.0, 1.0);
-    if keys.just_pressed(KeyCode::KeyG) {
-        frame.state.gear_up = true;
-    }
+    frame.state.gear_request = game_core::gear_request(low_requested, high_requested);
     if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
         frame.state.reset = true;
     }
@@ -317,7 +321,7 @@ fn step_sim(
         crash.dir = sim.0.bump_dir;
     }
     // edge-triggered flags are consumed by exactly one fixed step
-    frame.state.gear_up = false;
+    frame.state.gear_request = None;
     frame.state.reset = false;
     frame.state.pause = false;
     frame.state.nitro = false;
@@ -342,7 +346,6 @@ fn publish_state(
     nitro_visuals: Res<view::NitroVisuals>,
     end: Res<EndSession>,
     leaderboard: Res<LeaderboardState>,
-    tuning: Res<TuningRes>,
 ) {
     let weather = sim.0.weather();
     let score = game_core::score_for(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped);
@@ -353,7 +356,7 @@ fn publish_state(
         ),
         None => "null".to_string(),
     };
-    let leaderboard_json = session::entries_json(&leaderboard.entries, 10);
+    let leaderboard_json = session::entries_json(&leaderboard.entries, sim.0.difficulty(), 10);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
         "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
@@ -367,7 +370,7 @@ fn publish_state(
         leaderboard_json,
         leaderboard.persistent,
         leaderboard.qa_mode,
-        tuning.0.session_secs,
+        sim.0.session_duration(),
         score,
         sim.0.speed,
         sim.0.session_remaining,
@@ -428,7 +431,7 @@ mod tests {
     #[test]
     fn terminal_phase_disables_frozen_nitro_visuals() {
         let tuning = Tuning::default();
-        let mut game = Game::new(7, &tuning);
+        let mut game = Game::new(7, Difficulty::Hard, &tuning);
         game.phase = game_core::Phase::Running;
         game.nitro_t = 1.0;
         assert!(nitro_effects_active(&game));
