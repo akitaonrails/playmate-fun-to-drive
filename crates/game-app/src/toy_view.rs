@@ -6,6 +6,7 @@ use bevy::asset::io::embedded::EmbeddedAssetRegistry;
 use bevy::camera::RenderTarget;
 
 use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
+use bevy::post_process::bloom::{Bloom, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::world_serialization::WorldAssetRoot;
@@ -157,43 +158,62 @@ pub fn setup(
             ..default()
         },
         Transform::from_xyz(0.0, 0.185, 0.275).looking_at(Vec3::new(0.0, 0.128, 0.02), Vec3::Y),
-        bevy::core_pipeline::tonemapping::Tonemapping::None,
+        bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
+        Bloom {
+            intensity: 0.035,
+            // Keep white plastic below bloom: only the HDR screen emitter
+            // should produce the soft old-backlight bleed.
+            prefilter: BloomPrefilter {
+                threshold: 1.05,
+                threshold_softness: 0.12,
+            },
+            ..Bloom::OLD_SCHOOL
+        },
         ToyCamera,
     ));
 
-    // key light with shadows (contrast/AO feel)
+    // Dim blue window/moon fill establishes a dorm room at night without
+    // flattening the toy's deliberately simple plastic forms.
     commands.spawn((
         Transform::from_xyz(1.1, 1.8, 1.4).looking_at(Vec3::ZERO, Vec3::Y),
         DirectionalLight {
-            illuminance: 9_000.0,
+            color: Color::srgb(0.42, 0.52, 0.78),
+            illuminance: 140.0,
             shadow_maps_enabled: true,
             ..default()
         },
         bevy::light::CascadeShadowConfig::default(),
     ));
-    // warm desk-lamp fill from the player's side
+    // Warm desk lamp focused on the toy: the narrow pool of light adds the
+    // requested contrast while leaving the desk edges and wall subdued.
     commands.spawn((
-        PointLight {
-            color: Color::srgb(1.0, 0.88, 0.72),
-            intensity: 6.0,
-            range: 2.5,
+        SpotLight {
+            color: Color::srgb(1.0, 0.77, 0.50),
+            intensity: 360.0,
+            // Stops before the rear wall, so it reads as a pool on the toy
+            // and desk instead of making the entire room uniformly bright.
+            range: 0.55,
+            radius: 0.06,
+            inner_angle: 0.26,
+            outer_angle: 0.56,
+            shadow_maps_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.55, 0.55),
+        Transform::from_xyz(0.23, 0.32, 0.30).looking_at(Vec3::new(0.0, 0.055, 0.0), Vec3::Y),
     ));
-    // cool rim light from behind for edge contrast on the plastic
+    // Low cool rim separates the dark shell from the wall.
     commands.spawn((
         PointLight {
-            color: Color::srgb(0.55, 0.7, 1.0),
-            intensity: 4.0,
-            range: 2.0,
+            color: Color::srgb(0.35, 0.53, 1.0),
+            intensity: 24.0,
+            range: 0.8,
             ..default()
         },
-        Transform::from_xyz(-0.5, 0.4, -0.6),
+        Transform::from_xyz(-0.35, 0.32, -0.42),
     ));
     commands.spawn(AmbientLight {
-        color: Color::srgb(0.55, 0.58, 0.66),
-        brightness: 50.0,
+        color: Color::srgb(0.24, 0.29, 0.48),
+        brightness: 3.0,
         ..default()
     });
 }
@@ -299,8 +319,8 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.16, 0.14, 0.12),
-                    perceptual_roughness: 0.65,
+                    base_color: Color::srgb(0.075, 0.060, 0.052),
+                    perceptual_roughness: 0.72,
                     ..default()
                 })),
                 Transform::from_scale(Vec3::splat(1.4)),
@@ -309,7 +329,7 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.10, 0.09, 0.085),
+                    base_color: Color::srgb(0.025, 0.030, 0.052),
                     perceptual_roughness: 1.0,
                     ..default()
                 })),
@@ -503,7 +523,20 @@ pub fn paint_screen(
     screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
 ) {
     for (entity, name) in screens.iter() {
-        if name.as_str().starts_with("Screen") && name.as_str() != "ScreenFrame" {
+        if name.as_str() == "ScreenFrame" {
+            // The original toy surrounds its display with molded near-black
+            // plastic. Keep this separate from the emissive screen material.
+            let bezel = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.025, 0.03, 0.035),
+                perceptual_roughness: 0.62,
+                metallic: 0.04,
+                ..default()
+            });
+            commands
+                .entity(entity)
+                .insert(MeshMaterial3d(bezel))
+                .insert(ScreenPainted);
+        } else if name.as_str().starts_with("Screen") && mat_handle.0.is_none() {
             let mat = materials.add(StandardMaterial {
                 base_color_texture: Some(game_image.0.clone()),
                 // the game image itself is the light source: backlit drum
@@ -518,7 +551,6 @@ pub fn paint_screen(
                 .entity(entity)
                 .insert(MeshMaterial3d(mat))
                 .insert(ScreenPainted);
-            return; // one screen per toy
         }
     }
 }
@@ -547,7 +579,8 @@ pub fn update_screen_mat(
         // overlays live in the 2D drum view; see view.rs)
         let look = view.toy_look;
         mat.base_color = Color::srgb(1.0, 1.0, 1.0).mix(&Color::srgb(0.92, 0.85, 0.70), look * 0.6);
-        mat.emissive = LinearRgba::new(look * 0.18, look * 0.16, look * 0.12, 1.0);
+        let backlight = 1.12 + look * 0.30;
+        mat.emissive = LinearRgba::new(backlight, backlight * 0.88, backlight * 0.68, 1.0);
     }
 }
 

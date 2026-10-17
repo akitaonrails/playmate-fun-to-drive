@@ -342,6 +342,14 @@ impl Game {
         self.road.curve_at(self.loop_pos() + ahead_m) + drum_shift
     }
 
+    pub fn road_grade(&self) -> f32 {
+        self.road.grade_at(self.loop_pos())
+    }
+
+    pub fn slope_speed_factor(&self, tuning: &Tuning) -> f32 {
+        (1.0 - self.road_grade() * tuning.slope_speed_gain).clamp(0.90, 1.10)
+    }
+
     pub fn step(&mut self, input: &InputState, dt: f32, t: &Tuning) -> StepEvents {
         let mut ev = StepEvents::default();
         let dt = dt.max(0.0);
@@ -495,8 +503,8 @@ impl Game {
         // intervals. The active boost therefore applies for its complete five
         // seconds, and any time remaining after expiry ages the cooldown.
         let mut remaining = dt;
-        let mut car_collision = false;
-        let mut car_bump_dir = 1.0;
+        let mut obstacle_collision = false;
+        let mut obstacle_bump_dir = 1.0;
         let mut off_road_bump = false;
         while remaining > 0.0 {
             let nitro_active = self.nitro_t > 0.0;
@@ -516,8 +524,8 @@ impl Game {
                 ev,
                 nitro_active,
                 bump_active,
-                &mut car_collision,
-                &mut car_bump_dir,
+                &mut obstacle_collision,
+                &mut obstacle_bump_dir,
                 &mut off_road_bump,
             );
 
@@ -540,10 +548,10 @@ impl Game {
         }
 
         // Preserve the outer fixed-step contract: all encounters are counted,
-        // but collectively cause at most one impulse, with car-over-off-road
-        // precedence even when a timer boundary split the integration.
-        if car_collision {
-            self.bump(ev, t, car_bump_dir);
+        // but collectively cause at most one impulse, with an obstacle taking
+        // precedence over the generic off-road timer at the same instant.
+        if obstacle_collision {
+            self.bump(ev, t, obstacle_bump_dir);
         } else if off_road_bump {
             self.bump(ev, t, self.road_x.signum());
         }
@@ -563,8 +571,8 @@ impl Game {
         ev: &mut StepEvents,
         nitro_active: bool,
         bump_active: bool,
-        car_collision: &mut bool,
-        car_bump_dir: &mut f32,
+        obstacle_collision: &mut bool,
+        obstacle_bump_dir: &mut f32,
         off_road_bump: &mut bool,
     ) {
         let mut target = match self.recovery {
@@ -580,6 +588,7 @@ impl Game {
         if nitro_active && self.recovery == Recovery::Normal {
             target *= t.nitro_speed_multiplier;
         }
+        target *= self.slope_speed_factor(t);
         target *= off_road_speed_factor(self.road_x, t);
         let brake = input.brake.clamp(0.0, 1.0);
         target *= 1.0 - brake;
@@ -646,25 +655,31 @@ impl Game {
         // (previous_distance, distance], including repeated-loop encounters.
         // Crossings use the resolved road offset for their timer-bounded
         // interval.
-        // Passed and bumped are mutually exclusive per encounter; roadside
-        // scenery never affects either counter, and collisions collectively
-        // produce at most one physical impulse below.
+        // Passed and bumped are mutually exclusive per car encounter.
+        // Roadside scenery can cause the same physical crash but deliberately
+        // does not alter either car-specific leaderboard counter.
         let hit_band = (t.car_half_width + t.hazard_half_width) * (1.0 - t.collision_forgiveness);
         for h in &self.road.hazards {
-            if h.kind == HazardKind::Oncoming {
-                let crossings =
-                    crossings_between(previous_distance, self.distance, h.s, self.road.length);
-                if crossings == 0 {
-                    continue;
-                }
-                let x_eff = h.x + self.road_x;
-                if x_eff.abs() < hit_band {
+            let crossings =
+                crossings_between(previous_distance, self.distance, h.s, self.road.length);
+            if crossings == 0 {
+                continue;
+            }
+            let x_eff = self.road.hazard_x_at(h, 0.0) + self.road_x;
+            match h.kind {
+                HazardKind::Oncoming if x_eff.abs() < hit_band => {
                     self.cars_bumped = self.cars_bumped.saturating_add(crossings);
-                    *car_collision = true;
-                    *car_bump_dir = -x_eff.signum();
-                } else {
+                    *obstacle_collision = true;
+                    *obstacle_bump_dir = -x_eff.signum();
+                }
+                HazardKind::Oncoming => {
                     self.cars_passed = self.cars_passed.saturating_add(crossings);
                 }
+                HazardKind::Tree | HazardKind::Billboard if x_eff.abs() < hit_band => {
+                    *obstacle_collision = true;
+                    *obstacle_bump_dir = -x_eff.signum();
+                }
+                HazardKind::Tree | HazardKind::Billboard => {}
             }
         }
     }
@@ -817,6 +832,41 @@ mod tests {
         run_seconds(&mut g2, 1.0, &idle(), &t2);
         assert!(v_high_after_1s > g2.speed, "HIGH must out-run LOW");
         assert!(v_high_after_1s <= t.scroll_speed_high * 1.001);
+    }
+
+    #[test]
+    fn gentle_grade_resists_uphill_and_assists_downhill_speed() {
+        let t = Tuning::default();
+        let mut road = RoadLoop::generate(&mut crate::Rng::new(204));
+        road.hazards.clear();
+        let positions: Vec<f32> = (0..crate::road::CURVE_SAMPLES)
+            .map(|i| road.length * i as f32 / crate::road::CURVE_SAMPLES as f32)
+            .collect();
+        let uphill_pos = *positions
+            .iter()
+            .max_by(|a, b| road.grade_at(**a).total_cmp(&road.grade_at(**b)))
+            .unwrap();
+        let downhill_pos = *positions
+            .iter()
+            .min_by(|a, b| road.grade_at(**a).total_cmp(&road.grade_at(**b)))
+            .unwrap();
+        assert!(road.grade_at(uphill_pos) > 0.01);
+        assert!(road.grade_at(downhill_pos) < -0.01);
+
+        let mut uphill = Game::with_road(204, road.clone(), Difficulty::Hard, &t);
+        let mut downhill = Game::with_road(204, road, Difficulty::Hard, &t);
+        for (game, position) in [(&mut uphill, uphill_pos), (&mut downhill, downhill_pos)] {
+            game.start_run(&t);
+            game.distance = position;
+            game.speed = t.scroll_speed_low;
+            game.step(&idle(), 0.25, &t);
+        }
+        assert!(uphill.speed < t.scroll_speed_low);
+        assert!(downhill.speed > t.scroll_speed_low);
+        assert!(
+            downhill.speed - uphill.speed < 1.0,
+            "hills should stay subtle"
+        );
     }
 
     #[test]
@@ -1507,7 +1557,7 @@ mod tests {
     }
 
     #[test]
-    fn oncoming_crossings_are_mutually_exclusive_and_roadside_is_ignored() {
+    fn oncoming_crossings_are_mutually_exclusive_and_scenery_is_not_a_car() {
         let t = Tuning::default();
         let hazards = vec![
             Hazard {
@@ -1521,8 +1571,8 @@ mod tests {
                 s: 1.0,
             },
             Hazard {
-                kind: HazardKind::Roadside,
-                x: 0.0,
+                kind: HazardKind::Tree,
+                x: 1.15,
                 s: 1.0,
             },
         ];
@@ -1534,6 +1584,31 @@ mod tests {
         assert_eq!(g.cars_bumped, 1);
         assert_eq!(g.cars_passed, 1);
         assert_eq!(g.cars_bumped + g.cars_passed, 2);
+    }
+
+    #[test]
+    fn roadside_scenery_uses_crash_recovery_without_changing_car_counts() {
+        let t = Tuning::default();
+        let hazard = Hazard {
+            kind: HazardKind::Billboard,
+            x: 1.15,
+            s: 1.0,
+        };
+        let mut g = Game::with_road(
+            530,
+            RoadLoop::straight(20.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+        g.road_x = -1.15;
+        let event = g.step(&idle(), 0.1, &t);
+        assert!(event.bumped);
+        assert_eq!(g.cars_bumped, 0);
+        assert_eq!(g.cars_passed, 0);
+        assert_eq!(g.recovery(), Recovery::BuildSpeed);
+        assert!(g.speed < t.scroll_speed_low * 0.6);
     }
 
     #[test]

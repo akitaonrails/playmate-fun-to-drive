@@ -4,6 +4,7 @@
 //! input, steps the sim on the fixed schedule, renders, and (on wasm)
 //! publishes state for the Playwright harness.
 
+mod audio;
 mod bridge;
 mod session;
 mod toy_view;
@@ -70,7 +71,13 @@ struct FrameInput {
     pub(crate) pad_seen: bool,
     kb: KeyboardSteering,
     suppress_gameplay_once: bool,
+    gear_request_buffer_secs: f32,
+    low_bumper_down: bool,
+    high_bumper_down: bool,
 }
+
+const BUMPER_PRESS_THRESHOLD: f32 = 0.28;
+const GEAR_REQUEST_BUFFER_SECS: f32 = 0.15;
 
 fn main() {
     let tuning = Tuning::default();
@@ -93,6 +100,7 @@ fn main() {
         (entries, persistent)
     };
     let mut app = App::new();
+    let audio_muted = bridge::load_local(audio::STORAGE_KEY).0.as_deref() == Some("muted");
 
     app.add_plugins(
         DefaultPlugins
@@ -100,6 +108,7 @@ fn main() {
                 // wasm: don't probe for .meta files next to assets (they don't exist
                 // in the trunk dist; probing fails asset loads)
                 meta_check: AssetMetaCheck::Never,
+                file_path: "assets".into(),
                 ..default()
             })
             .set(WindowPlugin {
@@ -111,7 +120,8 @@ fn main() {
                 ..default()
             }),
     )
-    .insert_resource(ClearColor(Color::srgb(0.05, 0.06, 0.09)))
+    .add_plugins(audio::ArcadeAudioPlugin)
+    .insert_resource(ClearColor(Color::srgb(0.008, 0.011, 0.022)))
     .insert_resource(TuningRes(tuning))
     .insert_resource(RunConfig { qa_duration })
     .insert_resource(LeaderboardState {
@@ -120,10 +130,10 @@ fn main() {
         qa_mode,
     })
     .insert_resource(Sim({
-        // square feel-test track: straights + 4 constant corners (user req)
+        // Seeded technical loop: mixed-radius corners, rolling elevation,
+        // traffic, and collidable roadside scenery.
         let mut rng = game_core::Rng::new(20261015);
-        let mut road = game_core::RoadLoop::generate(&mut rng);
-        road.apply_square_curve();
+        let road = game_core::RoadLoop::generate(&mut rng);
         if let Some(duration) = qa_duration {
             Game::with_road_for_duration(20261015, road, Difficulty::Medium, duration, &tuning)
         } else {
@@ -133,6 +143,7 @@ fn main() {
     .init_resource::<FrameInput>()
     .init_resource::<VisualEffects>()
     .init_resource::<EndSession>()
+    .insert_resource(audio::AudioState::new(audio_muted))
     .add_systems(
         Startup,
         (view::setup, toy_view::setup, toy_view::setup_diorama),
@@ -180,11 +191,13 @@ fn gather_input(
         frame.state.gear_request = None;
         frame.state.pause = false;
         frame.state.nitro = false;
+        frame.gear_request_buffer_secs = 0.0;
         return;
     }
     if frame.suppress_gameplay_once {
         frame.suppress_gameplay_once = false;
         frame.state = InputState::default();
+        frame.gear_request_buffer_secs = 0.0;
         return;
     }
     // keyboard short/long-press shaping (M6, logic tested in game-core)
@@ -197,6 +210,8 @@ fn gather_input(
 
     let mut low_requested = keys.just_pressed(KeyCode::KeyQ);
     let mut high_requested = keys.just_pressed(KeyCode::KeyE);
+    let mut low_bumper_down = false;
+    let mut high_bumper_down = false;
     let mut brake = 0.0_f32;
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
@@ -205,14 +220,13 @@ fn gather_input(
             steer = x; // analog stick overrides the keyboard shape
             frame.pad_seen = true;
         }
-        if pad.just_pressed(GamepadButton::LeftTrigger) {
-            low_requested = true;
-            frame.pad_seen = true;
-        }
-        if pad.just_pressed(GamepadButton::RightTrigger) {
-            high_requested = true;
-            frame.pad_seen = true;
-        }
+        // LB/RB can report analog values on some controllers. Bevy's normal
+        // digital press point is intentionally firm, so use a lighter edge
+        // here and latch it until the fixed simulation consumes the request.
+        low_bumper_down |=
+            pad.get(GamepadButton::LeftTrigger).unwrap_or_default() >= BUMPER_PRESS_THRESHOLD;
+        high_bumper_down |=
+            pad.get(GamepadButton::RightTrigger).unwrap_or_default() >= BUMPER_PRESS_THRESHOLD;
         let pad_brake = pad
             .get(GamepadButton::LeftTrigger2)
             .unwrap_or_default()
@@ -235,9 +249,27 @@ fn gather_input(
         }
     }
 
+    low_requested |= low_bumper_down && !frame.low_bumper_down;
+    high_requested |= high_bumper_down && !frame.high_bumper_down;
+    if low_requested || high_requested {
+        frame.pad_seen |= low_bumper_down || high_bumper_down;
+    }
+    frame.low_bumper_down = low_bumper_down;
+    frame.high_bumper_down = high_bumper_down;
+
     frame.state.steer = steer.clamp(-1.0, 1.0);
     frame.state.brake = brake;
-    frame.state.gear_request = game_core::gear_request(low_requested, high_requested);
+    let gear_request = game_core::gear_request(low_requested, high_requested);
+    if gear_request.is_some() {
+        frame.state.gear_request = gear_request;
+        frame.gear_request_buffer_secs = GEAR_REQUEST_BUFFER_SECS;
+    } else {
+        frame.gear_request_buffer_secs =
+            (frame.gear_request_buffer_secs - time.delta_secs()).max(0.0);
+        if frame.gear_request_buffer_secs == 0.0 {
+            frame.state.gear_request = None;
+        }
+    }
     if keys.just_pressed(KeyCode::KeyR) {
         frame.state.reset = true;
     }
@@ -270,10 +302,13 @@ fn handle_end_input(
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
     mut frame: ResMut<FrameInput>,
+    mut audio_state: ResMut<audio::AudioState>,
+    mut audio_events: ResMut<audio::AudioEvents>,
 ) {
     match end.0.mode {
         EndMode::Playing => {}
         EndMode::DifficultySelect => {
+            let previous_index = end.0.difficulty_index;
             let left = keys.just_pressed(KeyCode::ArrowLeft)
                 || pads
                     .iter()
@@ -283,11 +318,17 @@ fn handle_end_input(
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::DPadRight));
             end.0.difficulty_index = menu_index_after_input(end.0.difficulty_index, left, right);
+            if end.0.difficulty_index != previous_index {
+                audio_events.emit(audio::AudioCue::MenuMove);
+            }
             let confirm = keys.just_pressed(KeyCode::Enter)
                 || pads
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::South));
             if confirm {
+                audio_state.unlock();
+                audio_events.emit(audio::AudioCue::MenuConfirm);
+                audio_events.emit(audio::AudioCue::RunStart);
                 let difficulty = Difficulty::ALL[end.0.difficulty_index];
                 if let Some(duration) = config.qa_duration {
                     sim.0 = Game::with_road_for_duration(
@@ -316,15 +357,20 @@ fn handle_end_input(
         }
         EndMode::NameEntry => {
             if keys.just_pressed(KeyCode::Backspace) {
-                end.0.initials.pop();
+                if end.0.initials.pop() {
+                    audio_events.emit(audio::AudioCue::Delete);
+                }
             } else if let Some(letter) = just_pressed_letter(&keys) {
-                end.0.initials.push(letter);
+                if end.0.initials.push(letter) {
+                    audio_events.emit(audio::AudioCue::Key);
+                }
             }
             if keys.just_pressed(KeyCode::Enter) {
                 let Some(result) = sim.0.result().copied() else {
                     return;
                 };
                 if let Some(entry) = end.0.submit(result) {
+                    audio_events.emit(audio::AudioCue::Submit);
                     leaderboard.entries.push(entry);
                     game_core::rank_leaderboard(&mut leaderboard.entries);
                     if !leaderboard.qa_mode {
@@ -336,6 +382,7 @@ fn handle_end_input(
         }
         EndMode::Leaderboard => {
             if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
+                audio_events.emit(audio::AudioCue::MenuConfirm);
                 end.0.mode = EndMode::DifficultySelect;
                 end.0.difficulty_index = difficulty_index(sim.0.difficulty());
                 end.0.initials = session::Initials::default();
@@ -401,9 +448,14 @@ fn step_sim(
     mut crash: ResMut<toy_view::CrashPulse>,
     tuning: Res<TuningRes>,
     time: Res<Time>,
+    mut audio_events: ResMut<audio::AudioEvents>,
 ) {
     let dt = time.delta_secs();
+    let gear_before = sim.0.gear();
     let events = sim.0.step(&frame.state, dt, &tuning.0);
+    if sim.0.gear() != gear_before && !events.downshifted {
+        audio_events.emit(audio::AudioCue::Shift);
+    }
     if events.started {
         effects.nitro_pickup_glow = 0.0;
         effects.nitro_segment = None;
@@ -413,18 +465,25 @@ fn step_sim(
         effects.downshift_severity = None;
     }
     if events.nitro_collected {
+        audio_events.emit(audio::AudioCue::NitroPickup);
         effects.nitro_pickup_glow = NITRO_PICKUP_GLOW_SECS;
         effects.nitro_segment = sim.0.nitro_charges.checked_sub(1);
     }
+    if events.nitro_started {
+        audio_events.emit(audio::AudioCue::NitroStart);
+    }
     if events.bumped {
+        audio_events.emit(audio::AudioCue::Crash);
         crash.pending = true;
         crash.dir = sim.0.bump_dir;
     }
     if events.high_rejected {
+        audio_events.emit(audio::AudioCue::Clank);
         effects.action_cue = ActionCue::TooSoon;
         effects.action_cue_secs = 0.75;
     }
     if events.downshifted {
+        audio_events.emit(audio::AudioCue::Shift);
         effects.action_cue = ActionCue::ShiftLow;
         effects.action_cue_secs = 0.55;
         effects.downshift_secs = 0.38;
@@ -432,6 +491,7 @@ fn step_sim(
     }
     // edge-triggered flags are consumed by exactly one fixed step
     frame.state.gear_request = None;
+    frame.gear_request_buffer_secs = 0.0;
     frame.state.reset = false;
     frame.state.pause = false;
     frame.state.nitro = false;
@@ -476,6 +536,8 @@ fn publish_state(
     instruments: Res<view::InstrumentVisuals>,
     end: Res<EndSession>,
     leaderboard: Res<LeaderboardState>,
+    audio: Res<audio::AudioState>,
+    tuning: Res<TuningRes>,
 ) {
     let weather = sim.0.weather();
     let score = game_core::score_for(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped);
@@ -489,7 +551,7 @@ fn publish_state(
     let leaderboard_json = session::entries_json(&leaderboard.entries, sim.0.difficulty(), 10);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"difficulty\":\"{}\",\"difficulty_index\":{},\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"speed_kmh\":{:.3},\"speedometer_angle\":{:.5},\"overrev\":{:.3},\"recovery\":\"{}\",\"action_cue\":\"{}\",\"nitro_cooldown\":{:.3},\"cooldown_gauge\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"lever_target\":{:.4},\"lever_angle\":{:.4},\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"brake\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"difficulty\":\"{}\",\"difficulty_index\":{},\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"speed_kmh\":{:.3},\"speedometer_angle\":{:.5},\"overrev\":{:.3},\"recovery\":\"{}\",\"action_cue\":\"{}\",\"nitro_cooldown\":{:.3},\"cooldown_gauge\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"lever_target\":{:.4},\"lever_angle\":{:.4},\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"brake\":{:.3},\"road_x\":{:.4},\"road_elevation\":{:.4},\"road_grade\":{:.5},\"slope_speed_factor\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{},\"audio_unlocked\":{},\"audio_muted\":{},\"audio_engine_low\":{:.4},\"audio_engine_high\":{:.4},\"audio_wind\":{:.4},\"audio_rain\":{:.4},\"audio_brake\":{:.4},\"audio_skid\":{:.4},\"audio_overrev\":{:.4},\"audio_nitro\":{:.4},\"audio_pitch\":{:.4},\"audio_music_track\":{},\"audio_music_sunset\":{:.4},\"audio_music_neon\":{:.4},\"audio_music_dawn\":{:.4},\"audio_last_cue\":\"{}\",\"audio_cue_count\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -551,9 +613,29 @@ fn publish_state(
         frame.state.steer,
         frame.state.brake,
         sim.0.road_x,
+        sim.0.road.elevation_at(sim.0.loop_pos()),
+        sim.0.road_grade(),
+        sim.0.slope_speed_factor(&tuning.0),
         sim.0.off_road,
         rig.0.roll,
         frame.pad_seen,
+        audio.unlocked,
+        audio.muted,
+        audio.engine_low,
+        audio.engine_high,
+        audio.wind,
+        audio.rain,
+        audio.brake,
+        audio.skid,
+        audio.overrev,
+        audio.nitro,
+        audio.engine_pitch,
+        audio.music_track,
+        audio.music_sunset,
+        audio.music_neon,
+        audio.music_dawn,
+        audio.last_cue,
+        audio.cue_count,
     );
     bridge::publish_state(&payload);
 }

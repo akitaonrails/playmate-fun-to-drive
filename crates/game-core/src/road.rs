@@ -9,7 +9,8 @@ pub const CURVE_SAMPLES: usize = 128;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HazardKind {
     Oncoming,
-    Roadside,
+    Tree,
+    Billboard,
 }
 
 /// All lateral values are normalized: 1.0 = half road width.
@@ -28,98 +29,116 @@ pub struct RoadLoop {
     pub hazards: Vec<Hazard>,
     /// Sampled centerline curve, periodic, normalized to max |1.0|.
     curve: Vec<f32>,
+    /// Periodic terrain elevation in meters, kept deliberately low-relief.
+    elevation: Vec<f32>,
 }
 
 impl RoadLoop {
     pub fn generate(rng: &mut Rng) -> Self {
-        let length = rng.range(48.0, 72.0);
+        let length = rng.range(180.0, 240.0);
+        let direction = if rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
+        let curve = Self::technical_curve(direction);
 
-        // Integer-period harmonics => seamless wrap at the loop joint.
-        let mut phases = [0.0f32; 3];
-        let mut amps = [0.0f32; 3];
-        for i in 0..3 {
-            phases[i] = rng.next_f32() * std::f32::consts::TAU;
-            amps[i] = rng.range(0.3, 1.0) / (i as f32 + 1.0);
-        }
-
-        let mut curve = Vec::with_capacity(CURVE_SAMPLES);
-        let mut peak: f32 = 1.0e-6;
+        // Two low harmonics make broad, seamless rises and dips. Their
+        // amplitude keeps grades around a few percent rather than mountains.
+        let elevation_phase = rng.next_f32() * std::f32::consts::TAU;
+        let mut elevation = Vec::with_capacity(CURVE_SAMPLES);
         for n in 0..CURVE_SAMPLES {
             let t = n as f32 / CURVE_SAMPLES as f32;
-            let mut v = 0.0;
-            for i in 0..3 {
-                v += amps[i] * (std::f32::consts::TAU * (i as f32 + 1.0) * t + phases[i]).sin();
-            }
-            peak = peak.max(v.abs());
-            curve.push(v);
-        }
-        // warm-up/warm-down: amplitude fades in over the first 20% of the
-        // loop and out over the last 10%, so runs start gentle and the loop
-        // joint stays smooth (a cold full-amplitude first curve is unfair).
-        // Peak is re-normalized AFTER the fade so max |curve| stays 1.0.
-        let n = CURVE_SAMPLES as f32;
-        for (i, v) in curve.iter_mut().enumerate() {
-            let i = i as f32;
-            let fade = (i / (0.20 * n)).min((n - i) / (0.10 * n)).clamp(0.0, 1.0);
-            *v *= fade;
-        }
-        let peak = curve.iter().fold(1.0e-6f32, |m, v| m.max(v.abs()));
-        for v in &mut curve {
-            *v /= peak;
+            elevation.push(
+                0.72 * (std::f32::consts::TAU * t + elevation_phase).sin()
+                    + 0.24 * (std::f32::consts::TAU * 2.0 * t + elevation_phase * 0.47).sin(),
+            );
         }
 
-        let count = rng.range(6.0, 9.0).round() as usize;
+        let traffic_count = rng.range(12.0, 17.0).round() as usize;
+        let scenery_count = rng.range(8.0, 13.0).round() as usize;
         let lanes = [-0.72f32, 0.0, 0.72];
-        let mut hazards = Vec::with_capacity(count);
-        for k in 0..count {
+        let mut hazards = Vec::with_capacity(traffic_count + scenery_count);
+        for k in 0..traffic_count {
             // first hazard no earlier than 22% into the loop (fair start)
-            let t = 0.22 + 0.78 * (k as f32 + rng.range(0.25, 0.75)) / count as f32;
+            let t = 0.22 + 0.78 * (k as f32 + rng.range(0.25, 0.75)) / traffic_count as f32;
             let s = t * length;
             let lane = lanes[(rng.next_u64() % lanes.len() as u64) as usize];
             let x = (lane + rng.range(-0.05, 0.05)).clamp(-0.9, 0.9);
-            let kind = if rng.next_f32() < 0.75 {
-                HazardKind::Oncoming
-            } else {
-                HazardKind::Roadside
-            };
-            hazards.push(Hazard { kind, x, s });
+            hazards.push(Hazard {
+                kind: HazardKind::Oncoming,
+                x,
+                s,
+            });
         }
+        for k in 0..scenery_count {
+            let t = (k as f32 + rng.range(0.15, 0.85)) / scenery_count as f32;
+            let side = if rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
+            hazards.push(Hazard {
+                kind: if rng.next_f32() < 0.62 {
+                    HazardKind::Tree
+                } else {
+                    HazardKind::Billboard
+                },
+                x: side * rng.range(1.08, 1.26),
+                s: t * length,
+            });
+        }
+        hazards.sort_by(|a, b| a.s.total_cmp(&b.s));
 
         RoadLoop {
             length,
             hazards,
             curve,
+            elevation,
         }
     }
 
-    /// Replace the curve with a "square" track: long straights joined by
-    /// four constant-curvature corners (2 right, 2 left) — feel-testing
-    /// track per user request (drive straight, turn at corners).
-    pub fn apply_square_curve(&mut self) {
+    /// Deterministic approach line for traffic. A minority of cars move to an
+    /// adjacent lane while distant, then lock their line before reaching the
+    /// player. Rendering and collision both call this function.
+    pub fn hazard_x_at(&self, hazard: &Hazard, ahead: f32) -> f32 {
+        if hazard.kind != HazardKind::Oncoming || self.elevation.iter().all(|height| *height == 0.0)
+        {
+            return hazard.x;
+        }
+        let Some(target) = oncoming_lane_target(hazard) else {
+            return hazard.x;
+        };
+        const CHANGE_START_M: f32 = 18.0;
+        const CHANGE_END_M: f32 = 6.0;
+        let t = ((CHANGE_START_M - ahead) / (CHANGE_START_M - CHANGE_END_M)).clamp(0.0, 1.0);
+        let smooth = t * t * (3.0 - 2.0 * t);
+        hazard.x + (target - hazard.x) * smooth
+    }
+
+    /// A designed arcade course: long straights, broad 90-degree sweepers,
+    /// a short-radius 90-degree hairpin, and a fast opposing S-bend. Curve
+    /// magnitude represents inverse radius; segment length represents sweep.
+    fn technical_curve(direction: f32) -> Vec<f32> {
         let n = CURVE_SAMPLES as f32;
         let mut raw = vec![0.0f32; CURVE_SAMPLES];
         for (i, v) in raw.iter_mut().enumerate() {
             let t = i as f32 / n;
-            *v = if (0.22..=0.34).contains(&t) {
-                1.0
-            } else if (0.47..=0.59).contains(&t) {
-                -1.0
-            } else if (0.72..=0.84).contains(&t) {
-                1.0
-            } else if (0.94..=1.0).contains(&t) || t <= 0.06 {
-                -1.0
+            *v = if (0.12..0.28).contains(&t) {
+                0.56 * direction // long-radius 90-degree sweeper
+            } else if (0.35..0.44).contains(&t) {
+                -direction // short-radius 90-degree corner
+            } else if (0.52..0.59).contains(&t) {
+                0.78 * direction // fast S entry
+            } else if (0.59..0.66).contains(&t) {
+                -0.78 * direction // fast S exit
             } else {
                 0.0
             };
         }
-        // soften the step transitions a little so corners ease in
-        let mut curve = raw.clone();
-        for i in 0..CURVE_SAMPLES {
-            let prev = raw[(i + CURVE_SAMPLES - 1) % CURVE_SAMPLES];
-            let next = raw[(i + 1) % CURVE_SAMPLES];
-            curve[i] = (raw[i] * 4.0 + prev + next) / 6.0;
+        // Two circular smoothing passes give readable corner entry/exit while
+        // preserving materially different radii and straight sections.
+        for _ in 0..2 {
+            let previous = raw.clone();
+            for i in 0..CURVE_SAMPLES {
+                let before = previous[(i + CURVE_SAMPLES - 1) % CURVE_SAMPLES];
+                let after = previous[(i + 1) % CURVE_SAMPLES];
+                raw[i] = (previous[i] * 4.0 + before + after) / 6.0;
+            }
         }
-        self.curve = curve;
+        raw
     }
 
     /// Flat loop with explicit hazards: deterministic course for tests and
@@ -129,6 +148,7 @@ impl RoadLoop {
             length,
             hazards,
             curve: vec![0.0; CURVE_SAMPLES],
+            elevation: vec![0.0; CURVE_SAMPLES],
         }
     }
 
@@ -145,6 +165,64 @@ impl RoadLoop {
     pub fn max_abs_curve(&self) -> f32 {
         self.curve.iter().fold(0.0f32, |m, v| m.max(v.abs()))
     }
+
+    /// Terrain height at loop position `s`, in meters.
+    pub fn elevation_at(&self, s: f32) -> f32 {
+        self.sample_periodic(&self.elevation, s)
+    }
+
+    /// Signed rise/run. Positive is uphill in the driving direction.
+    pub fn grade_at(&self, s: f32) -> f32 {
+        let ds = (self.length / CURVE_SAMPLES as f32).clamp(0.35, 1.0);
+        (self.elevation_at(s + ds) - self.elevation_at(s - ds)) / (2.0 * ds)
+    }
+
+    pub fn max_abs_grade(&self) -> f32 {
+        (0..CURVE_SAMPLES)
+            .map(|i| {
+                self.grade_at(self.length * i as f32 / CURVE_SAMPLES as f32)
+                    .abs()
+            })
+            .fold(0.0, f32::max)
+    }
+
+    fn sample_periodic(&self, samples: &[f32], s: f32) -> f32 {
+        let n = samples.len() as f32;
+        let pos = (s.rem_euclid(self.length) / self.length) * n;
+        let i = (pos.floor() as usize) % samples.len();
+        let j = (i + 1) % samples.len();
+        let f = pos - pos.floor();
+        samples[i] * (1.0 - f) + samples[j] * f
+    }
+}
+
+fn oncoming_lane_target(hazard: &Hazard) -> Option<f32> {
+    let mut hash = u64::from(hazard.s.to_bits())
+        ^ u64::from(hazard.x.to_bits()).rotate_left(23)
+        ^ 0x9e37_79b9_7f4a_7c15;
+    hash ^= hash >> 30;
+    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash ^= hash >> 27;
+    // Roughly three cars in ten change lane on each deterministic course.
+    if hash % 10 >= 3 {
+        return None;
+    }
+
+    let lane = if hazard.x < -0.36 {
+        -1
+    } else if hazard.x > 0.36 {
+        1
+    } else {
+        0
+    };
+    let target_lane = match lane {
+        -1 | 1 => 0,
+        _ if hash & 0x10 == 0 => -1,
+        _ => 1,
+    };
+    let original_center = lane as f32 * 0.72;
+    let jitter = (hazard.x - original_center).clamp(-0.05, 0.05);
+    Some(target_lane as f32 * 0.72 + jitter)
 }
 
 #[cfg(test)]
@@ -191,17 +269,15 @@ mod tests {
     }
 
     #[test]
-    fn square_track_has_straights_and_corners() {
-        let mut r = loop_from(5);
-        r.apply_square_curve();
-        let n = CURVE_SAMPLES as f32;
+    fn technical_track_has_straights_and_mixed_radius_corners() {
+        let r = loop_from(5);
         let at = |t: f32| r.curve_at(t * r.length);
-        assert!(at(0.10).abs() < 0.1, "straight section");
-        assert!(at(0.28) > 0.8, "right corner");
-        assert!(at(0.53) < -0.8, "left corner");
-        assert!(at(0.65).abs() < 0.1, "straight again");
+        assert!(at(0.07).abs() < 0.1, "opening straight");
+        assert!((0.45..0.65).contains(&at(0.20).abs()), "broad sweeper");
+        assert!(at(0.395).abs() > 0.9, "short-radius 90-degree corner");
+        assert!(at(0.48).abs() < 0.1, "straight between corners");
+        assert!(at(0.55).signum() != at(0.63).signum(), "opposing S-bend");
         assert!((at(0.0) - at(1.0)).abs() < 1e-4, "seamless wrap");
-        let _ = n;
     }
 
     #[test]
@@ -217,20 +293,49 @@ mod tests {
     #[test]
     fn hazards_on_loop_and_spaced() {
         let r = loop_from(77);
-        assert!((6..=9).contains(&r.hazards.len()));
+        assert!((20..=30).contains(&r.hazards.len()));
         for h in &r.hazards {
             assert!(h.s >= 0.0 && h.s < r.length);
-            assert!(h.x.abs() <= 0.9);
+            match h.kind {
+                HazardKind::Oncoming => assert!(h.x.abs() <= 0.9),
+                HazardKind::Tree | HazardKind::Billboard => {
+                    assert!((1.08..=1.26).contains(&h.x.abs()))
+                }
+            }
         }
-        // roughly even spacing in the playable window [22%, 100%) of the loop
-        let span = r.length * 0.78;
-        let slot = span / r.hazards.len() as f32;
-        for h in &r.hazards {
-            assert!(h.s >= r.length * 0.22 - 1e-4);
+        assert!(r.hazards.iter().any(|h| h.kind == HazardKind::Tree));
+        assert!(r.hazards.iter().any(|h| h.kind == HazardKind::Billboard));
+    }
+
+    #[test]
+    fn some_generated_traffic_changes_lane_then_locks_near_player() {
+        let r = loop_from(77);
+        let mut changed = 0;
+        for hazard in r
+            .hazards
+            .iter()
+            .filter(|hazard| hazard.kind == HazardKind::Oncoming)
+        {
+            let far = r.hazard_x_at(hazard, 20.0);
+            let mid = r.hazard_x_at(hazard, 12.0);
+            let near = r.hazard_x_at(hazard, 5.0);
+            assert_eq!(far, hazard.x);
+            assert_eq!(near, r.hazard_x_at(hazard, 0.0));
+            if near != hazard.x {
+                changed += 1;
+                assert!(mid > hazard.x.min(near) && mid < hazard.x.max(near));
+            }
         }
-        for (k, h) in r.hazards.iter().enumerate() {
-            let rel = h.s - r.length * 0.22;
-            assert!(rel >= k as f32 * slot - 1e-4 && rel < (k + 1) as f32 * slot + slot);
-        }
+        assert!(changed > 0, "seed should produce occasional lane changes");
+        assert!(changed < 8, "lane changes should remain occasional");
+    }
+
+    #[test]
+    fn elevation_is_periodic_gentle_and_non_flat() {
+        let r = loop_from(91);
+        assert!((r.elevation_at(0.0) - r.elevation_at(r.length)).abs() < 1e-5);
+        assert!(r.max_abs_grade() > 0.01);
+        assert!(r.max_abs_grade() < 0.08, "small hills, not mountains");
+        assert!(r.elevation_at(r.length * 0.2) != r.elevation_at(r.length * 0.4));
     }
 }

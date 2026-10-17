@@ -23,6 +23,7 @@ pub const ROWS: usize = 30;
 pub const D_MIN: f32 = 2.2; // meters to the nearest row
 pub const S_FAR: f32 = 0.045; // scale at the horizon row
 pub const CURVE_BEND: f32 = 0.055; // lateral half-widths gained per curve-meter
+const ELEVATION_PX_PER_M: f32 = 105.0;
 
 fn row_scale(i: usize) -> f32 {
     S_FAR.powf(i as f32 / ROWS as f32)
@@ -33,9 +34,12 @@ fn scale_to_y(s: f32) -> f32 {
 fn scale_to_d(s: f32) -> f32 {
     D_MIN / s
 }
+fn elevated_row_y(scale: f32, relative_elevation: f32) -> f32 {
+    scale_to_y(scale) + relative_elevation * ELEVATION_PX_PER_M * scale
+}
 const VIEW_TOP: f32 = 322.0;
 const PALM_POOL: usize = 10;
-const HAZARD_POOL: usize = 16;
+const HAZARD_POOL: usize = 40;
 const NITRO_X_LEFT: f32 = 302.0;
 const NITRO_Y: f32 = 216.0;
 const RAIN_POOL: usize = 84;
@@ -121,6 +125,20 @@ pub struct Cloud;
 #[derive(Component)]
 pub struct HazeStrip;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AmbientKind {
+    Birds,
+    ShootingStar,
+    Hurricane,
+    Ufo,
+}
+
+#[derive(Component)]
+struct AmbientPart {
+    kind: AmbientKind,
+    index: usize,
+}
+
 /// snow particles
 #[derive(Component)]
 pub struct SnowFlake;
@@ -137,7 +155,7 @@ struct SpeedTick {
     red_zone: bool,
 }
 #[derive(Component)]
-struct GearPanelText;
+struct GearPanelText(Gear);
 #[derive(Component)]
 struct RecoveryText;
 #[derive(Component)]
@@ -161,6 +179,7 @@ pub struct InstrumentVisuals {
     pub gauge_fill: f32,
     pub recovery: &'static str,
     pub cue: &'static str,
+    pub low_shift_hint_secs: f32,
 }
 
 #[derive(Component)]
@@ -214,6 +233,8 @@ struct RecessShade;
 pub struct Proj {
     /// lateral center (half-width units incl. bend) at each row's distance
     pub rows_x: [f32; ROWS],
+    /// projected lower edge of each road row after terrain elevation
+    pub rows_y: [f32; ROWS],
     /// cumulative curve at each row distance (half-width units)
     pub cum: [f32; ROWS],
 }
@@ -249,7 +270,25 @@ impl Proj {
             }
             val
         };
-        let y = scale_to_y(s);
+        let y = {
+            let mut val = self.rows_y[ROWS - 1];
+            for i in 0..ROWS {
+                let di = scale_to_d(row_scale(i));
+                if d <= di {
+                    let d0 = if i == 0 {
+                        D_MIN
+                    } else {
+                        scale_to_d(row_scale(i - 1))
+                    };
+                    let t = if di > d0 { (d - d0) / (di - d0) } else { 1.0 };
+                    let y0 = if i == 0 { CAR_Y } else { self.rows_y[i - 1] };
+                    val = y0 + (self.rows_y[i] - y0) * t;
+                    break;
+                }
+                val = self.rows_y[i];
+            }
+            val
+        };
         Some((y, s, road_x + CURVE_BEND * cum))
     }
 }
@@ -309,7 +348,7 @@ fn normal_recovery_cue(gear: Gear, speed: f32, shift_threshold: f32) -> &'static
     if gear == Gear::Low && speed >= shift_threshold {
         "SHIFT HIGH"
     } else {
-        "Q LOW  |  E HIGH"
+        "LB LOW | RB HIGH"
     }
 }
 
@@ -380,18 +419,24 @@ fn spawn_instruments(commands: &mut Commands) {
         Transform::from_xyz(-378.0, -226.0, 0.82),
         HudPanel,
     ));
+    for (gear, label, x) in [(Gear::Low, "LOW", -421.0), (Gear::High, "HIGH", -337.0)] {
+        commands.spawn((
+            Text2d::new(label),
+            TextFont {
+                font_size: FontSize::Px(24.0),
+                ..default()
+            },
+            TextColor(if gear == Gear::Low {
+                Color::srgb(1.0, 0.86, 0.32)
+            } else {
+                Color::srgb(0.20, 0.28, 0.32)
+            }),
+            Transform::from_xyz(x, -205.0, 0.94),
+            GearPanelText(gear),
+        ));
+    }
     commands.spawn((
-        Text2d::new("LOW"),
-        TextFont {
-            font_size: FontSize::Px(32.0),
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 0.86, 0.32)),
-        Transform::from_xyz(-378.0, -205.0, 0.94),
-        GearPanelText,
-    ));
-    commands.spawn((
-        Text2d::new("Q LOW  |  E HIGH"),
+        Text2d::new("LB LOW | RB HIGH"),
         TextFont {
             font_size: FontSize::Px(13.0),
             ..default()
@@ -570,6 +615,23 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, HORIZON_Y + 15.0, -4.55),
         HazeStrip,
     ));
+    // Rare, non-interactive background easter eggs. Pooled pieces remain
+    // hidden outside their deterministic event windows.
+    for (kind, count) in [
+        (AmbientKind::Birds, 10),
+        (AmbientKind::ShootingStar, 2),
+        (AmbientKind::Hurricane, 6),
+        (AmbientKind::Ufo, 3),
+    ] {
+        for index in 0..count {
+            commands.spawn((
+                Sprite::from_color(Color::WHITE, Vec2::ONE),
+                Transform::from_xyz(0.0, 0.0, -4.62),
+                Visibility::Hidden,
+                AmbientPart { kind, index },
+            ));
+        }
+    }
     for k in 0..36 {
         let fx = -480.0 + (k * 53 % 960) as f32;
         let fy = -300.0 + (k * 37 % 600) as f32;
@@ -1062,17 +1124,31 @@ fn sync_roads(
     // the bend is CUMULATIVE, so the road sweeps smoothly instead of
     // zig-zagging row to row)
     let mut cum = 0.0f32;
+    let player_elevation = sim.0.road.elevation_at(sim.0.distance);
     for i in 0..ROWS {
         let s = row_scale(i);
         let d = row_dist(i);
         let pos = sim.0.distance + d;
         cum += sim.0.road.curve_at(pos) * (d - if i == 0 { D_MIN } else { row_dist(i - 1) });
         proj.rows_x[i] = HALF_ROAD_PX * s * (sim.0.road_x + CURVE_BEND * cum);
+        let relative_elevation = sim.0.road.elevation_at(pos) - player_elevation;
+        proj.rows_y[i] = elevated_row_y(s, relative_elevation);
         proj.cum[i] = cum;
     }
 
     for (i, (mut tf, mut sp)) in rows.iter_mut().enumerate() {
         tf.translation.x = proj.rows_x[i];
+        let y0 = proj.rows_y[i];
+        let y1 = if i + 1 < ROWS {
+            proj.rows_y[i + 1]
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let h = (y1 - y0).max(1.5);
+        tf.translation.y = y0 + h * 0.5;
+        if let Some(size) = sp.custom_size.as_mut() {
+            size.y = h + 1.0;
+        }
         let pos = sim.0.distance + row_dist(i);
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on {
@@ -1083,6 +1159,17 @@ fn sync_roads(
     }
     for (i, (mut tf, mut sp)) in grass.iter_mut().enumerate() {
         tf.translation.x = 0.0;
+        let y0 = proj.rows_y[i];
+        let y1 = if i + 1 < ROWS {
+            proj.rows_y[i + 1]
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let h = (y1 - y0).max(1.5);
+        tf.translation.y = y0 + h * 0.5;
+        if let Some(size) = sp.custom_size.as_mut() {
+            size.y = h + 1.0;
+        }
         let pos = sim.0.distance + row_dist(i);
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.grass_a } else { colors.grass_b };
@@ -1092,6 +1179,12 @@ fn sync_roads(
         let pos0 = sim.0.distance + D_MIN;
         let on0 = ((pos0 / 3.5).floor() as i64).rem_euclid(2) == 0;
         for (idx, (mut tf, mut sp)) in apron.iter_mut().enumerate() {
+            let apron_bottom = -322.0;
+            let h = (proj.rows_y[0] - apron_bottom).max(1.0);
+            tf.translation.y = apron_bottom + h * 0.5;
+            if let Some(size) = sp.custom_size.as_mut() {
+                size.y = h + 2.0;
+            }
             let w = sp.custom_size.map(|c| c.x).unwrap_or(0.0);
             if w > 900.0 {
                 // grass
@@ -1122,6 +1215,17 @@ fn sync_roads(
         let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
         let s = row_scale(row);
         tf.translation.x = proj.rows_x[row] + side * (HALF_ROAD_PX - 8.0) * s;
+        let y0 = proj.rows_y[row];
+        let y1 = if row + 1 < ROWS {
+            proj.rows_y[row + 1]
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let h = (y1 - y0).max(1.5);
+        tf.translation.y = y0 + h * 0.5;
+        if let Some(size) = sp.custom_size.as_mut() {
+            size.y = h + 1.0;
+        }
         let pos = sim.0.distance + row_dist(row);
         let red = ((pos / 7.0).floor() as i64).rem_euclid(2) == 0;
         sp.color = if red {
@@ -1135,6 +1239,17 @@ fn sync_roads(
         let lane: f32 = if i % 2 == 0 { -0.4 } else { 0.4 };
         let s = row_scale(row);
         tf.translation.x = proj.rows_x[row] + lane * HALF_ROAD_PX * s;
+        let y0 = proj.rows_y[row];
+        let y1 = if row + 1 < ROWS {
+            proj.rows_y[row + 1]
+        } else {
+            HORIZON_Y + 2.0
+        };
+        let h = (y1 - y0).max(1.5);
+        tf.translation.y = y0 + h * 0.5;
+        if let Some(size) = sp.custom_size.as_mut() {
+            size.y = h * 0.6;
+        }
         let pos = sim.0.distance + row_dist(row);
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.dash } else { colors.asphalt_a };
@@ -1149,30 +1264,88 @@ fn sync_hazards(
 ) {
     let lp = sim.0.loop_pos();
     let mut parts = pool.iter_mut();
-    let mut place = |body: Color, accent: Color, dark: Color, w: f32, x: f32, y: f32, s: f32| {
-        let w = (w * s).max(2.0);
-        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y, -2.5);
-            sp.color = body;
-            sp.custom_size = Some(Vec2::new(w, w * 0.42));
-            *vis = Visibility::Visible;
-        }
-        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y + w * 0.12, -2.4);
-            sp.color = dark;
-            sp.custom_size = Some(Vec2::new(w * 0.5, w * 0.18));
-            *vis = Visibility::Visible;
-        }
-        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y - w * 0.18, -2.4);
-            sp.color = accent;
-            sp.custom_size = Some(Vec2::new(w * 0.9, w * 0.09));
-            *vis = Visibility::Visible;
-        }
-        if let Some((mut tf, mut sp, mut vis)) = parts.next() {
-            tf.translation = Vec3::new(x, y - w * 0.24, -2.6);
-            sp.color = Color::srgb(0.06, 0.06, 0.07);
-            sp.custom_size = Some(Vec2::new(w * 0.95, w * 0.1));
+    let mut place = |kind: game_core::HazardKind, x: f32, y: f32, s: f32| {
+        for part in 0..4 {
+            let Some((mut tf, mut sp, mut vis)) = parts.next() else {
+                return;
+            };
+            let (color, size, dy, z) = match (kind, part) {
+                (game_core::HazardKind::Oncoming, 0) => (
+                    Color::srgb(0.93, 0.91, 0.85),
+                    Vec2::new(TRAFFIC_CAR_WIDTH_PX, TRAFFIC_CAR_WIDTH_PX * 0.42),
+                    0.0,
+                    -2.5,
+                ),
+                (game_core::HazardKind::Oncoming, 1) => (
+                    Color::srgb(0.15, 0.22, 0.35),
+                    Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.5, TRAFFIC_CAR_WIDTH_PX * 0.18),
+                    TRAFFIC_CAR_WIDTH_PX * 0.12,
+                    -2.4,
+                ),
+                (game_core::HazardKind::Oncoming, 2) => (
+                    Color::srgb(1.0, 0.9, 0.4),
+                    Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.9, TRAFFIC_CAR_WIDTH_PX * 0.09),
+                    -TRAFFIC_CAR_WIDTH_PX * 0.18,
+                    -2.4,
+                ),
+                (game_core::HazardKind::Oncoming, _) => (
+                    Color::srgb(0.06, 0.06, 0.07),
+                    Vec2::new(TRAFFIC_CAR_WIDTH_PX * 0.95, TRAFFIC_CAR_WIDTH_PX * 0.1),
+                    -TRAFFIC_CAR_WIDTH_PX * 0.24,
+                    -2.6,
+                ),
+                (game_core::HazardKind::Tree, 0) => (
+                    Color::srgb(0.34, 0.18, 0.07),
+                    Vec2::new(8.0, 34.0),
+                    17.0,
+                    -2.55,
+                ),
+                (game_core::HazardKind::Tree, 1) => (
+                    Color::srgb(0.05, 0.30, 0.12),
+                    Vec2::new(35.0, 25.0),
+                    37.0,
+                    -2.45,
+                ),
+                (game_core::HazardKind::Tree, 2) => (
+                    Color::srgb(0.10, 0.48, 0.19),
+                    Vec2::new(25.0, 20.0),
+                    51.0,
+                    -2.42,
+                ),
+                (game_core::HazardKind::Tree, _) => (
+                    Color::srgba(0.02, 0.08, 0.03, 0.55),
+                    Vec2::new(30.0, 6.0),
+                    0.0,
+                    -2.62,
+                ),
+                (game_core::HazardKind::Billboard, 0) => (
+                    Color::srgb(0.95, 0.35, 0.12),
+                    Vec2::new(44.0, 27.0),
+                    30.0,
+                    -2.46,
+                ),
+                (game_core::HazardKind::Billboard, 1) => (
+                    Color::srgb(0.98, 0.90, 0.38),
+                    Vec2::new(35.0, 18.0),
+                    30.0,
+                    -2.42,
+                ),
+                (game_core::HazardKind::Billboard, 2) => (
+                    Color::srgb(0.30, 0.24, 0.20),
+                    Vec2::new(5.0, 29.0),
+                    9.0,
+                    -2.54,
+                ),
+                (game_core::HazardKind::Billboard, _) => (
+                    Color::srgb(0.12, 0.60, 0.84),
+                    Vec2::new(38.0, 4.0),
+                    38.0,
+                    -2.39,
+                ),
+            };
+            tf.translation = Vec3::new(x, y + dy * s, z);
+            sp.color = color;
+            sp.custom_size = Some(Vec2::new((size.x * s).max(1.5), (size.y * s).max(1.5)));
             *vis = Visibility::Visible;
         }
     };
@@ -1182,27 +1355,8 @@ fn sync_hazards(
         let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) else {
             continue;
         };
-        let x = (lat + h.x) * HALF_ROAD_PX * s;
-        match h.kind {
-            game_core::HazardKind::Oncoming => place(
-                Color::srgb(0.93, 0.91, 0.85),
-                Color::srgb(1.0, 0.9, 0.4),
-                Color::srgb(0.15, 0.22, 0.35),
-                TRAFFIC_CAR_WIDTH_PX,
-                x,
-                y,
-                s,
-            ),
-            game_core::HazardKind::Roadside => place(
-                Color::srgb(0.95, 0.45, 0.10),
-                Color::srgb(0.95, 0.95, 0.9),
-                Color::srgb(0.95, 0.95, 0.9),
-                30.0,
-                x,
-                y,
-                s,
-            ),
-        }
+        let x = (lat + sim.0.road.hazard_x_at(h, ahead)) * HALF_ROAD_PX * s;
+        place(h.kind, x, y, s);
     }
     for (_, _, mut vis) in parts.by_ref() {
         *vis = Visibility::Hidden;
@@ -1743,6 +1897,120 @@ fn rain_visibility(rain: f32, winter: f32) -> f32 {
     rain.clamp(0.0, 1.0) * (1.0 - winter.clamp(0.0, 1.0))
 }
 
+fn ambient_kind(slot: u64, salt: u64) -> Option<AmbientKind> {
+    let mut hash = slot ^ salt.rotate_left(17) ^ 0xd1b5_4a32_d192_ed03;
+    hash ^= hash >> 30;
+    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash ^= hash >> 27;
+    match hash % 32 {
+        0 => Some(AmbientKind::Ufo),
+        1 => Some(AmbientKind::Hurricane),
+        2..=4 => Some(AmbientKind::ShootingStar),
+        5..=9 => Some(AmbientKind::Birds),
+        _ => None,
+    }
+}
+
+fn ambient_event(t: f32, daylight: f32, salt: u64) -> Option<(AmbientKind, f32)> {
+    const SLOT_SECS: f32 = 20.0;
+    const EVENT_SECS: f32 = 5.0;
+    let slot = (t.max(0.0) / SLOT_SECS).floor() as u64;
+    let progress = (t - slot as f32 * SLOT_SECS) / EVENT_SECS;
+    if !(0.0..1.0).contains(&progress) {
+        return None;
+    }
+    let kind = ambient_kind(slot, salt)?;
+    match kind {
+        AmbientKind::Birds if daylight > 0.62 => Some((kind, progress)),
+        AmbientKind::ShootingStar | AmbientKind::Ufo if daylight < 0.30 => Some((kind, progress)),
+        AmbientKind::Hurricane => Some((kind, progress)),
+        _ => None,
+    }
+}
+
+fn sync_ambient_easter_eggs(
+    sim: Res<Sim>,
+    time: Res<Time>,
+    mut parts: Query<(&AmbientPart, &mut Transform, &mut Sprite, &mut Visibility)>,
+) {
+    let daylight = game_core::environment::daylight(sim.0.environment_time);
+    let salt = sim
+        .0
+        .road
+        .hazards
+        .first()
+        .map_or(0, |hazard| u64::from(hazard.s.to_bits()));
+    let event = matches!(sim.0.phase, Phase::Running)
+        .then(|| ambient_event(sim.0.environment_time, daylight, salt))
+        .flatten();
+
+    for (part, mut tf, mut sprite, mut visibility) in &mut parts {
+        let Some((kind, progress)) = event.filter(|(kind, _)| *kind == part.kind) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        *visibility = Visibility::Visible;
+        let fade = (progress * 8.0).min(1.0) * ((1.0 - progress) * 8.0).min(1.0);
+        match kind {
+            AmbientKind::Birds => {
+                let bird = part.index / 2;
+                let wing = part.index % 2;
+                let formation_x = (bird % 3) as f32 * 27.0 - (bird / 3) as f32 * 14.0;
+                let formation_y = (bird / 3) as f32 * 18.0 - (bird % 3) as f32 * 5.0;
+                let flap = (time.elapsed_secs() * 10.0 + bird as f32).sin() * 0.22;
+                tf.translation.x = -540.0 + 1080.0 * progress + formation_x;
+                tf.translation.y =
+                    235.0 + formation_y + (progress * std::f32::consts::TAU).sin() * 8.0;
+                tf.rotation =
+                    Quat::from_rotation_z(if wing == 0 { 0.42 + flap } else { -0.42 - flap });
+                sprite.custom_size = Some(Vec2::new(12.0, 2.0));
+                sprite.color = Color::srgba(0.05, 0.08, 0.12, fade * 0.82);
+            }
+            AmbientKind::ShootingStar => {
+                tf.translation.x = -410.0 + 780.0 * progress - part.index as f32 * 16.0;
+                tf.translation.y = 292.0 - 125.0 * progress + part.index as f32 * 7.0;
+                tf.rotation = Quat::from_rotation_z(-0.16);
+                sprite.custom_size = Some(if part.index == 0 {
+                    Vec2::new(54.0, 2.0)
+                } else {
+                    Vec2::new(8.0, 5.0)
+                });
+                sprite.color =
+                    Color::srgba(0.82, 0.94, 1.0, fade * (0.62 + part.index as f32 * 0.3));
+            }
+            AmbientKind::Hurricane => {
+                let i = part.index as f32;
+                let swirl = (time.elapsed_secs() * 3.0 + i * 1.35).sin() * (10.0 - i);
+                tf.translation.x = -570.0 + 1140.0 * progress + swirl;
+                tf.translation.y = 265.0 - i * 19.0;
+                tf.rotation = Quat::from_rotation_z((i - 2.5) * 0.025);
+                sprite.custom_size = Some(Vec2::new((112.0 - i * 17.0).max(18.0), 8.0));
+                sprite.color = Color::srgba(0.22, 0.27, 0.34, fade * (0.36 + i * 0.035));
+            }
+            AmbientKind::Ufo => {
+                let bob = (time.elapsed_secs() * 4.2).sin() * 4.0;
+                tf.translation.x = 550.0 - 1100.0 * progress;
+                tf.translation.y = 258.0 + bob + part.index as f32 * 4.0;
+                tf.rotation = Quat::IDENTITY;
+                let pulse = 0.55 + 0.45 * (time.elapsed_secs() * 9.0).sin().abs();
+                let (size, color) = match part.index {
+                    0 => (Vec2::new(62.0, 8.0), Color::srgba(0.45, 0.56, 0.64, fade)),
+                    1 => (
+                        Vec2::new(26.0, 11.0),
+                        Color::srgba(0.35, 0.82, 0.92, fade * 0.8),
+                    ),
+                    _ => (
+                        Vec2::new(38.0, 4.0),
+                        Color::srgba(0.35, 1.0, 0.72, fade * pulse),
+                    ),
+                };
+                sprite.custom_size = Some(size);
+                sprite.color = color;
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_environment(
     sim: Res<Sim>,
@@ -1996,8 +2264,13 @@ fn cooldown_gauge(nitro_t: f32, cooldown: f32, t: &game_core::Tuning) -> (f32, &
     }
 }
 
+fn low_shift_hint_active(gear: Gear, speed: f32, threshold: f32) -> bool {
+    gear == Gear::Low && speed >= threshold * 0.92
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_instruments(
+    time: Res<Time>,
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     effects: Res<crate::VisualEffects>,
@@ -2016,7 +2289,7 @@ fn sync_instruments(
         ),
     >,
     mut gear: Query<
-        (&mut Text2d, &mut TextColor),
+        (&GearPanelText, &mut TextColor),
         (
             With<GearPanelText>,
             Without<SpeedDigital>,
@@ -2065,15 +2338,26 @@ fn sync_instruments(
     if let Ok(mut text) = digital.single_mut() {
         text.0 = format!("{:03.0} km/h", kmh.min(999.0));
     }
-    if let Ok((mut text, mut color)) = gear.single_mut() {
-        text.0 = match sim.0.gear() {
-            Gear::Low => "LOW",
-            Gear::High => "HIGH",
-        }
-        .to_string();
-        color.0 = match sim.0.gear() {
-            Gear::Low => Color::srgb(1.0, 0.86, 0.32),
-            Gear::High => Color::srgb(0.25, 0.92, 1.0),
+    let hint_charging = matches!(sim.0.phase, Phase::Running)
+        && sim.0.recovery() == game_core::Recovery::Normal
+        && low_shift_hint_active(sim.0.gear(), sim.0.speed, tuning.0.shift_up_min_speed);
+    if hint_charging {
+        visuals.low_shift_hint_secs += time.delta_secs();
+    } else {
+        visuals.low_shift_hint_secs = 0.0;
+    }
+    let hint_blink =
+        visuals.low_shift_hint_secs >= 1.0 && (time.elapsed_secs() * 3.5).fract() < 0.58;
+    for (indicator, mut color) in &mut gear {
+        color.0 = if indicator.0 == sim.0.gear() {
+            match indicator.0 {
+                Gear::Low => Color::srgb(1.0, 0.86, 0.32),
+                Gear::High => Color::srgb(0.25, 0.92, 1.0),
+            }
+        } else if indicator.0 == Gear::High && hint_blink {
+            Color::srgb(1.0, 0.66, 0.12)
+        } else {
+            Color::srgb(0.20, 0.28, 0.32)
         };
     }
     let (recovery_name, base_cue) = match sim.0.recovery() {
@@ -2168,6 +2452,7 @@ pub fn add_view_systems(app: &mut App) {
         Update,
         (
             sync_environment,
+            sync_ambient_easter_eggs,
             sync_roads,
             sync_palms,
             sync_hazards,
@@ -2189,6 +2474,15 @@ pub fn add_view_systems(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rolling_terrain_moves_projected_rows_in_the_expected_direction() {
+        let scale = 0.25;
+        let flat = elevated_row_y(scale, 0.0);
+        assert!(elevated_row_y(scale, 0.8) > flat);
+        assert!(elevated_row_y(scale, -0.8) < flat);
+        assert!((elevated_row_y(scale, 0.8) - flat) < 25.0);
+    }
 
     #[test]
     fn speedometer_maps_true_kmh_across_full_sweep() {
@@ -2225,13 +2519,42 @@ mod tests {
     fn normal_low_cue_requests_high_at_shift_threshold() {
         assert_eq!(
             normal_recovery_cue(Gear::Low, 9.99, 10.0),
-            "Q LOW  |  E HIGH"
+            "LB LOW | RB HIGH"
         );
         assert_eq!(normal_recovery_cue(Gear::Low, 10.0, 10.0), "SHIFT HIGH");
         assert_eq!(
             normal_recovery_cue(Gear::High, 24.0, 10.0),
-            "Q LOW  |  E HIGH"
+            "LB LOW | RB HIGH"
         );
+    }
+
+    #[test]
+    fn high_gear_hint_arms_only_near_low_gear_limit() {
+        assert!(!low_shift_hint_active(Gear::Low, 8.9, 10.0));
+        assert!(low_shift_hint_active(Gear::Low, 9.2, 10.0));
+        assert!(!low_shift_hint_active(Gear::High, 12.0, 10.0));
+    }
+
+    #[test]
+    fn rare_ambient_events_respect_day_and_night() {
+        let salt = 1234;
+        let ufo_slot = (0..1024)
+            .find(|slot| ambient_kind(*slot, salt) == Some(AmbientKind::Ufo))
+            .expect("schedule should contain a UFO");
+        let ufo_time = ufo_slot as f32 * 20.0 + 1.0;
+        assert_eq!(ambient_event(ufo_time, 1.0, salt), None);
+        assert!(matches!(
+            ambient_event(ufo_time, 0.0, salt),
+            Some((AmbientKind::Ufo, _))
+        ));
+        assert_eq!(ambient_event(ufo_time + 6.0, 0.0, salt), None);
+
+        let birds_slot = (0..1024)
+            .find(|slot| ambient_kind(*slot, salt) == Some(AmbientKind::Birds))
+            .expect("schedule should contain birds");
+        let birds_time = birds_slot as f32 * 20.0 + 1.0;
+        assert!(ambient_event(birds_time, 1.0, salt).is_some());
+        assert_eq!(ambient_event(birds_time, 0.0, salt), None);
     }
 
     #[test]

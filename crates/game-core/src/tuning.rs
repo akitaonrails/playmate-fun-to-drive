@@ -22,6 +22,9 @@ pub struct Tuning {
     pub brake_ramp_secs: f32,
     /// How strongly the printed curve pulls the road aside at the car row.
     pub curve_gain: f32,
+    /// Fractional target-speed response per unit of road grade. Positive
+    /// slopes slow the car; negative slopes give the same modest assistance.
+    pub slope_speed_gain: f32,
     /// Rate at which road_x chases the curve target (per second at LOW speed).
     pub drift_rate: f32,
     /// Drum shift velocity at full steering input (half-widths/s).
@@ -92,6 +95,7 @@ impl Default for Tuning {
             gear_ramp_secs: 0.6,
             brake_ramp_secs: 1.2,
             curve_gain: 1.05,
+            slope_speed_gain: 1.6,
             drift_rate: 0.75,
             steer_rate: 2.0,
             off_road_limit: 1.02,
@@ -165,6 +169,9 @@ impl Tuning {
         }
         if !(0.0..=2.0).contains(&self.curve_gain) {
             return Err("curve_gain out of [0, 2]");
+        }
+        if !(0.0..=3.0).contains(&self.slope_speed_gain) {
+            return Err("slope_speed_gain out of [0, 3]");
         }
         if !(0.05..=5.0).contains(&self.drift_rate) {
             return Err("drift_rate out of [0.05, 5]");

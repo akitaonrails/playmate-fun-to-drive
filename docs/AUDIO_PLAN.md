@@ -71,6 +71,19 @@ indicator only if audio remains unavailable after that interaction.
 Add `M` / gamepad-compatible UI support for mute and persist only the audio
 preference locally. Audio must never affect simulation, score, or input timing.
 
+## Three-track soundtrack
+
+Ship three original compact PSG-style driving loops: `Sunset Drive`, `Neon
+Midnight`, and `Dawn Circuit`. Their square-wave leads, stepped bass figures,
+simple chord beds, and noise-channel drums evoke late-1980s road cabinets
+without quoting any existing melody or arrangement.
+
+Track zero starts with the run. Each completed day/night cycle advances to the
+next track modulo three. All three sources remain phase-stable loop entities;
+their gains crossfade over roughly 1.8 seconds at the cycle boundary, avoiding
+an abrupt stop or an asset-load gap. Nitro gently ducks the active track so its
+ignition, burn, engine, and wind layers stay legible.
+
 ## Implementation sequence
 
 1. Add the deterministic generator and auditionable source WAVs; encode the
@@ -102,6 +115,6 @@ preference locally. Audio must never affect simulation, score, or input timing.
 
 ## Scope boundary
 
-This phase adds sound effects and ambience, not a soundtrack. Music can be
-planned separately after the effects mix establishes how much frequency and
-dynamic space remains.
+This phase includes sound effects, ambience, and the initial three-track
+soundtrack. Additional songs, a title theme, and a dedicated music-selection
+screen remain future work.

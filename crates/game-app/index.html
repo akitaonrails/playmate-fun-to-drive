@@ -28,7 +28,7 @@
       <div class="wheel"></div>
       <div id="loading-text">spinning up the drum...</div>
       <div class="hint">first load compiles ~140 MB of wasm — later loads are cached</div>
-      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y nitro &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; T toy view</div>
+      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y nitro &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
     </div>
     <script>
       // harness markers: readiness + per-frame game state from wasm
@@ -47,5 +47,6 @@
       }, 1200);
     </script>
     <link data-trunk rel="rust" href="Cargo.toml" data-bin="game-app" data-type="main" />
+    <link data-trunk rel="copy-dir" href="assets" />
   </body>
 </html>
