@@ -8,6 +8,7 @@ pub mod dynamics;
 pub mod environment;
 pub mod game;
 pub mod input;
+pub mod rare_event;
 pub mod rng;
 pub mod road;
 pub mod tuning;
@@ -19,10 +20,11 @@ pub use environment::{
 };
 pub use game::{
     leaderboard_for, rank_leaderboard, score_for, Difficulty, DownshiftSeverity, EndReason, Game,
-    GearChange, LeaderboardEntry, Phase, Recovery, SessionResult, StepEvents, LEADERBOARD_CAPACITY,
-    LEADERBOARD_CAPACITY_PER_DIFFICULTY,
+    GearChange, LeaderboardEntry, Phase, RareTrafficHelp, Recovery, SessionResult, StepEvents,
+    LEADERBOARD_CAPACITY, LEADERBOARD_CAPACITY_PER_DIFFICULTY,
 };
 pub use input::{gear_request, Gear, InputState, KeyboardSteering};
+pub use rare_event::{RareEvent, RareEventKind};
 pub use rng::Rng;
 pub use road::{Hazard, HazardKind, RoadLoop, TrafficMotion};
 pub use tuning::Tuning;

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reworked the looping rain ambience into a softer, lower-frequency four-second
+  rainfall bed without the previous rapid, mechanical tremolo.
+- Turned the rare hurricane and nighttime UFO sightings into player assists:
+  hurricanes pull one or two approaching traffic cars off the road, while the
+  UFO hovers over the road and abducts one car with a tractor beam. Assisted
+  cars cannot collide with the player and do not count as passes or bumps.
 - Added Easy (2:00), Medium (6:00), and Hard (10:00) selection with isolated
   per-difficulty local leaderboards and v1-to-v2 storage migration.
 - Added explicit Q/E and LB/RB LOW/HIGH controls, an analog 0–120 km/h

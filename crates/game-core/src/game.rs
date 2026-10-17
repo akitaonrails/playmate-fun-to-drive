@@ -191,6 +191,13 @@ pub fn leaderboard_for(
         .filter(move |entry| entry.result.difficulty == difficulty)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RareTrafficHelp {
+    pub hazard_index: usize,
+    pub start_ahead: f32,
+    pub start_x: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Game {
     pub seed: u64,
@@ -301,6 +308,63 @@ impl Game {
 
     pub fn difficulty(&self) -> Difficulty {
         self.difficulty
+    }
+
+    fn rare_event_salt(&self) -> u64 {
+        self.road
+            .hazards
+            .first()
+            .map_or(0, |hazard| u64::from(hazard.s.to_bits()))
+    }
+
+    pub fn rare_event(&self) -> Option<crate::rare_event::RareEvent> {
+        crate::rare_event::event_at(self.environment_time, self.rare_event_salt())
+    }
+
+    /// Cars removed by the active hurricane/UFO assist. Selection uses the
+    /// event's starting distance, keeping rendering and collision in lockstep.
+    pub fn rare_traffic_help(&self, tuning: &Tuning) -> [Option<RareTrafficHelp>; 2] {
+        use crate::rare_event::RareEventKind;
+
+        let Some(event) = self.rare_event() else {
+            return [None; 2];
+        };
+        let wanted = match event.kind {
+            RareEventKind::Hurricane => {
+                1 + (crate::rare_event::selection_hash(event.slot, self.seed, 0) % 2) as usize
+            }
+            RareEventKind::Ufo => 1,
+            _ => return [None; 2],
+        };
+        let start_distance =
+            event.slot as f32 * crate::rare_event::SLOT_SECS * tuning.scroll_speed_low;
+        let start_pos = start_distance.rem_euclid(self.road.length);
+        let mut candidates: Vec<_> = self
+            .road
+            .hazards
+            .iter()
+            .enumerate()
+            .filter(|(_, hazard)| hazard.kind == HazardKind::Oncoming)
+            .filter_map(|(hazard_index, hazard)| {
+                let ahead = (hazard.s - start_pos).rem_euclid(self.road.length);
+                (8.0..=44.0).contains(&ahead).then(|| {
+                    (
+                        crate::rare_event::selection_hash(event.slot, self.seed, hazard_index),
+                        RareTrafficHelp {
+                            hazard_index,
+                            start_ahead: ahead,
+                            start_x: self.hazard_x_at(hazard, ahead, tuning),
+                        },
+                    )
+                })
+            })
+            .collect();
+        candidates.sort_by_key(|candidate| candidate.0);
+        let mut selected = [None; 2];
+        for (slot, (_, traffic)) in selected.iter_mut().zip(candidates.into_iter().take(wanted)) {
+            *slot = Some(traffic);
+        }
+        selected
     }
 
     pub fn speed_multiplier(&self, tuning: &Tuning) -> f32 {
@@ -715,9 +779,18 @@ impl Game {
         // Roadside scenery can cause the same physical crash but deliberately
         // does not alter either car-specific leaderboard counter.
         let hit_band = (t.car_half_width + t.hazard_half_width) * (1.0 - t.collision_forgiveness);
-        for h in &self.road.hazards {
-            let crossings =
+        let helped = self.rare_traffic_help(t);
+        for (hazard_index, h) in self.road.hazards.iter().enumerate() {
+            let mut crossings =
                 crossings_between(previous_distance, self.distance, h.s, self.road.length);
+            if h.kind == HazardKind::Oncoming
+                && helped
+                    .iter()
+                    .flatten()
+                    .any(|traffic| traffic.hazard_index == hazard_index)
+            {
+                crossings = crossings.saturating_sub(1);
+            }
             if crossings == 0 {
                 continue;
             }
@@ -2279,5 +2352,71 @@ mod tests {
             assert!(motion.change_end_m >= 18.0);
             assert!(motion.change_start_m - motion.change_end_m >= 16.0);
         }
+    }
+
+    fn rare_help_test_game(seed: u64) -> (Game, Tuning, u64) {
+        let tuning = Tuning::default();
+        let hazards = (1..20)
+            .map(|index| Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.0,
+                s: index as f32 * 10.0,
+            })
+            .collect();
+        let game = Game::with_road(
+            seed,
+            RoadLoop::straight(200.0, hazards),
+            Difficulty::Hard,
+            &tuning,
+        );
+        let salt = game.rare_event_salt();
+        (game, tuning, salt)
+    }
+
+    #[test]
+    fn hurricane_removes_one_or_two_deterministic_approaching_cars() {
+        let (mut game, tuning, salt) = rare_help_test_game(71);
+        let slot = (0..4096)
+            .find(|slot| {
+                crate::rare_event::kind_for_slot(*slot, salt)
+                    == Some(crate::rare_event::RareEventKind::Hurricane)
+            })
+            .expect("schedule should contain a hurricane");
+        game.phase = Phase::Running;
+        game.environment_time = slot as f32 * crate::rare_event::SLOT_SECS + 0.25;
+        game.distance = game.environment_time * tuning.scroll_speed_low;
+        let first = game.rare_traffic_help(&tuning);
+        let second = game.rare_traffic_help(&tuning);
+        assert_eq!(first, second);
+        assert!((1..=2).contains(&first.iter().flatten().count()));
+    }
+
+    #[test]
+    fn ufo_removes_exactly_one_car_and_the_assist_does_not_score_or_crash() {
+        let (mut game, tuning, salt) = rare_help_test_game(73);
+        let slot = (0..4096)
+            .find(|slot| {
+                crate::rare_event::kind_for_slot(*slot, salt)
+                    == Some(crate::rare_event::RareEventKind::Ufo)
+                    && crate::environment::daylight(
+                        *slot as f32 * crate::rare_event::SLOT_SECS + 1.0,
+                    ) < 0.30
+            })
+            .expect("schedule should contain a nighttime UFO");
+        game.phase = Phase::Running;
+        game.environment_time = slot as f32 * crate::rare_event::SLOT_SECS + 0.25;
+        game.distance = game.environment_time * tuning.scroll_speed_low;
+        let helped = game.rare_traffic_help(&tuning);
+        assert_eq!(helped.iter().flatten().count(), 1);
+        let traffic = helped[0].expect("UFO should choose one approaching car");
+
+        let event_start = slot as f32 * crate::rare_event::SLOT_SECS * tuning.scroll_speed_low;
+        game.distance = event_start + traffic.start_ahead - 0.05;
+        game.environment_time = game.distance / tuning.scroll_speed_low;
+        game.speed = tuning.scroll_speed_low;
+        game.session_remaining = 60.0;
+        let events = game.step(&idle(), 0.02, &tuning);
+        assert_eq!((game.cars_passed, game.cars_bumped), (0, 0));
+        assert_eq!(events.bump_direction, None);
     }
 }

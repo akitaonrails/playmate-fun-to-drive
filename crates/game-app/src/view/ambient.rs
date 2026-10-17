@@ -6,7 +6,8 @@
 use bevy::prelude::*;
 use game_core::Phase;
 
-use crate::Sim;
+use super::{Proj, HALF_ROAD_PX, TRAFFIC_CAR_WIDTH_PX};
+use crate::{Sim, TuningRes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AmbientKind {
@@ -16,6 +17,7 @@ enum AmbientKind {
     HurricaneLeaves,
     SakuraPetals,
     Ufo,
+    HelpedCar,
 }
 
 #[derive(Component)]
@@ -31,12 +33,13 @@ pub(super) fn spawn(commands: &mut Commands) {
         (AmbientKind::Hurricane, 6),
         (AmbientKind::HurricaneLeaves, 14),
         (AmbientKind::SakuraPetals, 18),
-        (AmbientKind::Ufo, 3),
+        (AmbientKind::Ufo, 4),
+        (AmbientKind::HelpedCar, 2),
     ] {
         for index in 0..count {
             let depth = if matches!(
                 kind,
-                AmbientKind::HurricaneLeaves | AmbientKind::SakuraPetals
+                AmbientKind::HurricaneLeaves | AmbientKind::SakuraPetals | AmbientKind::HelpedCar
             ) {
                 0.62
             } else {
@@ -52,66 +55,44 @@ pub(super) fn spawn(commands: &mut Commands) {
     }
 }
 
-fn kind_for_slot(slot: u64, salt: u64) -> Option<AmbientKind> {
-    let mut hash = slot ^ salt.rotate_left(17) ^ 0xd1b5_4a32_d192_ed03;
-    hash ^= hash >> 30;
-    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    hash ^= hash >> 27;
-    match hash % 32 {
-        0 => Some(AmbientKind::Ufo),
-        1 => Some(AmbientKind::Hurricane),
-        2..=4 => Some(AmbientKind::ShootingStar),
-        5..=9 => Some(AmbientKind::Birds),
-        10..=13 => Some(AmbientKind::SakuraPetals),
-        _ => None,
-    }
-}
-
-fn event_at(t: f32, daylight: f32, spring: f32, salt: u64) -> Option<(AmbientKind, f32)> {
-    const SLOT_SECS: f32 = 20.0;
-    const EVENT_SECS: f32 = 5.0;
-    let slot = (t.max(0.0) / SLOT_SECS).floor() as u64;
-    let progress = (t - slot as f32 * SLOT_SECS) / EVENT_SECS;
-    if !(0.0..1.0).contains(&progress) {
-        return None;
-    }
-    let kind = kind_for_slot(slot, salt)?;
+fn ambient_kind(kind: game_core::RareEventKind) -> AmbientKind {
     match kind {
-        AmbientKind::Birds if daylight > 0.62 => Some((kind, progress)),
-        AmbientKind::ShootingStar | AmbientKind::Ufo if daylight < 0.30 => Some((kind, progress)),
-        AmbientKind::Hurricane => Some((kind, progress)),
-        AmbientKind::SakuraPetals if daylight > 0.45 && spring > 0.55 => Some((kind, progress)),
-        _ => None,
+        game_core::RareEventKind::Birds => AmbientKind::Birds,
+        game_core::RareEventKind::ShootingStar => AmbientKind::ShootingStar,
+        game_core::RareEventKind::Hurricane => AmbientKind::Hurricane,
+        game_core::RareEventKind::SakuraPetals => AmbientKind::SakuraPetals,
+        game_core::RareEventKind::Ufo => AmbientKind::Ufo,
     }
 }
 
 fn participates(part: AmbientKind, event: AmbientKind) -> bool {
-    part == event || (part == AmbientKind::HurricaneLeaves && event == AmbientKind::Hurricane)
+    part == event
+        || (part == AmbientKind::HurricaneLeaves && event == AmbientKind::Hurricane)
+        || (part == AmbientKind::HelpedCar
+            && matches!(event, AmbientKind::Hurricane | AmbientKind::Ufo))
 }
 
 pub(super) fn sync(
     sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    proj: Res<Proj>,
     time: Res<Time>,
     mut parts: Query<(&AmbientPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
-    let daylight = game_core::environment::daylight(sim.0.environment_time);
     let seasons = game_core::environment::season_weights(sim.0.environment_time);
-    let salt = sim
-        .0
-        .road
-        .hazards
-        .first()
-        .map_or(0, |hazard| u64::from(hazard.s.to_bits()));
+    let helped = sim.0.rare_traffic_help(&tuning.0);
     let event = matches!(sim.0.phase, Phase::Running)
-        .then(|| event_at(sim.0.environment_time, daylight, seasons[0], salt))
+        .then(|| sim.0.rare_event())
         .flatten();
 
     for (part, mut tf, mut sprite, mut visibility) in &mut parts {
-        let Some((kind, progress)) = event.filter(|(kind, _)| participates(part.kind, *kind))
+        let Some(event) = event.filter(|event| participates(part.kind, ambient_kind(event.kind)))
         else {
             *visibility = Visibility::Hidden;
             continue;
         };
+        let kind = ambient_kind(event.kind);
+        let progress = event.progress;
         *visibility = Visibility::Visible;
         let fade = (progress * 8.0).min(1.0) * ((1.0 - progress) * 8.0).min(1.0);
         if part.kind == AmbientKind::HurricaneLeaves {
@@ -124,6 +105,14 @@ pub(super) fn sync(
                 &mut tf,
                 &mut sprite,
             );
+            continue;
+        }
+        if part.kind == AmbientKind::HelpedCar {
+            let Some(traffic) = helped.get(part.index).copied().flatten() else {
+                *visibility = Visibility::Hidden;
+                continue;
+            };
+            animate_helped_car(kind, traffic, progress, fade, &proj, &mut tf, &mut sprite);
             continue;
         }
         match kind {
@@ -143,6 +132,7 @@ pub(super) fn sync(
             AmbientKind::Ufo => {
                 animate_ufo(part.index, progress, fade, &time, &mut tf, &mut sprite)
             }
+            AmbientKind::HelpedCar => unreachable!("handled before event dispatch"),
         }
     }
 }
@@ -259,8 +249,9 @@ fn animate_ufo(
     sprite: &mut Sprite,
 ) {
     let bob = (time.elapsed_secs() * 4.2).sin() * 4.0;
-    tf.translation.x = 550.0 - 1100.0 * progress;
-    tf.translation.y = 258.0 + bob + index as f32 * 4.0;
+    let path = ufo_path(progress);
+    tf.translation.x = path.x;
+    tf.translation.y = path.y + bob + index.min(2) as f32 * 4.0;
     tf.rotation = Quat::IDENTITY;
     let pulse = 0.55 + 0.45 * (time.elapsed_secs() * 9.0).sin().abs();
     let (size, color) = match index {
@@ -269,13 +260,82 @@ fn animate_ufo(
             Vec2::new(26.0, 11.0),
             Color::srgba(0.35, 0.82, 0.92, fade * 0.8),
         ),
-        _ => (
+        2 => (
             Vec2::new(38.0, 4.0),
             Color::srgba(0.35, 1.0, 0.72, fade * pulse),
         ),
+        _ => {
+            let beam = ((progress - 0.22) / 0.10).clamp(0.0, 1.0)
+                * ((0.75 - progress) / 0.12).clamp(0.0, 1.0);
+            tf.translation.y = 190.0;
+            (
+                Vec2::new(28.0 + pulse * 8.0, 126.0),
+                Color::srgba(0.34, 1.0, 0.76, fade * beam * 0.22),
+            )
+        }
     };
     sprite.custom_size = Some(size);
     sprite.color = color;
+}
+
+fn ufo_path(progress: f32) -> Vec2 {
+    let (x, departure_lift) = if progress < 0.22 {
+        (550.0 * (1.0 - smoothstep(progress / 0.22)), 0.0)
+    } else if progress < 0.75 {
+        (0.0, 0.0)
+    } else {
+        let depart = smoothstep((progress - 0.75) / 0.25);
+        (-550.0 * depart, 130.0 * depart)
+    };
+    Vec2::new(x, 258.0 + departure_lift)
+}
+
+fn animate_helped_car(
+    kind: AmbientKind,
+    traffic: game_core::RareTrafficHelp,
+    progress: f32,
+    fade: f32,
+    proj: &Proj,
+    tf: &mut Transform,
+    sprite: &mut Sprite,
+) {
+    let Some((start_y, scale, lat)) = proj.project(traffic.start_ahead, 0.0) else {
+        return;
+    };
+    let start_x = (lat + traffic.start_x) * HALF_ROAD_PX * scale;
+    let pull = match kind {
+        AmbientKind::Hurricane => smoothstep(((progress - 0.12) / 0.58).clamp(0.0, 1.0)),
+        // The saucer completes its approach before the tractor beam lifts.
+        AmbientKind::Ufo => smoothstep(((progress - 0.26) / 0.42).clamp(0.0, 1.0)),
+        _ => unreachable!("only gameplay-help events carry cars"),
+    };
+    match kind {
+        AmbientKind::Hurricane => {
+            let target_x = -570.0 + 1140.0 * progress;
+            tf.translation.x = start_x + (target_x - start_x) * pull;
+            tf.translation.y = start_y
+                + (230.0 - start_y) * pull
+                + (progress * std::f32::consts::TAU * 4.0).sin() * 18.0 * pull;
+            tf.rotation = Quat::from_rotation_z(progress * std::f32::consts::TAU * 3.0 * pull);
+        }
+        AmbientKind::Ufo => {
+            tf.translation.x = start_x * (1.0 - pull);
+            tf.translation.y = start_y + (224.0 - start_y) * pull;
+            tf.rotation = Quat::from_rotation_z(progress * 0.22);
+        }
+        _ => unreachable!("only gameplay-help events carry cars"),
+    }
+    tf.translation.z = 0.68;
+    sprite.custom_size = Some(Vec2::new(
+        (TRAFFIC_CAR_WIDTH_PX * scale).max(10.0) * (1.0 - pull * 0.28),
+        (TRAFFIC_CAR_WIDTH_PX * 0.42 * scale).max(5.0) * (1.0 - pull * 0.28),
+    ));
+    sprite.color = Color::srgba(0.92, 0.20, 0.24, fade * (1.0 - pull * 0.35));
+}
+
+fn smoothstep(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
 }
 
 #[cfg(test)]
@@ -283,37 +343,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rare_events_respect_day_and_night() {
-        let salt = 1234;
-        let ufo_slot = (0..1024)
-            .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::Ufo))
-            .expect("schedule should contain a UFO");
-        let ufo_time = ufo_slot as f32 * 20.0 + 1.0;
-        assert_eq!(event_at(ufo_time, 1.0, 1.0, salt), None);
-        assert!(matches!(
-            event_at(ufo_time, 0.0, 1.0, salt),
-            Some((AmbientKind::Ufo, _))
-        ));
-        assert_eq!(event_at(ufo_time + 6.0, 0.0, 1.0, salt), None);
-
-        let birds_slot = (0..1024)
-            .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::Birds))
-            .expect("schedule should contain birds");
-        let birds_time = birds_slot as f32 * 20.0 + 1.0;
-        assert!(event_at(birds_time, 1.0, 1.0, salt).is_some());
-        assert_eq!(event_at(birds_time, 0.0, 1.0, salt), None);
+    fn core_event_kinds_map_to_every_visual_kind() {
+        assert_eq!(
+            ambient_kind(game_core::RareEventKind::Ufo),
+            AmbientKind::Ufo
+        );
+        assert_eq!(
+            ambient_kind(game_core::RareEventKind::Hurricane),
+            AmbientKind::Hurricane
+        );
     }
 
     #[test]
     fn petals_are_occasional_spring_events_and_hurricane_debris_is_linked() {
-        let salt = 4321;
-        let petal_slot = (0..1024)
-            .find(|slot| kind_for_slot(*slot, salt) == Some(AmbientKind::SakuraPetals))
-            .expect("schedule should contain petals");
-        let petal_time = petal_slot as f32 * 20.0 + 1.0;
-        assert!(event_at(petal_time, 0.8, 1.0, salt).is_some());
-        assert_eq!(event_at(petal_time, 0.8, 0.0, salt), None);
-        assert_eq!(event_at(petal_time, 0.2, 1.0, salt), None);
         assert!(participates(
             AmbientKind::HurricaneLeaves,
             AmbientKind::Hurricane
@@ -322,5 +364,16 @@ mod tests {
             AmbientKind::HurricaneLeaves,
             AmbientKind::Birds
         ));
+        assert!(participates(AmbientKind::HelpedCar, AmbientKind::Ufo));
+        assert!(participates(AmbientKind::HelpedCar, AmbientKind::Hurricane));
+    }
+
+    #[test]
+    fn ufo_approaches_hovers_over_the_road_then_departs() {
+        assert!(ufo_path(0.0).x > 500.0);
+        assert_eq!(ufo_path(0.30).x, 0.0);
+        assert_eq!(ufo_path(0.70).x, 0.0);
+        assert!(ufo_path(0.90).x < 0.0);
+        assert!(ufo_path(0.90).y > ufo_path(0.50).y);
     }
 }

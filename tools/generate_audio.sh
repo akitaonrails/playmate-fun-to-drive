@@ -46,12 +46,18 @@ noise "$work_dir/wind.wav" 2.0 pink -11
 sox -R "$work_dir/wind.wav" "$output_dir/wind.ogg" highpass 320 lowpass 3800 \
   tremolo 0.65 18 gain -n -8
 
-noise "$work_dir/rain_bed.wav" 2.0 white -15
-noise "$work_dir/rain_ticks.wav" 2.0 white -18
-sox -R "$work_dir/rain_bed.wav" "$work_dir/rain_bed_f.wav" highpass 900 lowpass 6800
-sox -R "$work_dir/rain_ticks.wav" "$work_dir/rain_ticks_f.wav" highpass 3300 \
-  tremolo 13 72
-mix_to_ogg "$output_dir/rain.ogg" "$work_dir/rain_bed_f.wav" "$work_dir/rain_ticks_f.wav"
+# Rain should read as a soft sheet on glass/road, not bright radio static.
+# Layering filtered pink and brown noise gives it body; two slow, shallow
+# modulations avoid the old machine-gun tick pattern while retaining a little
+# 16-bit cabinet movement. Four seconds makes repetition much less obvious.
+noise "$work_dir/rain_spray.wav" 4.0 pink -10
+noise "$work_dir/rain_body.wav" 4.0 brown -13
+sox -R "$work_dir/rain_spray.wav" "$work_dir/rain_spray_f.wav" \
+  highpass 420 lowpass 4600 tremolo 0.37 11
+sox -R "$work_dir/rain_body.wav" "$work_dir/rain_body_f.wav" \
+  highpass 110 lowpass 1500 tremolo 0.23 16
+sox -R -m "$work_dir/rain_spray_f.wav" "$work_dir/rain_body_f.wav" \
+  "$output_dir/rain.ogg" gain -n -8
 
 # Brake pad/tire drag: a restrained, pressure-controlled chip-noise bed. It
 # stays distinct from the wetter, brighter skid layer below.

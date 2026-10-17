@@ -1347,6 +1347,7 @@ fn sync_hazards(
     mut pool: Query<(&HazardPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
     let lp = sim.0.loop_pos();
+    let helped = sim.0.rare_traffic_help(&tuning.0);
     let prop_colors = roadside_prop_palette(
         game_core::environment::season_weights(sim.0.environment_time),
         game_core::environment::daylight(sim.0.environment_time),
@@ -1455,6 +1456,13 @@ fn sync_hazards(
     };
 
     for (hazard_index, h) in sim.0.road.hazards.iter().enumerate() {
+        if helped
+            .iter()
+            .flatten()
+            .any(|traffic| traffic.hazard_index == hazard_index)
+        {
+            continue;
+        }
         let ahead = (h.s - lp).rem_euclid(sim.0.road.length);
         let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) else {
             continue;
