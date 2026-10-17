@@ -21,6 +21,7 @@ pub enum EndMode {
 }
 
 impl EndMode {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::DifficultySelect => "difficulty_select",
@@ -266,25 +267,7 @@ pub fn encode_board(entries: &[LeaderboardEntry]) -> String {
     serde_json::to_string(&board).expect("leaderboard schema is serializable")
 }
 
-pub fn entries_json(entries: &[LeaderboardEntry], difficulty: Difficulty, limit: usize) -> String {
-    let rows: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.result.difficulty == difficulty)
-        .take(limit)
-        .map(|entry| {
-            serde_json::json!({
-                "initials": entry.initials_str(),
-                "difficulty": difficulty_name(entry.result.difficulty),
-                "day_cycles": entry.result.day_cycles,
-                "cars_passed": entry.result.cars_passed,
-                "cars_bumped": entry.result.cars_bumped,
-                "score": entry.result.score,
-            })
-        })
-        .collect();
-    serde_json::to_string(&rows).expect("leaderboard rows are serializable")
-}
-
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub const fn difficulty_name(difficulty: Difficulty) -> &'static str {
     match difficulty {
         Difficulty::Easy => "easy",

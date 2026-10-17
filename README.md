@@ -61,3 +61,6 @@ local to the browser under the versioned `fun-to-drive.leaderboard.v2` key;
 valid v1 rows migrate to the Hard board;
 stored totals above conservative 600-second plausibility ceilings (100 cycles
 or 100,000 passed/bumped cars) invalidate the stored board.
+
+For weaker GPUs, append `?quality=low`. This reduces the offscreen game view
+from 960×600 to 720×450 and disables bloom without changing simulation logic.

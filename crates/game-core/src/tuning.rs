@@ -25,6 +25,8 @@ pub struct Tuning {
     /// Fractional target-speed response per unit of road grade. Positive
     /// slopes slow the car; negative slopes give the same modest assistance.
     pub slope_speed_gain: f32,
+    pub slope_speed_min_factor: f32,
+    pub slope_speed_max_factor: f32,
     /// Rate at which road_x chases the curve target (per second at LOW speed).
     pub drift_rate: f32,
     /// Drum shift velocity at full steering input (half-widths/s).
@@ -33,6 +35,9 @@ pub struct Tuning {
     pub off_road_limit: f32,
     /// Seconds of grace off-road before crashing.
     pub off_road_grace: f32,
+    /// Lateral simulation clamp and rate at which off-road grace recovers.
+    pub max_lateral_offset: f32,
+    pub off_road_recovery_rate: f32,
     /// Speed retained at maximum lateral excursion. Between the road edge
     /// and the excursion clamp, drag increases smoothly toward this factor.
     pub off_road_min_speed_factor: f32,
@@ -48,6 +53,14 @@ pub struct Tuning {
     pub nitro_duration_secs: f32,
     pub nitro_cooldown_secs: f32,
     pub nitro_speed_multiplier: f32,
+    pub nitro_pickup_half_width: f32,
+    pub nitro_lane_offset: f32,
+    pub nitro_capacity: u8,
+    /// Crash/bump response.
+    pub bump_target_speed_factor: f32,
+    pub bump_lateral_kick: f32,
+    pub bump_speed_retention: f32,
+    pub bump_flash_intensity: f32,
     /// Duration of the crash flash / crashed phase.
     pub crash_flash_secs: f32,
     /// Body dynamics (M11): shared spring stiffness/damping for the rig.
@@ -96,10 +109,14 @@ impl Default for Tuning {
             brake_ramp_secs: 1.2,
             curve_gain: 1.05,
             slope_speed_gain: 1.6,
+            slope_speed_min_factor: 0.90,
+            slope_speed_max_factor: 1.10,
             drift_rate: 0.75,
             steer_rate: 2.0,
             off_road_limit: 1.02,
             off_road_grace: 0.45,
+            max_lateral_offset: 1.35,
+            off_road_recovery_rate: 2.0,
             off_road_min_speed_factor: 0.42,
             car_half_width: 0.20,
             hazard_half_width: 0.14,
@@ -109,6 +126,13 @@ impl Default for Tuning {
             nitro_duration_secs: 5.0,
             nitro_cooldown_secs: 3.0,
             nitro_speed_multiplier: 1.30,
+            nitro_pickup_half_width: 0.20,
+            nitro_lane_offset: 0.62,
+            nitro_capacity: 3,
+            bump_target_speed_factor: 0.35,
+            bump_lateral_kick: 0.38,
+            bump_speed_retention: 0.45,
+            bump_flash_intensity: 0.35,
             crash_flash_secs: 0.9,
             body_k: 55.0,
             body_c: 7.5,
@@ -173,6 +197,12 @@ impl Tuning {
         if !(0.0..=3.0).contains(&self.slope_speed_gain) {
             return Err("slope_speed_gain out of [0, 3]");
         }
+        if !(0.5..=1.0).contains(&self.slope_speed_min_factor)
+            || !(1.0..=1.5).contains(&self.slope_speed_max_factor)
+            || self.slope_speed_min_factor > self.slope_speed_max_factor
+        {
+            return Err("slope speed factor bounds invalid");
+        }
         if !(0.05..=5.0).contains(&self.drift_rate) {
             return Err("drift_rate out of [0.05, 5]");
         }
@@ -187,6 +217,12 @@ impl Tuning {
         }
         if !(0.0..=2.0).contains(&self.off_road_grace) {
             return Err("off_road_grace out of [0, 2]");
+        }
+        if !(self.off_road_limit..=2.0).contains(&self.max_lateral_offset) {
+            return Err("max_lateral_offset must exceed the road limit");
+        }
+        if !(0.1..=10.0).contains(&self.off_road_recovery_rate) {
+            return Err("off_road_recovery_rate out of [0.1, 10]");
         }
         if !(0.2..=0.9).contains(&self.off_road_min_speed_factor) {
             return Err("off_road_min_speed_factor out of [0.2, 0.9]");
@@ -215,6 +251,26 @@ impl Tuning {
         if !(1.05..=1.75).contains(&self.nitro_speed_multiplier) {
             return Err("nitro_speed_multiplier out of [1.05, 1.75]");
         }
+        if !(0.05..=0.5).contains(&self.nitro_pickup_half_width) {
+            return Err("nitro_pickup_half_width out of [0.05, 0.5]");
+        }
+        if !(0.2..=0.9).contains(&self.nitro_lane_offset) {
+            return Err("nitro_lane_offset out of [0.2, 0.9]");
+        }
+        if !(1..=8).contains(&self.nitro_capacity) {
+            return Err("nitro_capacity out of [1, 8]");
+        }
+        if !(0.0..=1.0).contains(&self.bump_target_speed_factor)
+            || !(0.0..=1.0).contains(&self.bump_speed_retention)
+        {
+            return Err("bump speed factors out of [0, 1]");
+        }
+        if !(0.0..=0.8).contains(&self.bump_lateral_kick) {
+            return Err("bump_lateral_kick out of [0, 0.8]");
+        }
+        if !(0.0..=1.0).contains(&self.bump_flash_intensity) {
+            return Err("bump_flash_intensity out of [0, 1]");
+        }
         if !(0.2..=3.0).contains(&self.crash_flash_secs) {
             return Err("crash_flash_secs out of [0.2, 3]");
         }
@@ -239,6 +295,12 @@ impl Tuning {
         if !(2.0..=25.0).contains(&self.heave_freq) {
             return Err("heave_freq out of [2, 25]");
         }
+        if !(20.0..=240.0).contains(&self.heave_k) {
+            return Err("heave_k out of [20, 240]");
+        }
+        if !(2.0..=30.0).contains(&self.heave_c) {
+            return Err("heave_c out of [2, 30]");
+        }
         if !(1.0..=8.0).contains(&self.crash_roll_impulse) {
             return Err("crash_roll_impulse out of [1, 8]");
         }
@@ -247,6 +309,9 @@ impl Tuning {
         }
         if !(0.2..=2.5).contains(&self.crash_shake_secs) {
             return Err("crash_shake_secs out of [0.2, 2.5]");
+        }
+        if !(0.001..=0.1).contains(&self.crash_shake_gain) {
+            return Err("crash_shake_gain out of [0.001, 0.1]");
         }
         if !(0.0..=0.3).contains(&self.pad_deadzone) {
             return Err("pad_deadzone out of [0, 0.3]");
@@ -315,5 +380,54 @@ mod tests {
             ..Default::default()
         };
         assert!(t.validate().is_err());
+    }
+
+    #[test]
+    fn validates_every_spring_and_shake_parameter() {
+        for invalid in [
+            Tuning {
+                heave_k: -1.0,
+                ..Tuning::default()
+            },
+            Tuning {
+                heave_c: f32::NAN,
+                ..Tuning::default()
+            },
+            Tuning {
+                crash_shake_gain: -0.01,
+                ..Tuning::default()
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn validates_extracted_driving_and_pickup_parameters() {
+        for invalid in [
+            Tuning {
+                slope_speed_min_factor: 1.1,
+                slope_speed_max_factor: 1.0,
+                ..Tuning::default()
+            },
+            Tuning {
+                max_lateral_offset: 0.5,
+                ..Tuning::default()
+            },
+            Tuning {
+                off_road_recovery_rate: f32::NAN,
+                ..Tuning::default()
+            },
+            Tuning {
+                nitro_capacity: 0,
+                ..Tuning::default()
+            },
+            Tuning {
+                bump_speed_retention: 1.1,
+                ..Tuning::default()
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
     }
 }

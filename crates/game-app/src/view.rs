@@ -5,6 +5,8 @@
 //! edges, lane dashes, palm trees, and composite car sprites — all drawn
 //! with flat sprites so it renders identically into the toy's screen.
 
+mod ambient;
+
 use bevy::prelude::*;
 use game_core::{Gear, Phase, WeatherKind, WeatherTransition};
 
@@ -125,20 +127,6 @@ pub struct Cloud;
 #[derive(Component)]
 pub struct HazeStrip;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AmbientKind {
-    Birds,
-    ShootingStar,
-    Hurricane,
-    Ufo,
-}
-
-#[derive(Component)]
-struct AmbientPart {
-    kind: AmbientKind,
-    index: usize,
-}
-
 /// snow particles
 #[derive(Component)]
 pub struct SnowFlake;
@@ -229,7 +217,7 @@ struct DrumBand;
 struct RecessShade;
 
 /// Per-frame road projection shared by road/sprite sync systems.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Proj {
     /// lateral center (half-width units incl. bend) at each row's distance
     pub rows_x: [f32; ROWS],
@@ -237,6 +225,22 @@ pub struct Proj {
     pub rows_y: [f32; ROWS],
     /// cumulative curve at each row distance (half-width units)
     pub cum: [f32; ROWS],
+    scales: [f32; ROWS],
+    distances: [f32; ROWS],
+}
+
+impl Default for Proj {
+    fn default() -> Self {
+        let scales = std::array::from_fn(row_scale);
+        let distances = std::array::from_fn(|index| scale_to_d(scales[index]));
+        Self {
+            rows_x: [0.0; ROWS],
+            rows_y: [0.0; ROWS],
+            cum: [0.0; ROWS],
+            scales,
+            distances,
+        }
+    }
 }
 
 impl Proj {
@@ -254,13 +258,9 @@ impl Proj {
             // rows are ordered near(0)..far(ROWS-1); d decreases with index
             let mut val = self.cum[ROWS - 1];
             for i in 0..ROWS {
-                let di = scale_to_d(row_scale(i));
+                let di = self.distances[i];
                 if d <= di {
-                    let d0 = if i == 0 {
-                        D_MIN
-                    } else {
-                        scale_to_d(row_scale(i - 1))
-                    };
+                    let d0 = if i == 0 { D_MIN } else { self.distances[i - 1] };
                     let t = if di > d0 { (d - d0) / (di - d0) } else { 1.0 };
                     let c0 = if i == 0 { 0.0 } else { self.cum[i - 1] };
                     val = c0 + (self.cum[i] - c0) * t;
@@ -273,13 +273,9 @@ impl Proj {
         let y = {
             let mut val = self.rows_y[ROWS - 1];
             for i in 0..ROWS {
-                let di = scale_to_d(row_scale(i));
+                let di = self.distances[i];
                 if d <= di {
-                    let d0 = if i == 0 {
-                        D_MIN
-                    } else {
-                        scale_to_d(row_scale(i - 1))
-                    };
+                    let d0 = if i == 0 { D_MIN } else { self.distances[i - 1] };
                     let t = if di > d0 { (d - d0) / (di - d0) } else { 1.0 };
                     let y0 = if i == 0 { CAR_Y } else { self.rows_y[i - 1] };
                     val = y0 + (self.rows_y[i] - y0) * t;
@@ -615,23 +611,7 @@ pub fn setup(mut commands: Commands) {
         Transform::from_xyz(0.0, HORIZON_Y + 15.0, -4.55),
         HazeStrip,
     ));
-    // Rare, non-interactive background easter eggs. Pooled pieces remain
-    // hidden outside their deterministic event windows.
-    for (kind, count) in [
-        (AmbientKind::Birds, 10),
-        (AmbientKind::ShootingStar, 2),
-        (AmbientKind::Hurricane, 6),
-        (AmbientKind::Ufo, 3),
-    ] {
-        for index in 0..count {
-            commands.spawn((
-                Sprite::from_color(Color::WHITE, Vec2::ONE),
-                Transform::from_xyz(0.0, 0.0, -4.62),
-                Visibility::Hidden,
-                AmbientPart { kind, index },
-            ));
-        }
-    }
+    ambient::spawn(&mut commands);
     for k in 0..36 {
         let fx = -480.0 + (k * 53 % 960) as f32;
         let fy = -300.0 + (k * 37 % 600) as f32;
@@ -1079,10 +1059,6 @@ pub fn setup(mut commands: Commands) {
     }
 }
 
-fn row_dist(i: usize) -> f32 {
-    scale_to_d(row_scale(i))
-}
-
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_roads(
     sim: Res<Sim>,
@@ -1126,10 +1102,10 @@ fn sync_roads(
     let mut cum = 0.0f32;
     let player_elevation = sim.0.road.elevation_at(sim.0.distance);
     for i in 0..ROWS {
-        let s = row_scale(i);
-        let d = row_dist(i);
+        let s = proj.scales[i];
+        let d = proj.distances[i];
         let pos = sim.0.distance + d;
-        cum += sim.0.road.curve_at(pos) * (d - if i == 0 { D_MIN } else { row_dist(i - 1) });
+        cum += sim.0.road.curve_at(pos) * (d - if i == 0 { D_MIN } else { proj.distances[i - 1] });
         proj.rows_x[i] = HALF_ROAD_PX * s * (sim.0.road_x + CURVE_BEND * cum);
         let relative_elevation = sim.0.road.elevation_at(pos) - player_elevation;
         proj.rows_y[i] = elevated_row_y(s, relative_elevation);
@@ -1149,7 +1125,7 @@ fn sync_roads(
         if let Some(size) = sp.custom_size.as_mut() {
             size.y = h + 1.0;
         }
-        let pos = sim.0.distance + row_dist(i);
+        let pos = sim.0.distance + proj.distances[i];
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on {
             colors.asphalt_a
@@ -1170,7 +1146,7 @@ fn sync_roads(
         if let Some(size) = sp.custom_size.as_mut() {
             size.y = h + 1.0;
         }
-        let pos = sim.0.distance + row_dist(i);
+        let pos = sim.0.distance + proj.distances[i];
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.grass_a } else { colors.grass_b };
     }
@@ -1213,7 +1189,7 @@ fn sync_roads(
     for (idx, (mut tf, mut sp)) in rumble.iter_mut().enumerate() {
         let row = idx / 2;
         let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
-        let s = row_scale(row);
+        let s = proj.scales[row];
         tf.translation.x = proj.rows_x[row] + side * (HALF_ROAD_PX - 8.0) * s;
         let y0 = proj.rows_y[row];
         let y1 = if row + 1 < ROWS {
@@ -1226,7 +1202,7 @@ fn sync_roads(
         if let Some(size) = sp.custom_size.as_mut() {
             size.y = h + 1.0;
         }
-        let pos = sim.0.distance + row_dist(row);
+        let pos = sim.0.distance + proj.distances[row];
         let red = ((pos / 7.0).floor() as i64).rem_euclid(2) == 0;
         sp.color = if red {
             colors.rumble_red
@@ -1237,7 +1213,7 @@ fn sync_roads(
     for (i, (mut tf, mut sp)) in dashes.iter_mut().enumerate() {
         let row = i / 2;
         let lane: f32 = if i % 2 == 0 { -0.4 } else { 0.4 };
-        let s = row_scale(row);
+        let s = proj.scales[row];
         tf.translation.x = proj.rows_x[row] + lane * HALF_ROAD_PX * s;
         let y0 = proj.rows_y[row];
         let y1 = if row + 1 < ROWS {
@@ -1250,7 +1226,7 @@ fn sync_roads(
         if let Some(size) = sp.custom_size.as_mut() {
             size.y = h * 0.6;
         }
-        let pos = sim.0.distance + row_dist(row);
+        let pos = sim.0.distance + proj.distances[row];
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.dash } else { colors.asphalt_a };
     }
@@ -1586,19 +1562,21 @@ fn sync_palms(
     let lp = sim.0.loop_pos();
     let l = sim.0.road.length;
     // sparse roadside scenery: 3 per side per loop (not traffic-dense)
-    let mut spots: Vec<(f32, f32, f32)> = Vec::new();
+    let mut spots = [None; 6];
+    let mut spot_count = 0;
     for k in 0..3u32 {
         for side in [-1.45f32, 1.45] {
             let s_pos = (k as f32 + if side < 0.0 { 0.5 } else { 0.0 }) / 3.0 * l;
             let ahead = (s_pos - lp).rem_euclid(l);
             if let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) {
                 let x = (lat + side) * HALF_ROAD_PX * s;
-                spots.push((x, y, s));
+                spots[spot_count] = Some((x, y, s));
+                spot_count += 1;
             }
         }
     }
     let mut parts = pool.iter_mut();
-    for &(x, y, s) in spots.iter() {
+    for (x, y, s) in spots.into_iter().flatten() {
         let h = (46.0 * s).max(2.0);
         // trunk
         if let Some((mut tf, mut vis, mut sp)) = parts.next() {
@@ -1742,27 +1720,27 @@ fn sync_hud(
         sprite.color = Color::srgba(0.45, 0.95, 1.0, if selected { 0.65 * fade } else { 0.0 });
     }
     if let Ok(mut text) = status.single_mut() {
-        **text = if sim.0.paused {
-            "PAUSED | Start/P resume | Select/R restart".to_string()
+        let next = if sim.0.paused {
+            "PAUSED | Start/P resume | Select/R restart"
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
                     "ARROWS drive | Q low / E high | Y nitro | R restart | T flat | L toy look"
-                        .to_string()
                 }
-                Phase::Running => "Y nitro | T flat view | L toy look".to_string(),
-                Phase::GameOver { .. } => String::new(),
+                Phase::Running => "Y nitro | T flat view | L toy look",
+                Phase::GameOver { .. } => "",
             }
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
                     "ARROWS steer | Q low / E high | Y nitro | R restart | T toy | L toy look"
-                        .to_string()
                 }
-                Phase::Running => String::new(),
-                Phase::GameOver { .. } => String::new(),
+                Phase::Running | Phase::GameOver { .. } => "",
             }
         };
+        if text.as_str() != next {
+            **text = next.to_owned();
+        }
     }
 }
 
@@ -1773,15 +1751,19 @@ fn sync_end_overlay(
     mut root: Query<&mut Visibility, With<EndOverlayRoot>>,
     mut texts: Query<(&EndOverlayText, &mut Text2d)>,
 ) {
+    let visible = matches!(
+        end.0.mode,
+        crate::session::EndMode::NameEntry | crate::session::EndMode::Leaderboard
+    );
     if let Ok(mut visibility) = root.single_mut() {
-        *visibility = if matches!(
-            end.0.mode,
-            crate::session::EndMode::NameEntry | crate::session::EndMode::Leaderboard
-        ) {
+        *visibility = if visible {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+    if !visible || (!sim.is_changed() && !end.is_changed() && !leaderboard.is_changed()) {
+        return;
     }
     let result = sim.0.result().copied().unwrap_or_else(|| {
         game_core::SessionResult::new(
@@ -1895,120 +1877,6 @@ fn weather_weights(transition: WeatherTransition) -> [f32; 3] {
 
 fn rain_visibility(rain: f32, winter: f32) -> f32 {
     rain.clamp(0.0, 1.0) * (1.0 - winter.clamp(0.0, 1.0))
-}
-
-fn ambient_kind(slot: u64, salt: u64) -> Option<AmbientKind> {
-    let mut hash = slot ^ salt.rotate_left(17) ^ 0xd1b5_4a32_d192_ed03;
-    hash ^= hash >> 30;
-    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    hash ^= hash >> 27;
-    match hash % 32 {
-        0 => Some(AmbientKind::Ufo),
-        1 => Some(AmbientKind::Hurricane),
-        2..=4 => Some(AmbientKind::ShootingStar),
-        5..=9 => Some(AmbientKind::Birds),
-        _ => None,
-    }
-}
-
-fn ambient_event(t: f32, daylight: f32, salt: u64) -> Option<(AmbientKind, f32)> {
-    const SLOT_SECS: f32 = 20.0;
-    const EVENT_SECS: f32 = 5.0;
-    let slot = (t.max(0.0) / SLOT_SECS).floor() as u64;
-    let progress = (t - slot as f32 * SLOT_SECS) / EVENT_SECS;
-    if !(0.0..1.0).contains(&progress) {
-        return None;
-    }
-    let kind = ambient_kind(slot, salt)?;
-    match kind {
-        AmbientKind::Birds if daylight > 0.62 => Some((kind, progress)),
-        AmbientKind::ShootingStar | AmbientKind::Ufo if daylight < 0.30 => Some((kind, progress)),
-        AmbientKind::Hurricane => Some((kind, progress)),
-        _ => None,
-    }
-}
-
-fn sync_ambient_easter_eggs(
-    sim: Res<Sim>,
-    time: Res<Time>,
-    mut parts: Query<(&AmbientPart, &mut Transform, &mut Sprite, &mut Visibility)>,
-) {
-    let daylight = game_core::environment::daylight(sim.0.environment_time);
-    let salt = sim
-        .0
-        .road
-        .hazards
-        .first()
-        .map_or(0, |hazard| u64::from(hazard.s.to_bits()));
-    let event = matches!(sim.0.phase, Phase::Running)
-        .then(|| ambient_event(sim.0.environment_time, daylight, salt))
-        .flatten();
-
-    for (part, mut tf, mut sprite, mut visibility) in &mut parts {
-        let Some((kind, progress)) = event.filter(|(kind, _)| *kind == part.kind) else {
-            *visibility = Visibility::Hidden;
-            continue;
-        };
-        *visibility = Visibility::Visible;
-        let fade = (progress * 8.0).min(1.0) * ((1.0 - progress) * 8.0).min(1.0);
-        match kind {
-            AmbientKind::Birds => {
-                let bird = part.index / 2;
-                let wing = part.index % 2;
-                let formation_x = (bird % 3) as f32 * 27.0 - (bird / 3) as f32 * 14.0;
-                let formation_y = (bird / 3) as f32 * 18.0 - (bird % 3) as f32 * 5.0;
-                let flap = (time.elapsed_secs() * 10.0 + bird as f32).sin() * 0.22;
-                tf.translation.x = -540.0 + 1080.0 * progress + formation_x;
-                tf.translation.y =
-                    235.0 + formation_y + (progress * std::f32::consts::TAU).sin() * 8.0;
-                tf.rotation =
-                    Quat::from_rotation_z(if wing == 0 { 0.42 + flap } else { -0.42 - flap });
-                sprite.custom_size = Some(Vec2::new(12.0, 2.0));
-                sprite.color = Color::srgba(0.05, 0.08, 0.12, fade * 0.82);
-            }
-            AmbientKind::ShootingStar => {
-                tf.translation.x = -410.0 + 780.0 * progress - part.index as f32 * 16.0;
-                tf.translation.y = 292.0 - 125.0 * progress + part.index as f32 * 7.0;
-                tf.rotation = Quat::from_rotation_z(-0.16);
-                sprite.custom_size = Some(if part.index == 0 {
-                    Vec2::new(54.0, 2.0)
-                } else {
-                    Vec2::new(8.0, 5.0)
-                });
-                sprite.color =
-                    Color::srgba(0.82, 0.94, 1.0, fade * (0.62 + part.index as f32 * 0.3));
-            }
-            AmbientKind::Hurricane => {
-                let i = part.index as f32;
-                let swirl = (time.elapsed_secs() * 3.0 + i * 1.35).sin() * (10.0 - i);
-                tf.translation.x = -570.0 + 1140.0 * progress + swirl;
-                tf.translation.y = 265.0 - i * 19.0;
-                tf.rotation = Quat::from_rotation_z((i - 2.5) * 0.025);
-                sprite.custom_size = Some(Vec2::new((112.0 - i * 17.0).max(18.0), 8.0));
-                sprite.color = Color::srgba(0.22, 0.27, 0.34, fade * (0.36 + i * 0.035));
-            }
-            AmbientKind::Ufo => {
-                let bob = (time.elapsed_secs() * 4.2).sin() * 4.0;
-                tf.translation.x = 550.0 - 1100.0 * progress;
-                tf.translation.y = 258.0 + bob + part.index as f32 * 4.0;
-                tf.rotation = Quat::IDENTITY;
-                let pulse = 0.55 + 0.45 * (time.elapsed_secs() * 9.0).sin().abs();
-                let (size, color) = match part.index {
-                    0 => (Vec2::new(62.0, 8.0), Color::srgba(0.45, 0.56, 0.64, fade)),
-                    1 => (
-                        Vec2::new(26.0, 11.0),
-                        Color::srgba(0.35, 0.82, 0.92, fade * 0.8),
-                    ),
-                    _ => (
-                        Vec2::new(38.0, 4.0),
-                        Color::srgba(0.35, 1.0, 0.72, fade * pulse),
-                    ),
-                };
-                sprite.custom_size = Some(size);
-                sprite.color = color;
-            }
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -2424,6 +2292,9 @@ fn sync_difficulty_overlay(
     mut cards: Query<(&DifficultyCard, &mut Sprite)>,
     mut texts: Query<(&DifficultyCardText, &mut TextColor)>,
 ) {
+    if !end.is_changed() {
+        return;
+    }
     if let Ok(mut visibility) = root.single_mut() {
         *visibility = if end.0.mode == crate::session::EndMode::DifficultySelect {
             Visibility::Visible
@@ -2447,17 +2318,36 @@ fn sync_difficulty_overlay(
     }
 }
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ViewSet {
+    Environment,
+    Projection,
+    Effects,
+    Presentation,
+}
+
 pub fn add_view_systems(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            ViewSet::Environment,
+            ViewSet::Projection,
+            ViewSet::Effects,
+            ViewSet::Presentation,
+        )
+            .chain()
+            .in_set(crate::AppSet::View),
+    );
+    app.add_systems(Update, sync_environment.in_set(ViewSet::Environment));
+    app.add_systems(Update, sync_roads.in_set(ViewSet::Projection));
+    app.add_systems(Update, sync_nitro_visual_intensity.in_set(ViewSet::Effects));
     app.add_systems(
         Update,
         (
-            sync_environment,
-            sync_ambient_easter_eggs,
-            sync_roads,
+            ambient::sync,
             sync_palms,
             sync_hazards,
             sync_nitro_pickup,
-            sync_nitro_visual_intensity,
             sync_nitro_exhaust,
             sync_nitro_speed_lines,
             sync_flash,
@@ -2467,7 +2357,7 @@ pub fn add_view_systems(app: &mut App) {
             sync_end_overlay,
             sync_difficulty_overlay,
         )
-            .chain(),
+            .in_set(ViewSet::Presentation),
     );
 }
 
@@ -2533,28 +2423,6 @@ mod tests {
         assert!(!low_shift_hint_active(Gear::Low, 8.9, 10.0));
         assert!(low_shift_hint_active(Gear::Low, 9.2, 10.0));
         assert!(!low_shift_hint_active(Gear::High, 12.0, 10.0));
-    }
-
-    #[test]
-    fn rare_ambient_events_respect_day_and_night() {
-        let salt = 1234;
-        let ufo_slot = (0..1024)
-            .find(|slot| ambient_kind(*slot, salt) == Some(AmbientKind::Ufo))
-            .expect("schedule should contain a UFO");
-        let ufo_time = ufo_slot as f32 * 20.0 + 1.0;
-        assert_eq!(ambient_event(ufo_time, 1.0, salt), None);
-        assert!(matches!(
-            ambient_event(ufo_time, 0.0, salt),
-            Some((AmbientKind::Ufo, _))
-        ));
-        assert_eq!(ambient_event(ufo_time + 6.0, 0.0, salt), None);
-
-        let birds_slot = (0..1024)
-            .find(|slot| ambient_kind(*slot, salt) == Some(AmbientKind::Birds))
-            .expect("schedule should contain birds");
-        let birds_time = birds_slot as f32 * 20.0 + 1.0;
-        assert!(ambient_event(birds_time, 1.0, salt).is_some());
-        assert_eq!(ambient_event(birds_time, 0.0, salt), None);
     }
 
     #[test]

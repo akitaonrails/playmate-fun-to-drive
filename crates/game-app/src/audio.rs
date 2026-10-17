@@ -18,7 +18,12 @@ impl Plugin for ArcadeAudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AudioEvents>()
             .add_systems(Startup, setup_audio)
-            .add_systems(Update, (toggle_mute, update_mix, play_cues).chain());
+            .add_systems(
+                Update,
+                (toggle_mute, update_mix, play_cues)
+                    .chain()
+                    .in_set(crate::AppSet::Audio),
+            );
     }
 }
 

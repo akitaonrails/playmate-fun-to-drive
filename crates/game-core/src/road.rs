@@ -23,6 +23,56 @@ pub struct Hazard {
     pub s: f32,
 }
 
+/// Tweakable behavior for occasional distant lane changes. Keeping this with
+/// the road makes generation, rendering, and collision share one contract.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrafficMotion {
+    pub chance_percent: u8,
+    pub change_start_m: f32,
+    pub change_end_m: f32,
+    pub lane_offset: f32,
+    pub lane_jitter: f32,
+}
+
+impl TrafficMotion {
+    pub const DISABLED: Self = Self {
+        chance_percent: 0,
+        change_start_m: 18.0,
+        change_end_m: 6.0,
+        lane_offset: 0.72,
+        lane_jitter: 0.05,
+    };
+
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.chance_percent > 100 {
+            return Err("traffic lane-change chance exceeds 100%");
+        }
+        if !self.change_start_m.is_finite()
+            || !self.change_end_m.is_finite()
+            || self.change_end_m < 0.0
+            || self.change_start_m <= self.change_end_m
+        {
+            return Err("traffic lane-change distances are invalid");
+        }
+        if !(0.3..=0.9).contains(&self.lane_offset) {
+            return Err("traffic lane offset out of [0.3, 0.9]");
+        }
+        if !(0.0..=0.15).contains(&self.lane_jitter) {
+            return Err("traffic lane jitter out of [0, 0.15]");
+        }
+        Ok(())
+    }
+}
+
+impl Default for TrafficMotion {
+    fn default() -> Self {
+        Self {
+            chance_percent: 30,
+            ..Self::DISABLED
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RoadLoop {
     pub length: f32,
@@ -31,6 +81,7 @@ pub struct RoadLoop {
     curve: Vec<f32>,
     /// Periodic terrain elevation in meters, kept deliberately low-relief.
     elevation: Vec<f32>,
+    traffic_motion: TrafficMotion,
 }
 
 impl RoadLoop {
@@ -53,7 +104,9 @@ impl RoadLoop {
 
         let traffic_count = rng.range(12.0, 17.0).round() as usize;
         let scenery_count = rng.range(8.0, 13.0).round() as usize;
-        let lanes = [-0.72f32, 0.0, 0.72];
+        let traffic_motion = TrafficMotion::default();
+        debug_assert!(traffic_motion.validate().is_ok());
+        let lanes = [-traffic_motion.lane_offset, 0.0, traffic_motion.lane_offset];
         let mut hazards = Vec::with_capacity(traffic_count + scenery_count);
         for k in 0..traffic_count {
             // first hazard no earlier than 22% into the loop (fair start)
@@ -87,6 +140,7 @@ impl RoadLoop {
             hazards,
             curve,
             elevation,
+            traffic_motion,
         }
     }
 
@@ -94,16 +148,15 @@ impl RoadLoop {
     /// adjacent lane while distant, then lock their line before reaching the
     /// player. Rendering and collision both call this function.
     pub fn hazard_x_at(&self, hazard: &Hazard, ahead: f32) -> f32 {
-        if hazard.kind != HazardKind::Oncoming || self.elevation.iter().all(|height| *height == 0.0)
-        {
+        if hazard.kind != HazardKind::Oncoming || self.traffic_motion.chance_percent == 0 {
             return hazard.x;
         }
-        let Some(target) = oncoming_lane_target(hazard) else {
+        let Some(target) = oncoming_lane_target(hazard, self.traffic_motion) else {
             return hazard.x;
         };
-        const CHANGE_START_M: f32 = 18.0;
-        const CHANGE_END_M: f32 = 6.0;
-        let t = ((CHANGE_START_M - ahead) / (CHANGE_START_M - CHANGE_END_M)).clamp(0.0, 1.0);
+        let t = ((self.traffic_motion.change_start_m - ahead)
+            / (self.traffic_motion.change_start_m - self.traffic_motion.change_end_m))
+            .clamp(0.0, 1.0);
         let smooth = t * t * (3.0 - 2.0 * t);
         hazard.x + (target - hazard.x) * smooth
     }
@@ -144,12 +197,26 @@ impl RoadLoop {
     /// Flat loop with explicit hazards: deterministic course for tests and
     /// simple scenarios (attract mode etc.).
     pub fn straight(length: f32, hazards: Vec<Hazard>) -> Self {
-        RoadLoop {
+        Self::try_straight(length, hazards).expect("straight road must have valid geometry")
+    }
+
+    /// Validated constructor for authored/test courses.
+    pub fn try_straight(length: f32, hazards: Vec<Hazard>) -> Result<Self, &'static str> {
+        if !length.is_finite() || length <= 0.0 {
+            return Err("road length must be finite and positive");
+        }
+        if hazards.iter().any(|hazard| {
+            !hazard.x.is_finite() || !hazard.s.is_finite() || hazard.s < 0.0 || hazard.s >= length
+        }) {
+            return Err("hazard must be finite and inside the road loop");
+        }
+        Ok(RoadLoop {
             length,
             hazards,
             curve: vec![0.0; CURVE_SAMPLES],
             elevation: vec![0.0; CURVE_SAMPLES],
-        }
+            traffic_motion: TrafficMotion::DISABLED,
+        })
     }
 
     /// Centerline offset at loop position `s` (meters), wrapping smoothly.
@@ -196,7 +263,7 @@ impl RoadLoop {
     }
 }
 
-fn oncoming_lane_target(hazard: &Hazard) -> Option<f32> {
+fn oncoming_lane_target(hazard: &Hazard, tuning: TrafficMotion) -> Option<f32> {
     let mut hash = u64::from(hazard.s.to_bits())
         ^ u64::from(hazard.x.to_bits()).rotate_left(23)
         ^ 0x9e37_79b9_7f4a_7c15;
@@ -204,13 +271,14 @@ fn oncoming_lane_target(hazard: &Hazard) -> Option<f32> {
     hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
     hash ^= hash >> 27;
     // Roughly three cars in ten change lane on each deterministic course.
-    if hash % 10 >= 3 {
+    if hash % 100 >= u64::from(tuning.chance_percent) {
         return None;
     }
 
-    let lane = if hazard.x < -0.36 {
+    let half_lane = tuning.lane_offset * 0.5;
+    let lane = if hazard.x < -half_lane {
         -1
-    } else if hazard.x > 0.36 {
+    } else if hazard.x > half_lane {
         1
     } else {
         0
@@ -220,9 +288,9 @@ fn oncoming_lane_target(hazard: &Hazard) -> Option<f32> {
         _ if hash & 0x10 == 0 => -1,
         _ => 1,
     };
-    let original_center = lane as f32 * 0.72;
-    let jitter = (hazard.x - original_center).clamp(-0.05, 0.05);
-    Some(target_lane as f32 * 0.72 + jitter)
+    let original_center = lane as f32 * tuning.lane_offset;
+    let jitter = (hazard.x - original_center).clamp(-tuning.lane_jitter, tuning.lane_jitter);
+    Some(target_lane as f32 * tuning.lane_offset + jitter)
 }
 
 #[cfg(test)]
@@ -337,5 +405,21 @@ mod tests {
         assert!(r.max_abs_grade() > 0.01);
         assert!(r.max_abs_grade() < 0.08, "small hills, not mountains");
         assert!(r.elevation_at(r.length * 0.2) != r.elevation_at(r.length * 0.4));
+    }
+
+    #[test]
+    fn authored_roads_reject_invalid_geometry() {
+        assert!(RoadLoop::try_straight(0.0, Vec::new()).is_err());
+        assert!(RoadLoop::try_straight(f32::NAN, Vec::new()).is_err());
+        assert!(RoadLoop::try_straight(
+            10.0,
+            vec![Hazard {
+                kind: HazardKind::Oncoming,
+                x: 0.0,
+                s: 10.0,
+            }],
+        )
+        .is_err());
+        assert!(TrafficMotion::default().validate().is_ok());
     }
 }

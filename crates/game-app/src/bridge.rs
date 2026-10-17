@@ -12,8 +12,12 @@ pub fn publish_state(json: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn publish_state(_json: &str) {}
+#[cfg(target_arch = "wasm32")]
+pub fn state_publisher_available() -> bool {
+    let global = js_sys::global();
+    js_sys::Reflect::get(&global, &js_sys::JsString::from("__ftdPublishState"))
+        .is_ok_and(|value| value.is_function())
+}
 
 #[cfg(target_arch = "wasm32")]
 fn storage() -> Option<web_sys::Storage> {

@@ -67,18 +67,24 @@ pub enum DownshiftSeverity {
     Unsafe,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GearChange {
+    pub gear: Gear,
+    pub downshift_severity: Option<DownshiftSeverity>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct StepEvents {
     pub started: bool,
     /// Toy-ish bump (hazard or off-road): the run continues.
-    pub bumped: bool,
+    pub bump_direction: Option<f32>,
     pub time_up: bool,
     pub game_over: bool,
-    pub nitro_collected: bool,
+    /// Zero-based meter segment filled by this pickup.
+    pub nitro_collected_segment: Option<u8>,
     pub nitro_started: bool,
     pub high_rejected: bool,
-    pub downshifted: bool,
-    pub downshift_severity: Option<DownshiftSeverity>,
+    pub gear_changed: Option<GearChange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,7 +274,7 @@ impl Game {
             nitro_t: 0.0,
             nitro_cooldown: 0.0,
             next_nitro_distance: t.nitro_pickup_first_m,
-            next_nitro_lane: Self::nitro_lane(seed, 0),
+            next_nitro_lane: Self::nitro_lane(seed, 0, t),
             nitro_pickup_index: 0,
             gear: Gear::Low,
             recovery: Recovery::Normal,
@@ -324,16 +330,16 @@ impl Game {
         self.result.as_ref()
     }
 
-    fn nitro_lane(seed: u64, index: u32) -> f32 {
-        const LANES: [f32; 3] = [-0.62, 0.0, 0.62];
+    fn nitro_lane(seed: u64, index: u32, t: &Tuning) -> f32 {
+        let lanes = [-t.nitro_lane_offset, 0.0, t.nitro_lane_offset];
         let mixed = seed ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        LANES[((mixed ^ (mixed >> 32)) % LANES.len() as u64) as usize]
+        lanes[((mixed ^ (mixed >> 32)) % lanes.len() as u64) as usize]
     }
 
     fn advance_nitro_pickup(&mut self, t: &Tuning) {
         self.nitro_pickup_index += 1;
         self.next_nitro_distance += t.nitro_pickup_interval_m;
-        self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index);
+        self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index, t);
     }
 
     /// Lateral offset of the road row `ahead_m` meters ahead of the car.
@@ -347,7 +353,8 @@ impl Game {
     }
 
     pub fn slope_speed_factor(&self, tuning: &Tuning) -> f32 {
-        (1.0 - self.road_grade() * tuning.slope_speed_gain).clamp(0.90, 1.10)
+        (1.0 - self.road_grade() * tuning.slope_speed_gain)
+            .clamp(tuning.slope_speed_min_factor, tuning.slope_speed_max_factor)
     }
 
     pub fn step(&mut self, input: &InputState, dt: f32, t: &Tuning) -> StepEvents {
@@ -426,7 +433,7 @@ impl Game {
         self.nitro_cooldown = 0.0;
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
-        self.next_nitro_lane = Self::nitro_lane(self.seed, 0);
+        self.next_nitro_lane = Self::nitro_lane(self.seed, 0, t);
         self.result = None;
         self.gear = Gear::Low;
         self.recovery = Recovery::Normal;
@@ -461,6 +468,10 @@ impl Game {
                 if self.recovery == Recovery::ReadyForHigh {
                     self.recovery = Recovery::Normal;
                 }
+                ev.gear_changed = Some(GearChange {
+                    gear: Gear::High,
+                    downshift_severity: None,
+                });
             }
             Gear::Low => {
                 let severity = if self.speed <= t.downshift_safe_speed {
@@ -474,8 +485,10 @@ impl Game {
                 if self.recovery == Recovery::NeedLow {
                     self.recovery = Recovery::BuildSpeed;
                 }
-                ev.downshifted = true;
-                ev.downshift_severity = Some(severity);
+                ev.gear_changed = Some(GearChange {
+                    gear: Gear::Low,
+                    downshift_severity: Some(severity),
+                });
             }
         }
     }
@@ -583,7 +596,7 @@ impl Game {
             },
         };
         if bump_active && self.recovery != Recovery::NeedLow {
-            target *= 0.35;
+            target *= t.bump_target_speed_factor;
         }
         if nitro_active && self.recovery == Recovery::Normal {
             target *= t.nitro_speed_multiplier;
@@ -625,7 +638,9 @@ impl Game {
         let drift = 1.0 - (-dt * t.drift_rate * (self.speed / t.scroll_speed_low)).exp();
         self.road_x += (curve_target - self.road_x) * drift;
         self.road_x -= input.steer * t.steer_rate * dt;
-        self.road_x = self.road_x.clamp(-1.35, 1.35);
+        self.road_x = self
+            .road_x
+            .clamp(-t.max_lateral_offset, t.max_lateral_offset);
 
         // One deterministic pickup at a time. The absolute-distance schedule
         // keeps appearances occasional and guarantees more than four per
@@ -633,10 +648,10 @@ impl Game {
         while self.distance >= self.next_nitro_distance {
             let capacity_used = self.nitro_charges + u8::from(self.nitro_t > 0.0);
             let x_eff = self.next_nitro_lane + self.road_x;
-            let pickup_band = t.car_half_width + 0.20;
-            if x_eff.abs() < pickup_band && capacity_used < 3 {
+            let pickup_band = t.car_half_width + t.nitro_pickup_half_width;
+            if x_eff.abs() < pickup_band && capacity_used < t.nitro_capacity {
                 self.nitro_charges += 1;
-                ev.nitro_collected = true;
+                ev.nitro_collected_segment = self.nitro_charges.checked_sub(1);
             }
             self.advance_nitro_pickup(t);
         }
@@ -647,7 +662,7 @@ impl Game {
         if self.road_x.abs() > t.off_road_limit {
             self.off_road += dt;
         } else {
-            self.off_road = (self.off_road - 2.0 * dt).max(0.0);
+            self.off_road = (self.off_road - t.off_road_recovery_rate * dt).max(0.0);
         }
         *off_road_bump |= self.off_road > t.off_road_grace;
 
@@ -708,14 +723,15 @@ impl Game {
         self.bump_t = t.crash_flash_secs;
         self.bump_dir = d;
         self.off_road = 0.0;
-        self.road_x = (self.road_x + d * 0.38).clamp(-1.35, 1.35);
-        self.speed *= 0.45;
+        self.road_x = (self.road_x + d * t.bump_lateral_kick)
+            .clamp(-t.max_lateral_offset, t.max_lateral_offset);
+        self.speed *= t.bump_speed_retention;
         self.recovery = match self.gear {
             Gear::High => Recovery::NeedLow,
             Gear::Low => Recovery::BuildSpeed,
         };
-        self.flash = 0.35;
-        ev.bumped = true;
+        self.flash = t.bump_flash_intensity;
+        ev.bump_direction = Some(d);
     }
 }
 
@@ -922,7 +938,7 @@ mod tests {
             let mut bumped = false;
             for _ in 0..(10.0 / DT) as usize {
                 let ev = g.step(&idle(), DT, &t);
-                if ev.bumped {
+                if ev.bump_direction.is_some() {
                     assert!(g.flash > 0.0, "flash must be lit at the bump moment");
                     bumped = true;
                     break;
@@ -958,11 +974,14 @@ mod tests {
         let mut ev = StepEvents::default();
         for _ in 0..(6.0 / DT) as usize {
             ev = g.step(&right, DT, &t);
-            if ev.bumped {
+            if ev.bump_direction.is_some() {
                 break;
             }
         }
-        assert!(ev.bumped, "holding full steer must bump off the road");
+        assert!(
+            ev.bump_direction.is_some(),
+            "holding full steer must bump off the road"
+        );
         assert!(matches!(g.phase, Phase::Running), "no game-over on bumps");
     }
 
@@ -981,7 +1000,7 @@ mod tests {
         g.road_x = 1.2;
         let mut bumped = false;
         for _ in 0..120 {
-            if g.step(&idle(), DT, &t).bumped {
+            if g.step(&idle(), DT, &t).bump_direction.is_some() {
                 bumped = true;
                 break;
             }
@@ -1016,7 +1035,7 @@ mod tests {
         let mut bumped = false;
         for _ in 0..(6.0 / DT) as usize {
             let ev = g.step(&idle(), DT, &t);
-            if ev.bumped {
+            if ev.bump_direction.is_some() {
                 bumped = true;
                 break;
             }
@@ -1048,7 +1067,10 @@ mod tests {
         );
         for _ in 0..(6.0 / DT) as usize {
             let ev = g.step(&idle(), DT, &t);
-            assert!(!ev.bumped, "side-lane hazard with no steering must miss");
+            assert!(
+                ev.bump_direction.is_none(),
+                "side-lane hazard with no steering must miss"
+            );
         }
     }
 
@@ -1076,7 +1098,7 @@ mod tests {
             };
             let ev = g.step(&input, DT, &t);
             assert!(
-                !ev.bumped,
+                ev.bump_direction.is_none(),
                 "autopilot should hold the road (road_x {})",
                 g.road_x
             );
@@ -1338,14 +1360,17 @@ mod tests {
             g.next_nitro_distance = g.distance;
             g.road_x = -g.next_nitro_lane;
             let ev = g.step(&idle(), DT, &t);
-            assert!(ev.nitro_collected);
+            assert_eq!(ev.nitro_collected_segment, Some(expected - 1));
             assert_eq!(g.nitro_charges, expected);
         }
 
         g.next_nitro_distance = g.distance;
         g.road_x = -g.next_nitro_lane;
         let ev = g.step(&idle(), DT, &t);
-        assert!(!ev.nitro_collected, "a full meter cannot overfill");
+        assert!(
+            ev.nitro_collected_segment.is_none(),
+            "a full meter cannot overfill"
+        );
         assert_eq!(g.nitro_charges, 3);
     }
 
@@ -1369,7 +1394,7 @@ mod tests {
         // Deliberately move the road away from the pickup lane.
         g.road_x = 0.0;
         let ev = g.step(&idle(), DT, &t);
-        assert!(!ev.nitro_collected);
+        assert!(ev.nitro_collected_segment.is_none());
         assert_eq!(g.nitro_charges, 0);
         assert!((g.next_nitro_distance - (old_distance + t.nitro_pickup_interval_m)).abs() < 1e-3);
     }
@@ -1460,7 +1485,7 @@ mod tests {
         let mut collected = 0;
         for _ in 0..(100.0 / DT) as usize {
             g.road_x = -g.next_nitro_lane;
-            if g.step(&idle(), DT, &t).nitro_collected {
+            if g.step(&idle(), DT, &t).nitro_collected_segment.is_some() {
                 collected += 1;
                 // Keep capacity open so this test counts every appearance.
                 g.nitro_charges = 0;
@@ -1580,7 +1605,7 @@ mod tests {
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         let ev = g.step(&idle(), 0.1, &t);
-        assert!(ev.bumped);
+        assert!(ev.bump_direction.is_some());
         assert_eq!(g.cars_bumped, 1);
         assert_eq!(g.cars_passed, 1);
         assert_eq!(g.cars_bumped + g.cars_passed, 2);
@@ -1604,7 +1629,7 @@ mod tests {
         g.speed = t.scroll_speed_low;
         g.road_x = -1.15;
         let event = g.step(&idle(), 0.1, &t);
-        assert!(event.bumped);
+        assert!(event.bump_direction.is_some());
         assert_eq!(g.cars_bumped, 0);
         assert_eq!(g.cars_passed, 0);
         assert_eq!(g.recovery(), Recovery::BuildSpeed);
@@ -1651,7 +1676,7 @@ mod tests {
         g.road_x = 1.1;
         g.off_road = t.off_road_grace;
         let ev = g.step(&idle(), 0.1, &t);
-        assert!(ev.bumped);
+        assert!(ev.bump_direction.is_some());
         assert_eq!(g.cars_bumped, 1);
         assert!(
             g.bump_dir < 0.0,
@@ -1770,7 +1795,7 @@ mod tests {
             &t,
         );
         assert!(!same.high_rejected);
-        assert!(!same.downshifted);
+        assert!(same.gear_changed.is_none());
         assert_eq!(g.gear(), Gear::High);
     }
 
@@ -1788,8 +1813,13 @@ mod tests {
             0.000_001,
             &t,
         );
-        assert!(ev.downshifted);
-        assert_eq!(ev.downshift_severity, Some(DownshiftSeverity::Normal));
+        assert_eq!(
+            ev.gear_changed,
+            Some(GearChange {
+                gear: Gear::Low,
+                downshift_severity: Some(DownshiftSeverity::Normal),
+            })
+        );
         assert!((normal.speed - 12.0 * 0.94).abs() < 0.001);
 
         let (mut unsafe_shift, _) = game(62);
@@ -1804,7 +1834,13 @@ mod tests {
             0.000_001,
             &t,
         );
-        assert_eq!(ev.downshift_severity, Some(DownshiftSeverity::Unsafe));
+        assert_eq!(
+            ev.gear_changed,
+            Some(GearChange {
+                gear: Gear::Low,
+                downshift_severity: Some(DownshiftSeverity::Unsafe),
+            })
+        );
         assert!((unsafe_shift.speed - 18.0 * 0.82).abs() < 0.001);
         assert!(unsafe_shift.low_overrev(&t) > 0.0);
     }
@@ -1885,7 +1921,7 @@ mod tests {
         g.speed = 20.0;
         let mut bump_ev = StepEvents::default();
         g.bump(&mut bump_ev, &t, 1.0);
-        assert!(bump_ev.bumped);
+        assert!(bump_ev.bump_direction.is_some());
         assert_eq!(g.recovery(), Recovery::NeedLow);
         let after_bump = g.speed;
         g.step(&idle(), 0.5, &t);
@@ -1949,7 +1985,7 @@ mod tests {
 
         g.bump(&mut ev, &t, -1.0);
 
-        assert!(ev.bumped);
+        assert!(ev.bump_direction.is_some());
         assert!(g.speed * 3.6 < 60.0, "crash must fall below 60 km/h");
         assert_eq!(g.recovery(), Recovery::NeedLow);
     }

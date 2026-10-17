@@ -19,12 +19,12 @@ pub use environment::{
 };
 pub use game::{
     leaderboard_for, rank_leaderboard, score_for, Difficulty, DownshiftSeverity, EndReason, Game,
-    LeaderboardEntry, Phase, Recovery, SessionResult, StepEvents, LEADERBOARD_CAPACITY,
+    GearChange, LeaderboardEntry, Phase, Recovery, SessionResult, StepEvents, LEADERBOARD_CAPACITY,
     LEADERBOARD_CAPACITY_PER_DIFFICULTY,
 };
 pub use input::{gear_request, Gear, InputState, KeyboardSteering};
 pub use rng::Rng;
-pub use road::{Hazard, HazardKind, RoadLoop};
+pub use road::{Hazard, HazardKind, RoadLoop, TrafficMotion};
 pub use tuning::Tuning;
 
 /// Crate version stamp (used by the app's HUD and smoke tests).

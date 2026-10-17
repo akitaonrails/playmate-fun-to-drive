@@ -59,6 +59,12 @@ impl Default for ViewState {
 #[derive(Resource, Default)]
 pub struct ScreenMatHandle(pub Option<Handle<StandardMaterial>>);
 
+#[derive(Resource, Default)]
+pub struct ScreenPaintState {
+    screen: bool,
+    bezel: bool,
+}
+
 /// Whole-toy spring rig (M11/M12); logic lives in game-core::dynamics.
 #[derive(Resource, Default)]
 pub struct BodyRig(pub game_core::BodyDynamics);
@@ -124,11 +130,12 @@ pub fn setup(
     registry: Res<EmbeddedAssetRegistry>,
     assets: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
+    quality: Res<crate::RenderQuality>,
 ) {
     commands.init_resource::<ViewState>();
     let size = Extent3d {
-        width: GAME_W,
-        height: GAME_H,
+        width: quality.game_width,
+        height: quality.game_height,
         ..default()
     };
     let mut image = Image::new_fill(
@@ -151,7 +158,7 @@ pub fn setup(
     commands.insert_resource(ToyGltf(assets.load("embedded://models/toy.glb")));
 
     // sit in front of the toy; its front faces +Z in the exported glTF
-    commands.spawn((
+    let mut toy_camera = commands.spawn((
         Camera3d::default(),
         Camera {
             is_active: false,
@@ -159,7 +166,10 @@ pub fn setup(
         },
         Transform::from_xyz(0.0, 0.185, 0.275).looking_at(Vec3::new(0.0, 0.128, 0.02), Vec3::Y),
         bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
-        Bloom {
+        ToyCamera,
+    ));
+    if quality.bloom {
+        toy_camera.insert(Bloom {
             intensity: 0.035,
             // Keep white plastic below bloom: only the HDR screen emitter
             // should produce the soft old-backlight bleed.
@@ -168,9 +178,8 @@ pub fn setup(
                 threshold_softness: 0.12,
             },
             ..Bloom::OLD_SCHOOL
-        },
-        ToyCamera,
-    ));
+        });
+    }
 
     // Dim blue window/moon fill establishes a dorm room at night without
     // flattening the toy's deliberately simple plastic forms.
@@ -348,6 +357,7 @@ pub fn toggle_mode(
     mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
     mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
     mut hud_texts: Query<&mut Visibility, (With<crate::view::StatusText>, Without<ToyRoot>)>,
+    mut applied_mode: Local<Option<ViewMode>>,
 ) {
     if keys.just_pressed(KeyCode::KeyT) {
         state.mode = match state.mode {
@@ -355,6 +365,10 @@ pub fn toggle_mode(
             ViewMode::Toy => ViewMode::Game,
         };
     }
+    if *applied_mode == Some(state.mode) {
+        return;
+    }
+    *applied_mode = Some(state.mode);
     apply_mode(
         &mut state,
         &mut commands,
@@ -520,10 +534,14 @@ pub fn paint_screen(
     game_image: Res<GameImage>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut mat_handle: ResMut<ScreenMatHandle>,
+    mut paint_state: ResMut<ScreenPaintState>,
     screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
 ) {
+    if paint_state.screen && paint_state.bezel {
+        return;
+    }
     for (entity, name) in screens.iter() {
-        if name.as_str() == "ScreenFrame" {
+        if name.as_str() == "ScreenFrame" && !paint_state.bezel {
             // The original toy surrounds its display with molded near-black
             // plastic. Keep this separate from the emissive screen material.
             let bezel = materials.add(StandardMaterial {
@@ -536,7 +554,8 @@ pub fn paint_screen(
                 .entity(entity)
                 .insert(MeshMaterial3d(bezel))
                 .insert(ScreenPainted);
-        } else if name.as_str().starts_with("Screen") && mat_handle.0.is_none() {
+            paint_state.bezel = true;
+        } else if name.as_str().starts_with("Screen") && !paint_state.screen {
             let mat = materials.add(StandardMaterial {
                 base_color_texture: Some(game_image.0.clone()),
                 // the game image itself is the light source: backlit drum
@@ -551,6 +570,7 @@ pub fn paint_screen(
                 .entity(entity)
                 .insert(MeshMaterial3d(mat))
                 .insert(ScreenPainted);
+            paint_state.screen = true;
         }
     }
 }
@@ -562,6 +582,7 @@ pub fn update_screen_mat(
     mut view: ResMut<ViewState>,
     mat_handle: Res<ScreenMatHandle>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut applied_look: Local<Option<f32>>,
 ) {
     if keys.just_pressed(KeyCode::KeyL) {
         view.toy_look = match view.toy_look {
@@ -573,6 +594,10 @@ pub fn update_screen_mat(
     let Some(handle) = mat_handle.0.as_ref() else {
         return;
     };
+    if *applied_look == Some(view.toy_look) {
+        return;
+    }
+    *applied_look = Some(view.toy_look);
     if let Some(mut mat) = materials.get_mut(handle) {
         // rolling-tube approximation on the proven StandardMaterial path:
         // warm lamp tint + emissive backlit glow scale with the dial (band
@@ -692,9 +717,15 @@ pub fn turbo_lamp(
     time: Res<Time>,
     lamp: Res<TurboLamp>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut previous: Local<Option<(Gear, bool)>>,
 ) {
+    let nitro_active = crate::nitro_effects_active(&sim.0);
+    let state = (sim.0.gear(), nitro_active);
+    if !nitro_active && *previous == Some(state) {
+        return;
+    }
+    *previous = Some(state);
     if let Some(mut mat) = materials.get_mut(&lamp.0) {
-        let nitro_active = crate::nitro_effects_active(&sim.0);
         let on = matches!(sim.0.gear(), Gear::High) || nitro_active;
         mat.emissive = if on {
             if nitro_active {
