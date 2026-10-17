@@ -1,6 +1,11 @@
 # Changelog
 
+All notable changes. Format loosely based on Keep a Changelog; one entry per
+milestone (docs/PLAN.md).
+
 ## Unreleased
+
+## [0.2.0] — 2026-10-17
 
 - Removed the unused KTX2/zstd texture-decoding path from the web build and
   switched the toy camera to shader-only ACES tonemapping, eliminating the
@@ -31,10 +36,7 @@
   through the shared projection, and widened the player collision band to
   better match the visible car while retaining near-miss forgiveness.
 
-All notable changes. Format loosely based on Keep a Changelog; one entry per
-milestone (docs/PLAN.md).
-
-## [0.1.0-dev] — unreleased
+## Development history
 
 ### v0.3.0-dev3 — timed challenge and local leaderboard (2026-10-17)
 
