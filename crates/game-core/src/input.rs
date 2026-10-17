@@ -35,7 +35,7 @@ pub struct InputState {
     pub reset: bool,
     /// Edge-triggered: pause/resume toggle this tick.
     pub pause: bool,
-    /// Edge-triggered: spend one nitro charge this tick.
+    /// Edge-triggered: fire nitro when the three-cell meter is full.
     pub nitro: bool,
 }
 

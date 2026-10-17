@@ -540,7 +540,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                 ));
             }
             parent.spawn((
-                Text2d::new("<   ARROWS SELECT   >"),
+                Text2d::new("<   ARROWS / LEFT STICK   >"),
                 TextFont {
                     font_size: FontSize::Px(18.0),
                     ..default()
@@ -549,7 +549,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                 Transform::from_xyz(0.0, -112.0, 0.3),
             ));
             parent.spawn((
-                Text2d::new("ENTER / GAMEPAD SOUTH TO START"),
+                Text2d::new("ENTER / A / START TO BEGIN"),
                 TextFont {
                     font_size: FontSize::Px(16.0),
                     ..default()
@@ -878,11 +878,10 @@ pub fn setup(mut commands: Commands) {
         }
     }
 
-    // Three-cell nitro meter, rendered into the toy screen. During a boost,
-    // the active cell shrinks over five seconds; collection and a full meter
-    // get separate soft glow layers.
+    // Three-cell nitro meter, rendered into the toy screen. It must be filled
+    // completely before use; firing consumes all three cells at once.
     commands.spawn((
-        Sprite::from_color(Color::srgba(0.10, 0.86, 1.0, 0.0), Vec2::new(228.0, 42.0)),
+        Sprite::from_color(Color::srgba(1.0, 0.78, 0.12, 0.0), Vec2::new(228.0, 42.0)),
         Transform::from_xyz(330.0, NITRO_Y, 0.98),
         NitroMeterHalo,
     ));
@@ -897,12 +896,12 @@ pub fn setup(mut commands: Commands) {
             font_size: FontSize::Px(16.0),
             ..default()
         },
-        TextColor(Color::srgb(0.55, 0.95, 1.0)),
+        TextColor(Color::srgb(1.0, 0.86, 0.34)),
         Transform::from_xyz(258.0, NITRO_Y, 1.1),
     ));
     for i in 0..3u8 {
         commands.spawn((
-            Sprite::from_color(Color::srgba(0.45, 0.95, 1.0, 0.0), Vec2::new(52.0, 28.0)),
+            Sprite::from_color(Color::srgba(1.0, 0.84, 0.24, 0.0), Vec2::new(52.0, 28.0)),
             Transform::from_xyz(NITRO_X_LEFT + i as f32 * 40.0 + 17.0, NITRO_Y, 1.05),
             NitroSegmentHalo(i),
         ));
@@ -1679,7 +1678,6 @@ fn sync_flash(sim: Res<Sim>, mut q: Query<&mut Sprite, With<FlashOverlay>>) {
 #[allow(clippy::too_many_arguments)]
 fn sync_hud(
     sim: Res<Sim>,
-    tuning: Res<TuningRes>,
     audio: Res<crate::audio::AudioState>,
     view: Res<crate::toy_view::ViewState>,
     effects: Res<crate::VisualEffects>,
@@ -1743,7 +1741,6 @@ fn sync_hud(
         );
     }
     let active = crate::nitro_effects_active(&sim.0);
-    let active_frac = (sim.0.nitro_t / tuning.0.nitro_duration_secs).clamp(0.0, 1.0);
     let full_pulse = 0.5 + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU * 1.5).sin();
     if let Ok(mut halo) = meter_halo.single_mut() {
         let alpha = if sim.0.nitro_charges == 3 && !active {
@@ -1751,19 +1748,13 @@ fn sync_hud(
         } else {
             0.0
         };
-        halo.color = Color::srgba(0.10, 0.86, 1.0, alpha);
+        halo.color = Color::srgba(1.0, 0.78, 0.12, alpha);
     }
     let pickup_pulse = nitro_pickup_pulse(effects.nitro_pickup_glow);
     for (segment, mut tf, mut sp) in &mut nitro {
         let i = segment.0;
-        let frac = if i < sim.0.nitro_charges {
-            1.0
-        } else if active && i == sim.0.nitro_charges {
-            active_frac
-        } else {
-            0.0
-        };
-        let w = if frac > 0.0 { 34.0 * frac } else { 34.0 };
+        let filled = i < sim.0.nitro_charges;
+        let w = 34.0;
         tf.translation.x = NITRO_X_LEFT + i as f32 * 40.0 + w * 0.5;
         sp.custom_size = Some(Vec2::new(w, 14.0));
         tf.scale = if effects.nitro_segment == Some(i) {
@@ -1771,8 +1762,8 @@ fn sync_hud(
         } else {
             Vec3::ONE
         };
-        sp.color = if frac > 0.0 {
-            Color::srgb(0.10, 0.86 + 0.14 * pickup_pulse, 1.0)
+        sp.color = if filled {
+            Color::srgb(1.0, 0.72 + 0.20 * pickup_pulse, 0.10)
         } else {
             Color::srgb(0.10, 0.16, 0.20)
         };
@@ -1785,7 +1776,7 @@ fn sync_hud(
         } else {
             1.0
         });
-        sprite.color = Color::srgba(0.45, 0.95, 1.0, if selected { 0.65 * fade } else { 0.0 });
+        sprite.color = Color::srgba(1.0, 0.84, 0.24, if selected { 0.65 * fade } else { 0.0 });
     }
     if let Ok(mut text) = status.single_mut() {
         let next = if audio.muted {
@@ -1950,14 +1941,16 @@ fn rain_visibility(rain: f32, winter: f32) -> f32 {
 }
 
 fn road_visibility(daylight: f32, rain: f32) -> RoadVisibilityVisuals {
-    let night = 1.0 - daylight.clamp(0.0, 1.0);
+    let daylight = daylight.clamp(0.0, 1.0);
+    let night = 1.0 - daylight;
     let rain = rain.clamp(0.0, 1.0);
+    let night_headlights = ((0.55 - daylight) / 0.40).clamp(0.0, 1.0);
     RoadVisibilityVisuals {
         night,
         rain,
         shade_alpha: (night * 0.18 + rain * 0.08).min(0.26),
         fog_alpha: (night * 0.30 + rain * 0.38).min(0.58),
-        headlights: night.max(rain * 0.88),
+        headlights: night_headlights.max(rain * 0.88),
     }
 }
 
@@ -1972,8 +1965,8 @@ fn headlight_band_geometry(index: usize) -> (f32, Vec2, f32) {
     let t = index as f32 / (VISIBILITY_BANDS - 1) as f32;
     let band_h = 300.0 / VISIBILITY_BANDS as f32;
     let y = -205.0 + band_h * (index as f32 + 0.5);
-    let width = 410.0 + (72.0 - 410.0) * t;
-    (y, Vec2::new(width, band_h + 1.5), 1.0 - t * 0.58)
+    let width = 82.0 + (390.0 - 82.0) * t;
+    (y, Vec2::new(width, band_h + 1.5), 0.55 + t * 0.45)
 }
 
 fn traffic_visibility(scale: f32, visibility: RoadVisibilityVisuals) -> (f32, f32) {
@@ -2648,6 +2641,8 @@ mod tests {
         assert!(night.shade_alpha > day.shade_alpha);
         assert!(night.fog_alpha > day.fog_alpha);
         assert!(storm.fog_alpha > night.fog_alpha);
+        assert_eq!(day.headlights, 0.0);
+        assert_eq!(road_visibility(0.70, 0.0).headlights, 0.0);
         assert!(night.headlights > 0.9);
         assert!(storm.headlights > 0.8);
         assert!(night.shade_alpha < 0.3 && storm.fog_alpha < 0.6);
@@ -2664,11 +2659,11 @@ mod tests {
     }
 
     #[test]
-    fn headlight_cone_widens_toward_the_player() {
+    fn headlight_cone_starts_at_the_car_and_widens_ahead() {
         let (_, near, near_weight) = headlight_band_geometry(0);
         let (_, far, far_weight) = headlight_band_geometry(VISIBILITY_BANDS - 1);
-        assert!(near.x > far.x);
-        assert!(near_weight > far_weight);
+        assert!(near.x < far.x);
+        assert!(near_weight < far_weight);
     }
 
     #[test]

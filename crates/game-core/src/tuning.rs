@@ -39,9 +39,7 @@ pub struct Tuning {
     pub steer_rate: f32,
     /// |road_x| beyond this counts as off-road.
     pub off_road_limit: f32,
-    /// Seconds of grace off-road before crashing.
-    pub off_road_grace: f32,
-    /// Lateral simulation clamp and rate at which off-road grace recovers.
+    /// Lateral simulation clamp and rate at which off-road intensity recovers.
     pub max_lateral_offset: f32,
     pub off_road_recovery_rate: f32,
     /// Speed retained at maximum lateral excursion. Between the road edge
@@ -128,7 +126,6 @@ impl Default for Tuning {
             drift_rate: 0.75,
             steer_rate: 2.0,
             off_road_limit: 1.02,
-            off_road_grace: 0.45,
             max_lateral_offset: 1.35,
             off_road_recovery_rate: 2.0,
             off_road_min_speed_factor: 0.42,
@@ -248,9 +245,6 @@ impl Tuning {
         }
         if !(0.8..=1.3).contains(&self.off_road_limit) {
             return Err("off_road_limit out of [0.8, 1.3]");
-        }
-        if !(0.0..=2.0).contains(&self.off_road_grace) {
-            return Err("off_road_grace out of [0, 2]");
         }
         if !(self.off_road_limit..=2.0).contains(&self.max_lateral_offset) {
             return Err("max_lateral_offset must exceed the road limit");

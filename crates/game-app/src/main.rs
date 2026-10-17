@@ -107,12 +107,14 @@ struct FrameInput {
     gear_latch: GearRequestLatch,
     low_bumper_down: bool,
     high_bumper_down: bool,
+    menu_axis: MenuAxisLatch,
 }
 
 #[derive(Resource, Debug, Clone, Copy)]
 struct ControlTuning {
     bumper_press_threshold: f32,
     gear_request_buffer_secs: f32,
+    menu_axis_threshold: f32,
 }
 
 impl Default for ControlTuning {
@@ -120,6 +122,7 @@ impl Default for ControlTuning {
         Self {
             bumper_press_threshold: 0.28,
             gear_request_buffer_secs: 0.15,
+            menu_axis_threshold: 0.55,
         }
     }
 }
@@ -132,6 +135,9 @@ impl ControlTuning {
         if !(0.05..=0.30).contains(&self.gear_request_buffer_secs) {
             return Err("gear request buffer out of [0.05, 0.30]");
         }
+        if !(0.20..=0.90).contains(&self.menu_axis_threshold) {
+            return Err("menu axis threshold out of [0.20, 0.90]");
+        }
         Ok(())
     }
 }
@@ -140,6 +146,26 @@ impl ControlTuning {
 struct GearRequestLatch {
     request: Option<game_core::Gear>,
     remaining: f32,
+}
+
+#[derive(Debug, Default)]
+struct MenuAxisLatch {
+    direction: i8,
+}
+
+impl MenuAxisLatch {
+    fn update(&mut self, axis: f32, threshold: f32) -> (bool, bool) {
+        let direction = if axis <= -threshold {
+            -1
+        } else if axis >= threshold {
+            1
+        } else {
+            0
+        };
+        let pressed = direction != 0 && direction != self.direction;
+        self.direction = direction;
+        (pressed && direction < 0, pressed && direction > 0)
+    }
 }
 
 impl GearRequestLatch {
@@ -416,6 +442,7 @@ fn handle_end_input(
     pads: Query<&Gamepad>,
     mut sim: ResMut<Sim>,
     tuning: Res<TuningRes>,
+    controls: Res<ControlTuning>,
     config: Res<RunConfig>,
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
@@ -426,11 +453,21 @@ fn handle_end_input(
         EndMode::Playing => {}
         EndMode::DifficultySelect => {
             let previous_index = end.0.difficulty_index;
+            let menu_axis = pads
+                .iter()
+                .filter_map(|pad| pad.get(GamepadAxis::LeftStickX))
+                .max_by(|left, right| left.abs().total_cmp(&right.abs()))
+                .unwrap_or_default();
+            let (stick_left, stick_right) = frame
+                .menu_axis
+                .update(menu_axis, controls.menu_axis_threshold);
             let left = keys.just_pressed(KeyCode::ArrowLeft)
+                || stick_left
                 || pads
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::DPadLeft));
             let right = keys.just_pressed(KeyCode::ArrowRight)
+                || stick_right
                 || pads
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::DPadRight));
@@ -439,9 +476,9 @@ fn handle_end_input(
                 audio_events.emit(audio::AudioCue::MenuMove);
             }
             let confirm = keys.just_pressed(KeyCode::Enter)
-                || pads
-                    .iter()
-                    .any(|pad| pad.just_pressed(GamepadButton::South));
+                || pads.iter().any(|pad| {
+                    pad.just_pressed(GamepadButton::South) || pad.just_pressed(GamepadButton::Start)
+                });
             if confirm {
                 audio_events.emit(audio::AudioCue::MenuConfirm);
                 audio_events.emit(audio::AudioCue::RunStart);
@@ -468,6 +505,7 @@ fn handle_end_input(
                 end.0.mode = EndMode::Playing;
                 frame.state = InputState::default();
                 frame.kb = KeyboardSteering::default();
+                frame.menu_axis = MenuAxisLatch::default();
                 frame.suppress_gameplay_once = true;
             }
         }
@@ -670,6 +708,16 @@ mod tests {
     }
 
     #[test]
+    fn menu_stick_moves_once_until_released_or_reversed() {
+        let mut latch = MenuAxisLatch::default();
+        assert_eq!(latch.update(0.8, 0.55), (false, true));
+        assert_eq!(latch.update(0.9, 0.55), (false, false));
+        assert_eq!(latch.update(0.0, 0.55), (false, false));
+        assert_eq!(latch.update(-0.8, 0.55), (true, false));
+        assert_eq!(latch.update(0.8, 0.55), (false, true));
+    }
+
+    #[test]
     fn quick_shift_request_stays_latched_until_fixed_step_consumes_it() {
         let tuning = ControlTuning::default();
         assert!(tuning.validate().is_ok());
@@ -702,6 +750,12 @@ mod tests {
         .is_err());
         assert!(ControlTuning {
             gear_request_buffer_secs: f32::NAN,
+            ..ControlTuning::default()
+        }
+        .validate()
+        .is_err());
+        assert!(ControlTuning {
+            menu_axis_threshold: 0.0,
             ..ControlTuning::default()
         }
         .validate()

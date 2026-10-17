@@ -3,8 +3,8 @@
 //! Model mirrors the toy (research/toy-mechanics.md): the car is a FIXED
 //! decal at screen center-bottom; the printed drum (road loop) scrolls and
 //! shifts laterally under it. Steering moves the ROAD; hazards ride the road;
-//! bump = an oncoming hazard under the car or the road slipping out from
-//! under it (off-road). Bumps slow the toy but do not end the timed session.
+//! bump = an oncoming car or roadside hazard under the player marker. Bumps
+//! slow the toy but do not end the timed session; leaving the road adds drag.
 
 use crate::environment::{WeatherSchedule, WeatherTransition, DAY_SECS};
 use crate::input::{Gear, InputState};
@@ -205,14 +205,14 @@ pub struct Game {
     pub cars_bumped: u64,
     /// Crash flash intensity in [0, 1] while > 0.
     pub flash: f32,
-    /// Seconds accumulated off the road (bumps after grace).
+    /// Seconds accumulated off the road, used for presentation/audio intensity.
     pub off_road: f32,
     /// True while the run is paused (Start button / P).
     pub paused: bool,
     /// Bump slow-down timer + kick direction.
     pub bump_t: f32,
     pub bump_dir: f32,
-    /// Stored pickups (the active charge, if any, lives in `nitro_t`).
+    /// Filled cells in the three-cell nitro meter. A boost consumes all cells.
     pub nitro_charges: u8,
     /// Seconds remaining in the active boost.
     pub nitro_t: f32,
@@ -549,9 +549,9 @@ impl Game {
             && self.recovery == Recovery::Normal
             && self.nitro_t <= 0.0
             && self.nitro_cooldown <= 0.0
-            && self.nitro_charges > 0
+            && self.nitro_charges == t.nitro_capacity
         {
-            self.nitro_charges -= 1;
+            self.nitro_charges = 0;
             self.nitro_t = t.nitro_duration_secs;
             ev.nitro_started = true;
         }
@@ -562,7 +562,6 @@ impl Game {
         let mut remaining = dt;
         let mut obstacle_collision = false;
         let mut obstacle_bump_dir = 1.0;
-        let mut off_road_bump = false;
         while remaining > 0.0 {
             let nitro_active = self.nitro_t > 0.0;
             let bump_active = self.bump_t > 0.0;
@@ -583,7 +582,6 @@ impl Game {
                 bump_active,
                 &mut obstacle_collision,
                 &mut obstacle_bump_dir,
-                &mut off_road_bump,
             );
 
             if nitro_active {
@@ -605,12 +603,9 @@ impl Game {
         }
 
         // Preserve the outer fixed-step contract: all encounters are counted,
-        // but collectively cause at most one impulse, with an obstacle taking
-        // precedence over the generic off-road timer at the same instant.
+        // but collectively cause at most one physical obstacle impulse.
         if obstacle_collision {
             self.bump(ev, t, obstacle_bump_dir);
-        } else if off_road_bump {
-            self.bump(ev, t, self.road_x.signum());
         }
 
         self.session_remaining = (self.session_remaining - dt).max(0.0);
@@ -630,7 +625,6 @@ impl Game {
         bump_active: bool,
         obstacle_collision: &mut bool,
         obstacle_bump_dir: &mut f32,
-        off_road_bump: &mut bool,
     ) {
         let mut target = match self.recovery {
             Recovery::NeedLow => self.recovery_bog_speed(t),
@@ -690,25 +684,22 @@ impl Game {
         // keeps appearances occasional and guarantees more than four per
         // 100-second light cycle at LOW speed.
         while self.distance >= self.next_nitro_distance {
-            let capacity_used = self.nitro_charges + u8::from(self.nitro_t > 0.0);
             let x_eff = self.next_nitro_lane + self.road_x;
             let pickup_band = t.car_half_width + t.nitro_pickup_half_width;
-            if x_eff.abs() < pickup_band && capacity_used < t.nitro_capacity {
+            if x_eff.abs() < pickup_band && self.nitro_charges < t.nitro_capacity {
                 self.nitro_charges += 1;
                 ev.nitro_collected_segment = self.nitro_charges.checked_sub(1);
             }
             self.advance_nitro_pickup(t);
         }
 
-        // Accumulate off-road time, but defer its impulse until after all
-        // traffic crossings have been classified. A car collision wins when
-        // both conditions occur in the same tick.
+        // Leaving the road progressively lowers target speed. This timer only
+        // drives presentation/audio; road edges never create a crash impulse.
         if self.road_x.abs() > t.off_road_limit {
             self.off_road += dt;
         } else {
             self.off_road = (self.off_road - t.off_road_recovery_rate * dt).max(0.0);
         }
-        *off_road_bump |= self.off_road > t.off_road_grace;
 
         // Fixed-step traffic contract: account every oncoming crossing in
         // (previous_distance, distance], including repeated-loop encounters.
@@ -998,91 +989,20 @@ mod tests {
     }
 
     #[test]
-    fn off_road_no_steering_eventually_crashes() {
-        // find a seed whose loop pushes the road past the limit early
-        for seed in 1..40u64 {
-            let (mut g, t) = game(seed);
-            g.step(
-                &InputState {
-                    steer: 0.001,
-                    ..Default::default()
-                },
-                DT,
-                &t,
-            );
-            let mut bumped = false;
-            for _ in 0..(10.0 / DT) as usize {
-                let ev = g.step(&idle(), DT, &t);
-                if ev.bump_direction.is_some() {
-                    assert!(g.flash > 0.0, "flash must be lit at the bump moment");
-                    bumped = true;
-                    break;
-                }
-            }
-            if bumped {
-                // toy-ish bump: run continues, drum keeps rolling
-                let d0 = g.distance;
-                run_seconds(&mut g, 2.0, &idle(), &t);
-                assert!(matches!(g.phase, Phase::Running));
-                assert!(g.distance > d0, "drum keeps rolling after a bump");
-                return;
-            }
-        }
-        panic!("no seed produced an off-road bump within 10s; drift model too weak?");
-    }
-
-    #[test]
-    fn sustained_bad_steering_crashes_quickly() {
-        let (mut g, t) = game(5);
-        g.step(
-            &InputState {
-                steer: 1.0,
-                ..Default::default()
-            },
-            DT,
-            &t,
-        );
-        let right = InputState {
-            steer: 1.0,
-            ..Default::default()
-        };
-        let mut ev = StepEvents::default();
-        for _ in 0..(6.0 / DT) as usize {
-            ev = g.step(&right, DT, &t);
-            if ev.bump_direction.is_some() {
-                break;
-            }
-        }
-        assert!(
-            ev.bump_direction.is_some(),
-            "holding full steer must bump off the road"
-        );
-        assert!(matches!(g.phase, Phase::Running), "no game-over on bumps");
-    }
-
-    #[test]
-    fn bump_resets_off_road_grace_so_recovery_is_possible() {
+    fn sustained_off_road_driving_slows_without_crashing() {
         let t = Tuning::default();
         let mut g = Game::with_road(40, RoadLoop::straight(500.0, vec![]), Difficulty::Hard, &t);
-        g.step(
-            &InputState {
-                steer: 0.001,
-                ..Default::default()
-            },
-            DT,
-            &t,
-        );
-        g.road_x = 1.2;
-        let mut bumped = false;
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
         for _ in 0..120 {
-            if g.step(&idle(), DT, &t).bump_direction.is_some() {
-                bumped = true;
-                break;
-            }
+            g.road_x = t.max_lateral_offset;
+            let event = g.step(&idle(), DT, &t);
+            assert!(event.bump_direction.is_none());
+            assert_eq!(g.flash, 0.0);
+            assert_eq!(g.bump_t, 0.0);
         }
-        assert!(bumped);
-        assert_eq!(g.off_road, 0.0);
-        assert!(g.bump_t > 0.0);
+        assert!(g.speed < t.scroll_speed_low * 0.7);
+        assert_eq!(g.recovery(), Recovery::Normal);
     }
 
     #[test]
@@ -1475,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn nitro_spends_one_charge_boosts_and_expires_in_five_seconds() {
+    fn nitro_requires_full_meter_consumes_all_cells_and_expires() {
         let t = Tuning::default();
         let road = RoadLoop::straight(2000.0, vec![]);
         let mut boosted = Game::with_road(33, road.clone(), Difficulty::Hard, &t);
@@ -1492,6 +1412,17 @@ mod tests {
             run_seconds(g, 2.0, &idle(), &t);
         }
         boosted.nitro_charges = 2;
+        let early = boosted.step(
+            &InputState {
+                nitro: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(!early.nitro_started);
+        assert_eq!(boosted.nitro_charges, 2);
+        boosted.nitro_charges = t.nitro_capacity;
         let ev = boosted.step(
             &InputState {
                 nitro: true,
@@ -1501,7 +1432,7 @@ mod tests {
             &t,
         );
         assert!(ev.nitro_started);
-        assert_eq!(boosted.nitro_charges, 1);
+        assert_eq!(boosted.nitro_charges, 0);
         assert!(boosted.nitro_active());
 
         run_seconds(&mut boosted, 1.0, &idle(), &t);
@@ -1733,7 +1664,7 @@ mod tests {
     }
 
     #[test]
-    fn car_collision_takes_precedence_over_simultaneous_off_road_bump() {
+    fn car_collision_still_crashes_while_player_is_off_road() {
         let t = Tuning::default();
         let hazard = Hazard {
             kind: HazardKind::Oncoming,
@@ -1749,7 +1680,6 @@ mod tests {
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
         g.road_x = 1.1;
-        g.off_road = t.off_road_grace;
         let ev = g.step(&idle(), 0.1, &t);
         assert!(ev.bump_direction.is_some());
         assert_eq!(g.cars_bumped, 1);
@@ -1809,10 +1739,7 @@ mod tests {
 
     #[test]
     fn off_road_speed_eases_down_and_recovers_after_returning_to_road() {
-        let t = Tuning {
-            off_road_grace: 2.0,
-            ..Default::default()
-        };
+        let t = Tuning::default();
         let mut g = Game::with_road(
             56,
             RoadLoop::straight(10_000.0, vec![]),
@@ -2001,7 +1928,7 @@ mod tests {
         let after_bump = g.speed;
         g.step(&idle(), 0.5, &t);
         assert!(g.speed < after_bump, "HIGH must bog until LOW is selected");
-        g.nitro_charges = 1;
+        g.nitro_charges = t.nitro_capacity;
         let charge = g.nitro_charges;
         g.step(
             &InputState {
@@ -2087,7 +2014,7 @@ mod tests {
             &t,
         );
         g.start_run(&t);
-        g.nitro_charges = 2;
+        g.nitro_charges = t.nitro_capacity;
         let started = g.step(
             &InputState {
                 nitro: true,
@@ -2097,7 +2024,7 @@ mod tests {
             &t,
         );
         assert!(started.nitro_started);
-        assert_eq!(g.nitro_charges, 1);
+        assert_eq!(g.nitro_charges, 0);
         g.step(&idle(), t.nitro_duration_secs - 0.1, &t);
         assert_eq!(g.nitro_t, 0.0);
         assert_eq!(g.nitro_cooldown, t.nitro_cooldown_secs);
@@ -2110,7 +2037,7 @@ mod tests {
             &t,
         );
         assert!(!ignored.nitro_started);
-        assert_eq!(g.nitro_charges, 1);
+        assert_eq!(g.nitro_charges, 0);
 
         g.step(
             &InputState {
@@ -2133,7 +2060,7 @@ mod tests {
         );
         g.step(&idle(), frozen, &t);
         assert_eq!(g.nitro_cooldown, 0.0);
-        let charges_before_restart = g.nitro_charges;
+        g.nitro_charges = t.nitro_capacity;
         let restarted = g.step(
             &InputState {
                 nitro: true,
@@ -2143,7 +2070,7 @@ mod tests {
             &t,
         );
         assert!(restarted.nitro_started);
-        assert_eq!(g.nitro_charges, charges_before_restart - 1);
+        assert_eq!(g.nitro_charges, 0);
 
         g.nitro_t = 0.0;
         g.nitro_cooldown = 1.0;
@@ -2175,7 +2102,7 @@ mod tests {
         );
         g.start_run(&t);
         g.speed = t.scroll_speed_low;
-        g.nitro_charges = 1;
+        g.nitro_charges = t.nitro_capacity;
 
         let ev = g.step(
             &InputState {
@@ -2214,7 +2141,7 @@ mod tests {
         for game in [&mut coarse, &mut split] {
             game.start_run(&t);
             game.speed = t.scroll_speed_low;
-            game.nitro_charges = 1;
+            game.nitro_charges = t.nitro_capacity;
         }
         let activate = InputState {
             nitro: true,
