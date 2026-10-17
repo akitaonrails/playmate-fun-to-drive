@@ -44,9 +44,9 @@ impl Default for ViewState {
             toy_look: 0.5,
             wheel_angle: 0.0,
             wheel_vel: 0.0,
-            lever_angle: 0.0,
+            lever_angle: 0.30,
             lever_vel: 0.0,
-            lever_target: -0.30,
+            lever_target: 0.30,
             key_angle: 0.0,
             key_vel: 0.0,
         }
@@ -237,13 +237,19 @@ pub fn setup_diorama(
         perceptual_roughness: 0.9,
         ..default()
     });
+    let headlight = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.88, 0.48),
+        emissive: LinearRgba::new(0.9, 0.55, 0.12, 1.0),
+        perceptual_roughness: 0.3,
+        ..default()
+    });
     commands
         .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
         .with_children(|parent| {
             parent
                 .spawn((
                     Transform::from_xyz(0.048, 0.0815, 0.050)
-                        .with_rotation(Quat::from_rotation_y(-10.0_f32.to_radians())),
+                        .with_rotation(Quat::from_rotation_y(100.0_f32.to_radians())),
                     Visibility::Visible,
                     SportsCarOrnament,
                 ))
@@ -282,6 +288,11 @@ pub fn setup_diorama(
                             Mesh3d(meshes.add(Cuboid::new(0.006, 0.0025, 0.0015))),
                             MeshMaterial3d(lamp.clone()),
                             Transform::from_xyz(x, 0.0065, 0.0215),
+                        ));
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.006, 0.0025, 0.0015))),
+                            MeshMaterial3d(headlight.clone()),
+                            Transform::from_xyz(x, 0.0065, -0.0215),
                         ));
                     }
                 });
@@ -382,8 +393,8 @@ fn apply_mode(
 /// snaps LOW↔HIGH with a springy overshoot.
 fn lever_target_for(gear: Gear) -> f32 {
     match gear {
-        Gear::Low => -0.30,
-        Gear::High => 0.30,
+        Gear::Low => 0.30,
+        Gear::High => -0.30,
     }
 }
 
@@ -724,7 +735,8 @@ mod tests {
 
     #[test]
     fn lever_target_is_authoritative_for_each_core_gear() {
-        assert_eq!(lever_target_for(Gear::Low), -0.30);
-        assert_eq!(lever_target_for(Gear::High), 0.30);
+        assert_eq!(lever_target_for(Gear::Low), 0.30);
+        assert_eq!(lever_target_for(Gear::High), -0.30);
+        assert!(lever_target_for(Gear::Low) > lever_target_for(Gear::High));
     }
 }

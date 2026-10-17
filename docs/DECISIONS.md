@@ -132,7 +132,12 @@ the confirmation frame. Q/E and LB/RB select
 LOW/HIGH; gamepad South is reserved for menu confirmation. Storage v2 keeps
 three strict boards; when v2 is absent, a valid v1 payload is immediately
 rewritten to v2 with its rows assigned to Hard. Corrupt v1 data is never
-written back.
+written back. Acceleration remains automatic; analog LT braking eases the
+speed target toward zero over a longer time constant. Falling below the normal
+10 m/s upshift threshold while braking in HIGH enters `NeedLow`; crashes in
+HIGH always enter the same recovery and drop even maximum speed below the
+60 km/h dial midpoint. Acceleration stays bogged until LOW is selected and the
+normal recovery sequence is completed.
 
 **Consequences**: ignored/idempotent shift and nitro requests spend nothing;
 pause and terminal states freeze cooldown. Leaderboards keep and rank ten

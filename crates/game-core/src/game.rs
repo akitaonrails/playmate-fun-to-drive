@@ -581,17 +581,30 @@ impl Game {
             target *= t.nitro_speed_multiplier;
         }
         target *= off_road_speed_factor(self.road_x, t);
+        let brake = input.brake.clamp(0.0, 1.0);
+        target *= 1.0 - brake;
         let initial_speed = self.speed;
-        let decay = (-dt / t.gear_ramp_secs).exp();
+        let ramp_secs = if brake > 0.0 {
+            t.brake_ramp_secs
+        } else {
+            t.gear_ramp_secs
+        };
+        let decay = (-dt / ramp_secs).exp();
         self.speed = target + (initial_speed - target) * decay;
+        if brake > 0.0
+            && self.gear == Gear::High
+            && self.recovery == Recovery::Normal
+            && self.speed < t.shift_up_min_speed
+        {
+            self.recovery = Recovery::NeedLow;
+        }
         self.update_recovery_readiness(t);
 
         let previous_distance = self.distance;
         // Exact integral of the exponential speed ramp for a constant target.
         // This makes distance identical whether an interval is stepped whole
         // or partitioned by callers.
-        let distance_delta =
-            target * dt + (initial_speed - target) * t.gear_ramp_secs * (1.0 - decay);
+        let distance_delta = target * dt + (initial_speed - target) * ramp_secs * (1.0 - decay);
         self.distance += distance_delta;
         self.environment_time += distance_delta / t.scroll_speed_low;
         self.day_cycles = (self.environment_time / DAY_SECS).floor().max(0.0) as u64;
@@ -1722,6 +1735,74 @@ mod tests {
     }
 
     #[test]
+    fn analog_brake_slows_gradually_and_release_restores_auto_acceleration() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(
+            63,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+        g.speed = t.scroll_speed_low;
+
+        run_seconds(
+            &mut g,
+            1.0,
+            &InputState {
+                brake: 0.5,
+                ..idle()
+            },
+            &t,
+        );
+        let braked = g.speed;
+        assert!(braked > 6.0 && braked < t.scroll_speed_low);
+
+        run_seconds(&mut g, 1.0, &idle(), &t);
+        assert!(g.speed > braked, "releasing LT must resume acceleration");
+        assert_eq!(g.recovery(), Recovery::Normal);
+    }
+
+    #[test]
+    fn braking_too_slow_in_high_requires_low_gear_recovery() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(
+            64,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+        g.gear = Gear::High;
+        g.speed = t.scroll_speed_high;
+
+        run_seconds(
+            &mut g,
+            2.0,
+            &InputState {
+                brake: 1.0,
+                ..idle()
+            },
+            &t,
+        );
+        assert_eq!(g.gear(), Gear::High);
+        assert_eq!(g.recovery(), Recovery::NeedLow);
+
+        run_seconds(&mut g, 1.0, &idle(), &t);
+        assert!(g.speed <= t.recovery_bog_speed * 1.05);
+        g.step(
+            &InputState {
+                gear_request: Some(Gear::Low),
+                ..idle()
+            },
+            DT,
+            &t,
+        );
+        assert_eq!(g.gear(), Gear::Low);
+        assert_eq!(g.recovery(), Recovery::BuildSpeed);
+    }
+
+    #[test]
     fn bump_recovery_requires_low_then_speed_then_high() {
         let (mut g, t) = game(63);
         g.start_run(&t);
@@ -1780,6 +1861,21 @@ mod tests {
 
         g.bump(&mut StepEvents::default(), &t, -1.0);
         g.bump(&mut StepEvents::default(), &t, 1.0);
+        assert_eq!(g.recovery(), Recovery::NeedLow);
+    }
+
+    #[test]
+    fn maximum_speed_crash_drops_below_dial_midpoint_and_requires_low() {
+        let (mut g, t) = game(65);
+        g.start_run(&t);
+        g.gear = Gear::High;
+        g.speed = t.scroll_speed_high;
+        let mut ev = StepEvents::default();
+
+        g.bump(&mut ev, &t, -1.0);
+
+        assert!(ev.bumped);
+        assert!(g.speed * 3.6 < 60.0, "crash must fall below 60 km/h");
         assert_eq!(g.recovery(), Recovery::NeedLow);
     }
 

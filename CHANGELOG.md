@@ -10,6 +10,11 @@
 - Replaced the shelf turbo dot with a low-poly 1980s wedge-car ornament whose
   rear lights retain HIGH/nitro feedback; the physical lever now follows only
   accepted core gear state and driving presentation includes downshift jolts.
+- Corrected the speedometer to sweep left-to-right, reversed the physical
+  lever so LOW rests down and HIGH moves up, and rotated the wedge-car ornament
+  100 degrees to expose its front quarter.
+- Added analog LT braking while preserving automatic acceleration; braking
+  below the HIGH-gear stall threshold requires a LOW-gear recovery.
 
 All notable changes. Format loosely based on Keep a Changelog; one entry per
 milestone (docs/PLAN.md).

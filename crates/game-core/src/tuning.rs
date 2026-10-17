@@ -18,6 +18,8 @@ pub struct Tuning {
     pub low_overrev_start: f32,
     /// Time constant of the speed ramp between gears (seconds).
     pub gear_ramp_secs: f32,
+    /// Time constant while braking; larger than the gear ramp for a gradual stop.
+    pub brake_ramp_secs: f32,
     /// How strongly the printed curve pulls the road aside at the car row.
     pub curve_gain: f32,
     /// Rate at which road_x chases the curve target (per second at LOW speed).
@@ -88,6 +90,7 @@ impl Default for Tuning {
             downshift_unsafe_retention: 0.82,
             low_overrev_start: 11.0,
             gear_ramp_secs: 0.6,
+            brake_ramp_secs: 1.2,
             curve_gain: 1.05,
             drift_rate: 0.75,
             steer_rate: 2.0,
@@ -156,6 +159,9 @@ impl Tuning {
         }
         if !(0.1..=2.0).contains(&self.gear_ramp_secs) {
             return Err("gear_ramp_secs out of [0.1, 2.0]");
+        }
+        if !(self.gear_ramp_secs..=3.0).contains(&self.brake_ramp_secs) {
+            return Err("brake_ramp_secs must be gradual and at most 3 seconds");
         }
         if !(0.0..=2.0).contains(&self.curve_gain) {
             return Err("curve_gain out of [0, 2]");

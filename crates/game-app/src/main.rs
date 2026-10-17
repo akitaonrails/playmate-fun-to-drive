@@ -176,6 +176,7 @@ fn gather_input(
 ) {
     if end.0.mode != EndMode::Playing {
         frame.state.steer = 0.0;
+        frame.state.brake = 0.0;
         frame.state.gear_request = None;
         frame.state.pause = false;
         frame.state.nitro = false;
@@ -196,6 +197,7 @@ fn gather_input(
 
     let mut low_requested = keys.just_pressed(KeyCode::KeyQ);
     let mut high_requested = keys.just_pressed(KeyCode::KeyE);
+    let mut brake = 0.0_f32;
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
         let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
@@ -209,6 +211,14 @@ fn gather_input(
         }
         if pad.just_pressed(GamepadButton::RightTrigger) {
             high_requested = true;
+            frame.pad_seen = true;
+        }
+        let pad_brake = pad
+            .get(GamepadButton::LeftTrigger2)
+            .unwrap_or_default()
+            .clamp(0.0, 1.0);
+        brake = brake.max(pad_brake);
+        if pad_brake > 0.02 {
             frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::Start) {
@@ -226,6 +236,7 @@ fn gather_input(
     }
 
     frame.state.steer = steer.clamp(-1.0, 1.0);
+    frame.state.brake = brake;
     frame.state.gear_request = game_core::gear_request(low_requested, high_requested);
     if keys.just_pressed(KeyCode::KeyR) {
         frame.state.reset = true;
@@ -478,7 +489,7 @@ fn publish_state(
     let leaderboard_json = session::entries_json(&leaderboard.entries, sim.0.difficulty(), 10);
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"difficulty\":\"{}\",\"difficulty_index\":{},\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"speed_kmh\":{:.3},\"speedometer_angle\":{:.5},\"overrev\":{:.3},\"recovery\":\"{}\",\"action_cue\":\"{}\",\"nitro_cooldown\":{:.3},\"cooldown_gauge\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"lever_target\":{:.4},\"lever_angle\":{:.4},\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"end_mode\":\"{}\",\"difficulty\":\"{}\",\"difficulty_index\":{},\"initials\":\"{}\",\"leaderboard\":{},\"leaderboard_persistent\":{},\"qa_mode\":{},\"session_duration\":{:.3},\"score\":{},\"speed\":{:.3},\"speed_kmh\":{:.3},\"speedometer_angle\":{:.5},\"overrev\":{:.3},\"recovery\":\"{}\",\"action_cue\":\"{}\",\"nitro_cooldown\":{:.3},\"cooldown_gauge\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_from\":\"{}\",\"weather_to\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"lever_target\":{:.4},\"lever_angle\":{:.4},\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"brake\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -538,6 +549,7 @@ fn publish_state(
         view.toy_look,
         sim.0.paused,
         frame.state.steer,
+        frame.state.brake,
         sim.0.road_x,
         sim.0.off_road,
         rig.0.roll,

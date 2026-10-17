@@ -296,7 +296,7 @@ const SPEED_CENTER: Vec2 = Vec2::new(365.0, -198.0);
 const SPEED_RADIUS: f32 = 82.0;
 
 fn speedometer_angle(kmh: f32) -> f32 {
-    (-135.0_f32.to_radians()) + (kmh.clamp(0.0, 120.0) / 120.0) * 270.0_f32.to_radians()
+    225.0_f32.to_radians() - (kmh.clamp(0.0, 120.0) / 120.0) * 270.0_f32.to_radians()
 }
 
 fn speedometer_danger(kmh: f32, nitro_active: bool) -> bool {
@@ -2187,9 +2187,10 @@ mod tests {
 
     #[test]
     fn speedometer_maps_true_kmh_across_full_sweep() {
-        assert!((speedometer_angle(0.0) + 135.0_f32.to_radians()).abs() < 1e-5);
-        assert!(speedometer_angle(60.0).abs() < 1e-5);
-        assert!((speedometer_angle(120.0) - 135.0_f32.to_radians()).abs() < 1e-5);
+        assert!((speedometer_angle(0.0) - 225.0_f32.to_radians()).abs() < 1e-5);
+        assert!((speedometer_angle(60.0) - 90.0_f32.to_radians()).abs() < 1e-5);
+        assert!((speedometer_angle(120.0) + 45.0_f32.to_radians()).abs() < 1e-5);
+        assert!(speedometer_angle(0.0) > speedometer_angle(120.0));
     }
 
     #[test]

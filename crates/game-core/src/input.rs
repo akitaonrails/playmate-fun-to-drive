@@ -27,6 +27,8 @@ pub fn gear_request(low: bool, high: bool) -> Option<Gear> {
 pub struct InputState {
     /// Steering in [-1, 1]; negative = left, positive = right.
     pub steer: f32,
+    /// Analog brake pressure in [0, 1]. Acceleration remains automatic when released.
+    pub brake: f32,
     /// Edge-triggered, explicit selector request. `None` preserves the gear.
     pub gear_request: Option<Gear>,
     /// Edge-triggered: restart request this tick.
