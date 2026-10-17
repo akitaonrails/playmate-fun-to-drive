@@ -12,11 +12,28 @@ use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use game_core::{Game, InputState, KeyboardSteering, Tuning};
 
+const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
+
 #[derive(Resource)]
 struct Sim(pub Game);
 
 #[derive(Resource)]
 struct TuningRes(pub Tuning);
+
+/// Nitro can remain numerically charged on the terminal fixed step, so every
+/// cosmetic consumer must also require a live running phase.
+pub(crate) fn nitro_effects_active(game: &Game) -> bool {
+    matches!(game.phase, game_core::Phase::Running) && game.nitro_active()
+}
+
+/// Short-lived presentation state captured from the fixed-step simulation.
+/// Keeping this outside `Game` prevents cosmetic timing from affecting the
+/// deterministic run while still making one-frame events visible to renderers.
+#[derive(Resource, Default)]
+pub(crate) struct VisualEffects {
+    pub(crate) nitro_pickup_glow: f32,
+    pub(crate) nitro_segment: Option<u8>,
+}
 
 #[derive(Resource, Default)]
 struct FrameInput {
@@ -56,6 +73,7 @@ fn main() {
         Game::with_road(20261015, road, &tuning)
     }))
     .init_resource::<FrameInput>()
+    .init_resource::<VisualEffects>()
     .add_systems(
         Startup,
         (view::setup, toy_view::setup, toy_view::setup_diorama),
@@ -63,6 +81,7 @@ fn main() {
     .add_systems(
         Update,
         (
+            tick_visual_effects,
             gather_input,
             toy_view::spawn_toy,
             toy_view::paint_screen,
@@ -78,6 +97,7 @@ fn main() {
     app.init_resource::<toy_view::ScreenMatHandle>();
     app.init_resource::<toy_view::BodyRig>();
     app.init_resource::<toy_view::CrashPulse>();
+    app.init_resource::<toy_view::NitroPose>();
 
     view::add_view_systems(&mut app);
     app.add_systems(Update, (toy_view::update_screen_mat, publish_state).chain());
@@ -144,11 +164,25 @@ fn gather_input(
 fn step_sim(
     mut sim: ResMut<Sim>,
     mut frame: ResMut<FrameInput>,
+    mut effects: ResMut<VisualEffects>,
+    mut crash: ResMut<toy_view::CrashPulse>,
     tuning: Res<TuningRes>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs();
-    let _ = sim.0.step(&frame.state, dt, &tuning.0);
+    let events = sim.0.step(&frame.state, dt, &tuning.0);
+    if events.started {
+        effects.nitro_pickup_glow = 0.0;
+        effects.nitro_segment = None;
+    }
+    if events.nitro_collected {
+        effects.nitro_pickup_glow = NITRO_PICKUP_GLOW_SECS;
+        effects.nitro_segment = sim.0.nitro_charges.checked_sub(1);
+    }
+    if events.bumped {
+        crash.pending = true;
+        crash.dir = sim.0.bump_dir;
+    }
     // edge-triggered flags are consumed by exactly one fixed step
     frame.state.gear_up = false;
     frame.state.reset = false;
@@ -156,11 +190,23 @@ fn step_sim(
     frame.state.nitro = false;
 }
 
+fn tick_visual_effects(time: Res<Time>, mut effects: ResMut<VisualEffects>) {
+    effects.nitro_pickup_glow = (effects.nitro_pickup_glow - time.delta_secs()).max(0.0);
+    if effects.nitro_pickup_glow <= 0.0 {
+        effects.nitro_segment = None;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn publish_state(
     sim: Res<Sim>,
     frame: Res<FrameInput>,
     view: Res<toy_view::ViewState>,
     rig: Res<toy_view::BodyRig>,
+    effects: Res<VisualEffects>,
+    nitro_pose: Res<toy_view::NitroPose>,
+    weather_visuals: Res<view::WeatherVisuals>,
+    nitro_visuals: Res<view::NitroVisuals>,
 ) {
     let weather = sim.0.weather();
     let score = game_core::score_for(sim.0.day_cycles, sim.0.cars_passed, sim.0.cars_bumped);
@@ -173,7 +219,7 @@ fn publish_state(
     };
     #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
     let payload = format!(
-        "{{\"phase\":\"{}\",\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_current\":\"{}\",\"weather_next\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
+        "{{\"phase\":\"{}\",\"score\":{},\"speed\":{:.3},\"session_remaining\":{:.3},\"environment_time\":{:.3},\"day_cycles\":{},\"cars_passed\":{},\"cars_bumped\":{},\"session_result\":{},\"weather_current\":\"{}\",\"weather_next\":\"{}\",\"weather_transition\":{:.3},\"weather_slot\":{},\"weather_clear_visual\":{:.3},\"weather_cloudy_visual\":{:.3},\"weather_rain_visual\":{:.3},\"weather_rain_visible\":{:.3},\"daylight\":{:.3},\"season\":{:.3},\"gear\":\"{}\",\"nitro\":{},\"nitro_t\":{:.3},\"nitro_ahead\":{:.3},\"nitro_lane\":{:.2},\"nitro_glow\":{:.3},\"nitro_glow_segment\":{},\"nitro_visual_intensity\":{:.3},\"toy_root_z\":{:.5},\"toy_root_pitch\":{:.5},\"toy\":{},\"look\":{:.2},\"paused\":{},\"steer\":{:.3},\"road_x\":{:.4},\"off_road\":{:.3},\"roll\":{:.4},\"pad\":{}}}",
         match sim.0.phase {
             game_core::Phase::Ready => "ready",
             game_core::Phase::Running => "running",
@@ -191,6 +237,10 @@ fn publish_state(
         weather_name(weather.to),
         weather.blend,
         weather.slot,
+        weather_visuals.clear,
+        weather_visuals.cloudy,
+        weather_visuals.rain,
+        weather_visuals.rain_visible,
         game_core::daylight(sim.0.environment_time),
         game_core::environment::season_index(sim.0.environment_time),
         match sim.0.gear() {
@@ -201,6 +251,13 @@ fn publish_state(
         sim.0.nitro_t,
         sim.0.nitro_pickup_ahead(),
         sim.0.next_nitro_lane,
+        effects.nitro_pickup_glow,
+        effects
+            .nitro_segment
+            .map_or_else(|| "null".to_string(), |segment| segment.to_string()),
+        nitro_visuals.intensity,
+        nitro_pose.z,
+        nitro_pose.pitch,
         view.mode == toy_view::ViewMode::Toy,
         view.toy_look,
         sim.0.paused,
@@ -219,5 +276,28 @@ fn weather_name(weather: game_core::WeatherKind) -> &'static str {
         game_core::WeatherKind::Clear => "clear",
         game_core::WeatherKind::Cloudy => "cloudy",
         game_core::WeatherKind::Rain => "rain",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_phase_disables_frozen_nitro_visuals() {
+        let tuning = Tuning::default();
+        let mut game = Game::new(7, &tuning);
+        game.phase = game_core::Phase::Running;
+        game.nitro_t = 1.0;
+        assert!(nitro_effects_active(&game));
+
+        game.phase = game_core::Phase::GameOver {
+            reason: game_core::EndReason::Time,
+        };
+        assert!(
+            game.nitro_active(),
+            "core charge is frozen for the result frame"
+        );
+        assert!(!nitro_effects_active(&game));
     }
 }

@@ -60,6 +60,16 @@ pub struct ScreenMatHandle(pub Option<Handle<StandardMaterial>>);
 #[derive(Resource, Default)]
 pub struct BodyRig(pub game_core::BodyDynamics);
 
+/// Eased acceleration pose layered over the normal body dynamics. Positive Z
+/// moves the toy toward the camera; negative pitch leans its face back.
+#[derive(Resource, Default)]
+pub struct NitroPose {
+    pub z: f32,
+    pub pitch: f32,
+    z_velocity: f32,
+    pitch_velocity: f32,
+}
+
 /// Crash pulse captured by the fixed-step sim, consumed by the rig (M12).
 #[derive(Resource, Default)]
 pub struct CrashPulse {
@@ -461,6 +471,7 @@ pub fn update_screen_mat(
 #[allow(clippy::too_many_arguments)]
 pub fn apply_body_dynamics(
     mut rig: ResMut<BodyRig>,
+    mut nitro_pose: ResMut<NitroPose>,
     mut pulse: ResMut<CrashPulse>,
     pads: Query<Entity, With<Gamepad>>,
     mut rumble: bevy::ecs::message::MessageWriter<GamepadRumbleRequest>,
@@ -491,17 +502,39 @@ pub fn apply_body_dynamics(
         &tuning.0,
     );
     let (jx, jz, jroll) = rig.0.shake_offset(time.elapsed_secs(), &tuning.0);
+    let dt = time.delta_secs().min(0.05);
+    let nitro_active = crate::nitro_effects_active(&sim.0);
+    let (target_z, target_pitch) = nitro_pose_targets(nitro_active);
+    let stiffness = if nitro_active { 150.0 } else { 95.0 };
+    let damping = if nitro_active { 20.0 } else { 19.0 };
+    nitro_pose.z = game_core::dynamics::spring_step(
+        nitro_pose.z,
+        &mut nitro_pose.z_velocity,
+        target_z,
+        stiffness,
+        damping,
+        dt,
+    );
+    nitro_pose.pitch = game_core::dynamics::spring_step(
+        nitro_pose.pitch,
+        &mut nitro_pose.pitch_velocity,
+        target_pitch,
+        stiffness,
+        damping,
+        dt,
+    );
     if let Ok(mut tf) = root.single_mut() {
-        tf.rotation =
-            Quat::from_rotation_z(rig.0.roll + jroll) * Quat::from_rotation_x(rig.0.pitch);
-        // Nitro throws the physical toy away from the player, then lets it
-        // ease forward as the five-second charge drains.
-        let nitro_kick = if sim.0.nitro_active() {
-            -0.014 * (sim.0.nitro_t / tuning.0.nitro_duration_secs).sqrt()
-        } else {
-            0.0
-        };
-        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz + nitro_kick);
+        tf.rotation = Quat::from_rotation_z(rig.0.roll + jroll)
+            * Quat::from_rotation_x(rig.0.pitch + nitro_pose.pitch);
+        tf.translation = Vec3::new(rig.0.shift + jx, 0.0, rig.0.heave + jz + nitro_pose.z);
+    }
+}
+
+fn nitro_pose_targets(active: bool) -> (f32, f32) {
+    if active {
+        (0.018, -0.040)
+    } else {
+        (0.0, 0.0)
     }
 }
 
@@ -512,9 +545,10 @@ pub fn turbo_lamp(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if let Some(mut mat) = materials.get_mut(&lamp.0) {
-        let on = matches!(sim.0.gear(), Gear::High) || sim.0.nitro_active();
+        let nitro_active = crate::nitro_effects_active(&sim.0);
+        let on = matches!(sim.0.gear(), Gear::High) || nitro_active;
         mat.emissive = if on {
-            if sim.0.nitro_active() {
+            if nitro_active {
                 LinearRgba::new(2.0, 0.55, 0.10, 1.0)
             } else {
                 LinearRgba::new(1.2, 0.35, 0.08, 1.0)
@@ -562,5 +596,13 @@ mod tests {
         let game = GAME_W as f32 / GAME_H as f32;
         let screen = SCREEN_W / SCREEN_H;
         assert!((game - screen).abs() < 1e-3, "{game} vs {screen}");
+    }
+
+    #[test]
+    fn nitro_pose_moves_toward_camera_and_leans_back() {
+        let (z, pitch) = nitro_pose_targets(true);
+        assert!(z > 0.0, "the +Z camera side must make the screen larger");
+        assert!(pitch < 0.0, "negative X pitch leans the toy face back");
+        assert_eq!(nitro_pose_targets(false), (0.0, 0.0));
     }
 }

@@ -6,7 +6,7 @@
 //! with flat sprites so it renders identically into the toy's screen.
 
 use bevy::prelude::*;
-use game_core::{EndReason, Gear, Phase};
+use game_core::{EndReason, Gear, Phase, WeatherKind, WeatherTransition};
 
 use crate::{Sim, TuningRes};
 
@@ -34,10 +34,10 @@ fn scale_to_d(s: f32) -> f32 {
 const VIEW_TOP: f32 = 322.0;
 const PALM_POOL: usize = 10;
 const HAZARD_POOL: usize = 16;
-const FUEL_X_LEFT: f32 = 240.0;
-const FUEL_Y: f32 = 270.0;
 const NITRO_X_LEFT: f32 = 302.0;
-const NITRO_Y: f32 = 226.0;
+const NITRO_Y: f32 = 216.0;
+const RAIN_POOL: usize = 84;
+const SPEED_LINE_POOL: usize = 28;
 
 #[derive(Component)]
 struct SkyBand;
@@ -68,7 +68,7 @@ struct Apron;
 struct HazardPart;
 
 #[derive(Component)]
-struct NitroPickupPart;
+struct NitroPickupPart(u8);
 
 #[derive(Component)]
 struct PalmPart;
@@ -77,13 +77,31 @@ struct PalmPart;
 struct CarPart;
 
 #[derive(Component)]
+struct NitroExhaust {
+    side: f32,
+    layer: u8,
+}
+
+#[derive(Component)]
+struct NitroSpeedLine(usize);
+
+#[derive(Component)]
 struct FlashOverlay;
 
 #[derive(Component)]
-struct FuelBarFill;
+struct NitroBarSegment(u8);
 
 #[derive(Component)]
-struct NitroBarSegment(u8);
+struct NitroSegmentHalo(u8);
+
+#[derive(Component)]
+struct NitroMeterHalo;
+
+#[derive(Component)]
+struct RainStreak(usize);
+
+#[derive(Component)]
+struct RoadSheen;
 
 #[derive(Component)]
 pub struct ScoreText;
@@ -115,7 +133,25 @@ pub struct GearText;
 pub struct StatusText;
 
 #[derive(Component)]
-pub struct LapText;
+pub struct SessionText;
+
+#[derive(Component)]
+pub struct TrafficText;
+
+/// Resolved visual weather weights are published for deterministic QA.
+#[derive(Resource, Default)]
+pub struct WeatherVisuals {
+    pub clear: f32,
+    pub cloudy: f32,
+    pub rain: f32,
+    pub rain_visible: f32,
+}
+
+/// Shared eased envelope for nitro-only screen effects.
+#[derive(Resource, Default)]
+pub struct NitroVisuals {
+    pub intensity: f32,
+}
 
 /// M10 rolling-tube overlays: bands printed on the drum + recess shading.
 #[derive(Component)]
@@ -212,6 +248,8 @@ fn sky_colors() -> [(Color, f32); 6] {
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
+    commands.init_resource::<WeatherVisuals>();
+    commands.init_resource::<NitroVisuals>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
     // ---- sky gradient bands (static), sun, clouds, sea, sand ----
@@ -240,9 +278,13 @@ pub fn setup(mut commands: Commands) {
         SkyObject,
     ));
     for (cx, cy, w) in [
-        (-60.0, 205.0, 90.0),
-        (170.0, 240.0, 120.0),
-        (330.0, 190.0, 70.0),
+        (-350.0, 260.0, 130.0),
+        (-190.0, 210.0, 95.0),
+        (-45.0, 248.0, 145.0),
+        (105.0, 190.0, 85.0),
+        (215.0, 235.0, 125.0),
+        (350.0, 205.0, 105.0),
+        (430.0, 272.0, 80.0),
     ] {
         commands.spawn((
             Sprite::from_color(Color::srgba(0.95, 0.96, 1.0, 0.85), Vec2::new(w, 12.0)),
@@ -285,6 +327,34 @@ pub fn setup(mut commands: Commands) {
             },
             Transform::from_xyz(fx, fy, 1.4),
             SnowFlake,
+        ));
+    }
+    for k in 0..RAIN_POOL {
+        let x = -480.0 + (k * 67 % 960) as f32;
+        let y = -300.0 + (k * 97 % 600) as f32;
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.72, 0.88, 1.0, 0.0),
+                custom_size: Some(Vec2::new(2.0, 14.0)),
+                ..default()
+            },
+            Transform::from_xyz(x, y, 0.7).with_rotation(Quat::from_rotation_z(-0.22)),
+            RainStreak(k),
+        ));
+    }
+    for k in 0..SPEED_LINE_POOL {
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.72, 0.94, 1.0, 0.0), Vec2::new(2.0, 48.0)),
+            Transform::from_xyz(0.0, 0.0, 0.68),
+            Visibility::Hidden,
+            NitroSpeedLine(k),
+        ));
+    }
+    for y in [-190.0, -145.0, -95.0, -38.0] {
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.55, 0.78, 0.92, 0.0), Vec2::new(250.0, 3.0)),
+            Transform::from_xyz(0.0, y, -3.65),
+            RoadSheen,
         ));
     }
 
@@ -422,12 +492,12 @@ pub fn setup(mut commands: Commands) {
     }
 
     // ---- next nitro pickup (one deterministic road item at a time) ----
-    for _ in 0..4 {
+    for i in 0..4u8 {
         commands.spawn((
             Sprite::from_color(Color::srgb(0.15, 0.92, 1.0), Vec2::new(36.0, 48.0)),
             Transform::from_xyz(0.0, CAR_Y, -2.3),
             Visibility::Hidden,
-            NitroPickupPart,
+            NitroPickupPart(i),
         ));
     }
 
@@ -460,22 +530,31 @@ pub fn setup(mut commands: Commands) {
         ));
     }
 
-    // fuel bar (top right)
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.12, 0.13, 0.16), Vec2::new(184.0, 18.0)),
-        Transform::from_xyz(FUEL_X_LEFT + 90.0, FUEL_Y, 0.8),
-    ));
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.20, 0.75, 0.30), Vec2::new(180.0, 14.0)),
-        Transform::from_xyz(FUEL_X_LEFT + 90.0, FUEL_Y, 0.9),
-        FuelBarFill,
-    ));
+    // Twin layered jets sit behind the player car. They remain pooled and
+    // hidden until nitro is active so both the flat and toy-screen views see
+    // the same lightweight effect.
+    for side in [-1.0f32, 1.0] {
+        for layer in 0..3u8 {
+            commands.spawn((
+                Sprite::from_color(Color::srgba(1.0, 0.5, 0.1, 0.0), Vec2::ONE),
+                Transform::from_xyz(side * 27.0, CAR_Y - 24.0, 0.42 + layer as f32 * 0.05),
+                Visibility::Hidden,
+                NitroExhaust { side, layer },
+            ));
+        }
+    }
 
     // Three-cell nitro meter, rendered into the toy screen. During a boost,
-    // the active cell shrinks over five seconds; a stored full meter blinks.
+    // the active cell shrinks over five seconds; collection and a full meter
+    // get separate soft glow layers.
     commands.spawn((
-        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.82), Vec2::new(196.0, 34.0)),
-        Transform::from_xyz(332.0, NITRO_Y, 1.0),
+        Sprite::from_color(Color::srgba(0.10, 0.86, 1.0, 0.0), Vec2::new(228.0, 42.0)),
+        Transform::from_xyz(330.0, NITRO_Y, 0.98),
+        NitroMeterHalo,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.82), Vec2::new(220.0, 34.0)),
+        Transform::from_xyz(330.0, NITRO_Y, 1.0),
         HudPanel,
     ));
     commands.spawn((
@@ -485,9 +564,14 @@ pub fn setup(mut commands: Commands) {
             ..default()
         },
         TextColor(Color::srgb(0.55, 0.95, 1.0)),
-        Transform::from_xyz(253.0, NITRO_Y, 1.1),
+        Transform::from_xyz(258.0, NITRO_Y, 1.1),
     ));
     for i in 0..3u8 {
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.45, 0.95, 1.0, 0.0), Vec2::new(52.0, 28.0)),
+            Transform::from_xyz(NITRO_X_LEFT + i as f32 * 40.0 + 17.0, NITRO_Y, 1.05),
+            NitroSegmentHalo(i),
+        ));
         commands.spawn((
             Sprite::from_color(Color::srgb(0.10, 0.16, 0.20), Vec2::new(34.0, 14.0)),
             Transform::from_xyz(NITRO_X_LEFT + i as f32 * 40.0 + 17.0, NITRO_Y, 1.1),
@@ -495,38 +579,34 @@ pub fn setup(mut commands: Commands) {
         ));
     }
 
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.78), Vec2::new(64.0, 34.0)),
+        Transform::from_xyz(178.0, NITRO_Y, 1.0),
+        HudPanel,
+    ));
+
     // in-screen HUD (Text2d => rendered INTO the game texture, so it shows
     // on the toy screen itself) with dark backing panels for contrast
-    for (cx, w) in [(-330.0, 210.0), (0.0, 330.0), (332.0, 196.0)] {
+    for (cx, w) in [(-355.0, 190.0), (-75.0, 350.0), (275.0, 330.0)] {
         commands.spawn((
             Sprite {
-                color: Color::srgba(0.02, 0.02, 0.04, 0.75),
-                custom_size: Some(Vec2::new(w, 40.0)),
+                color: Color::srgba(0.02, 0.02, 0.04, 0.78),
+                custom_size: Some(Vec2::new(w, 44.0)),
                 ..default()
             },
-            Transform::from_xyz(cx, 274.0, 1.0),
+            Transform::from_xyz(cx, 258.0, 1.0),
             HudPanel,
         ));
     }
     commands.spawn((
         Text2d::new(""),
         TextFont {
-            font_size: FontSize::Px(24.0),
+            font_size: FontSize::Px(22.0),
             ..default()
         },
         TextColor(Color::srgb(0.99, 0.99, 0.94)),
-        Transform::from_xyz(-330.0, 274.0, 1.1),
+        Transform::from_xyz(-355.0, 258.0, 1.1),
         ScoreText,
-    ));
-    commands.spawn((
-        Text2d::new(""),
-        TextFont {
-            font_size: FontSize::Px(26.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.99, 0.95, 0.75)),
-        Transform::from_xyz(0.0, 274.0, 1.1),
-        LapText,
     ));
     commands.spawn((
         Text2d::new(""),
@@ -534,8 +614,28 @@ pub fn setup(mut commands: Commands) {
             font_size: FontSize::Px(20.0),
             ..default()
         },
+        TextColor(Color::srgb(0.99, 0.95, 0.75)),
+        Transform::from_xyz(-75.0, 258.0, 1.1),
+        SessionText,
+    ));
+    commands.spawn((
+        Text2d::new(""),
+        TextFont {
+            font_size: FontSize::Px(18.0),
+            ..default()
+        },
         TextColor(Color::srgb(0.8, 0.93, 0.99)),
-        Transform::from_xyz(330.0, 254.0, 1.1),
+        Transform::from_xyz(275.0, 258.0, 1.1),
+        TrafficText,
+    ));
+    commands.spawn((
+        Text2d::new(""),
+        TextFont {
+            font_size: FontSize::Px(15.0),
+            ..default()
+        },
+        TextColor(Color::srgb(0.8, 0.93, 0.99)),
+        Transform::from_xyz(178.0, NITRO_Y, 1.1),
         GearText,
     ));
     commands.spawn((
@@ -785,47 +885,191 @@ fn sync_hazards(
 fn sync_nitro_pickup(
     sim: Res<Sim>,
     proj: Res<Proj>,
-    mut parts: Query<(&mut Transform, &mut Sprite, &mut Visibility), With<NitroPickupPart>>,
+    time: Res<Time>,
+    mut parts: Query<(
+        &NitroPickupPart,
+        &mut Transform,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
 ) {
     let mut parts = parts.iter_mut();
     let Some((y, s, lat)) = proj.project(sim.0.nitro_pickup_ahead(), sim.0.road_x) else {
-        for (_, _, mut vis) in parts {
+        for (_, _, _, mut vis) in parts {
             *vis = Visibility::Hidden;
         }
         return;
     };
     let x = (lat + sim.0.next_nitro_lane) * HALF_ROAD_PX * s;
-    let w = (38.0 * s).max(3.0);
-    let h = (50.0 * s).max(4.0);
-    let specs = [
-        (Color::srgb(0.08, 0.72, 0.95), Vec2::new(w, h), 0.0, 0.0),
-        (
-            Color::srgb(1.0, 0.55, 0.08),
-            Vec2::new(w * 0.52, h * 0.16),
-            0.0,
-            h * 0.55,
-        ),
-        (
-            Color::srgb(0.88, 1.0, 1.0),
-            Vec2::new(w * 0.70, h * 0.16),
-            0.0,
-            -h * 0.05,
-        ),
-        (
-            Color::srgb(0.02, 0.18, 0.28),
-            Vec2::new(w * 0.22, h * 0.52),
-            0.0,
-            0.0,
-        ),
-    ];
-    for ((mut tf, mut sprite, mut vis), (color, size, dx, dy)) in parts.by_ref().zip(specs) {
-        tf.translation = Vec3::new(x + dx, y + dy, -2.3);
+    let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 11.3).sin();
+    for (part, mut tf, mut sprite, mut vis) in parts.by_ref() {
+        let (color, size, dy, z) = match part.0 {
+            0 => (
+                Color::srgba(0.10, 0.90, 1.0, 0.12 + pulse * 0.18),
+                Vec2::new((58.0 * s).max(5.0), (66.0 * s).max(6.0)),
+                0.0,
+                -2.35,
+            ),
+            1 => (
+                Color::srgb(0.08, 0.78, 0.98),
+                Vec2::new((30.0 * s).max(3.0), (42.0 * s).max(4.0)),
+                0.0,
+                -2.3,
+            ),
+            2 => (
+                Color::srgb(0.82, 1.0, 1.0),
+                Vec2::new((14.0 * s).max(2.0), (7.0 * s).max(1.0)),
+                23.0 * s,
+                -2.28,
+            ),
+            _ => (
+                Color::srgb(1.0, 0.91, 0.42),
+                Vec2::new((10.0 * s).max(2.0), (24.0 * s).max(3.0)),
+                0.0,
+                -2.27,
+            ),
+        };
+        tf.translation = Vec3::new(x, y + dy, z);
         sprite.color = color;
         sprite.custom_size = Some(size);
         *vis = Visibility::Visible;
     }
-    for (_, _, mut vis) in parts {
+    for (_, _, _, mut vis) in parts {
         *vis = Visibility::Hidden;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ExhaustShape {
+    size: Vec2,
+    center_y: f32,
+    alpha: f32,
+    sway: f32,
+}
+
+fn exhaust_shape(layer: u8, side: f32, elapsed: f32, active_fraction: f32) -> ExhaustShape {
+    let fraction = active_fraction.clamp(0.0, 1.0);
+    let phase = elapsed * 37.0 + side * 1.7 + layer as f32 * 0.83;
+    let flicker = (0.84 + phase.sin() * 0.12 + (phase * 0.47).cos() * 0.04).clamp(0.68, 1.0);
+    let power = 0.72 + fraction.sqrt() * 0.28;
+    let (width, length, alpha) = match layer {
+        0 => (13.0, 40.0, 0.78),
+        1 => (9.0, 28.0, 0.92),
+        _ => (5.0, 14.0, 1.0),
+    };
+    let length = length * flicker * power;
+    ExhaustShape {
+        size: Vec2::new(width * power, length),
+        center_y: CAR_Y - 20.0 - length * 0.5,
+        alpha: alpha * (0.72 + fraction * 0.28),
+        sway: phase.sin() * 0.035,
+    }
+}
+
+fn ease_toward(current: f32, target: f32, dt: f32, time_constant: f32) -> f32 {
+    let response = 1.0 - (-dt.max(0.0) / time_constant.max(0.001)).exp();
+    current + (target - current) * response
+}
+
+fn sync_nitro_visual_intensity(
+    sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    time: Res<Time>,
+    mut visuals: ResMut<NitroVisuals>,
+) {
+    let fraction = (sim.0.nitro_t / tuning.0.nitro_duration_secs).clamp(0.0, 1.0);
+    let target = if crate::nitro_effects_active(&sim.0) {
+        0.68 + fraction.sqrt() * 0.32
+    } else {
+        0.0
+    };
+    let time_constant = if target > visuals.intensity {
+        0.09
+    } else {
+        0.24
+    };
+    visuals.intensity = ease_toward(
+        visuals.intensity,
+        target,
+        time.delta_secs().min(0.05),
+        time_constant,
+    );
+    if target == 0.0 && visuals.intensity < 0.002 {
+        visuals.intensity = 0.0;
+    }
+}
+
+fn sync_nitro_exhaust(
+    visuals: Res<NitroVisuals>,
+    time: Res<Time>,
+    mut jets: Query<(&NitroExhaust, &mut Transform, &mut Sprite, &mut Visibility)>,
+) {
+    if visuals.intensity <= 0.01 {
+        for (_, _, _, mut visibility) in &mut jets {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    for (jet, mut transform, mut sprite, mut visibility) in &mut jets {
+        let shape = exhaust_shape(jet.layer, jet.side, time.elapsed_secs(), visuals.intensity);
+        transform.translation.x = jet.side * 27.0;
+        transform.translation.y = shape.center_y;
+        transform.rotation = Quat::from_rotation_z(shape.sway * jet.side);
+        sprite.custom_size = Some(shape.size);
+        sprite.color = match jet.layer {
+            0 => Color::srgba(1.0, 0.38, 0.06, shape.alpha),
+            1 => Color::srgba(0.05, 0.82, 1.0, shape.alpha),
+            _ => Color::srgba(0.92, 1.0, 1.0, shape.alpha),
+        };
+        *visibility = Visibility::Visible;
+    }
+}
+
+fn speed_line_geometry(index: usize, elapsed: f32, intensity: f32) -> (Vec2, Vec2, f32) {
+    let side = if index.is_multiple_of(2) { -1.0 } else { 1.0 };
+    let speed = 1.35 + (index % 5) as f32 * 0.11;
+    let phase = (elapsed * speed + index as f32 * 0.618_034).fract();
+    let x = side * (270.0 + phase * 210.0);
+    let lane = (index % 7) as f32 - 3.0;
+    let y = 220.0 - phase * 520.0 + lane * 5.0;
+    let size = Vec2::new(
+        1.5 + intensity * 1.5,
+        (34.0 + phase * 34.0) * (0.58 + intensity * 0.42),
+    );
+    (Vec2::new(x, y), size, side * 0.34)
+}
+
+fn sync_nitro_speed_lines(
+    visuals: Res<NitroVisuals>,
+    time: Res<Time>,
+    mut lines: Query<(
+        &NitroSpeedLine,
+        &mut Transform,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    if visuals.intensity <= 0.015 {
+        for (_, _, _, mut visibility) in &mut lines {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+    for (line, mut transform, mut sprite, mut visibility) in &mut lines {
+        let (position, size, angle) =
+            speed_line_geometry(line.0, time.elapsed_secs(), visuals.intensity);
+        transform.translation.x = position.x;
+        transform.translation.y = position.y;
+        transform.rotation = Quat::from_rotation_z(angle);
+        sprite.custom_size = Some(size);
+        let edge_strength = ((position.x.abs() - 250.0) / 230.0).clamp(0.0, 1.0);
+        sprite.color = Color::srgba(
+            0.72,
+            0.94,
+            1.0,
+            visuals.intensity * (0.10 + edge_strength * 0.20),
+        );
+        *visibility = Visibility::Visible;
     }
 }
 
@@ -892,66 +1136,85 @@ fn sync_hud(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     view: Res<crate::toy_view::ViewState>,
-    mut fuel: Query<
-        (&mut Transform, &mut Sprite),
-        (
-            With<FuelBarFill>,
-            Without<RoadRow>,
-            Without<FlashOverlay>,
-            Without<HazardPart>,
-        ),
-    >,
-    mut score: Query<&mut Text2d, (With<ScoreText>, Without<GearText>, Without<StatusText>)>,
-    mut gear: Query<&mut Text2d, (With<GearText>, Without<StatusText>)>,
-    mut status: Query<&mut Text, (With<StatusText>, Without<LapText>)>,
-    mut lap: Query<
+    effects: Res<crate::VisualEffects>,
+    mut score: Query<
         &mut Text2d,
         (
-            With<LapText>,
+            With<ScoreText>,
+            Without<GearText>,
+            Without<SessionText>,
+            Without<TrafficText>,
+        ),
+    >,
+    mut gear: Query<&mut Text2d, (With<GearText>, Without<TrafficText>)>,
+    mut status: Query<&mut Text, (With<StatusText>, Without<SessionText>)>,
+    mut session: Query<
+        &mut Text2d,
+        (
+            With<SessionText>,
             Without<StatusText>,
             Without<ScoreText>,
             Without<GearText>,
+            Without<TrafficText>,
         ),
     >,
+    mut traffic: Query<&mut Text2d, (With<TrafficText>, Without<GearText>)>,
     mut nitro: Query<
         (&NitroBarSegment, &mut Transform, &mut Sprite),
-        (With<NitroBarSegment>, Without<FuelBarFill>),
+        (
+            With<NitroBarSegment>,
+            Without<NitroSegmentHalo>,
+            Without<NitroMeterHalo>,
+        ),
+    >,
+    mut segment_halos: Query<
+        (&NitroSegmentHalo, &mut Transform, &mut Sprite),
+        (Without<NitroBarSegment>, Without<NitroMeterHalo>),
+    >,
+    mut meter_halo: Query<
+        &mut Sprite,
+        (
+            With<NitroMeterHalo>,
+            Without<NitroBarSegment>,
+            Without<NitroSegmentHalo>,
+        ),
     >,
     time: Res<Time>,
 ) {
-    if let Ok((mut tf, mut sp)) = fuel.single_mut() {
-        let frac = (sim.0.session_remaining / tuning.0.session_secs).clamp(0.0, 1.0);
-        let w = 180.0 * frac;
-        tf.translation.x = FUEL_X_LEFT + w * 0.5;
-        sp.custom_size = Some(Vec2::new(w.max(1.0), 14.0));
-        sp.color = if frac > 0.5 {
-            Color::srgb(0.20, 0.75, 0.30)
-        } else if frac > 0.25 {
-            Color::srgb(0.90, 0.75, 0.20)
-        } else {
-            Color::srgb(0.90, 0.25, 0.15)
-        };
-    }
     if let Ok(mut text) = score.single_mut() {
         text.0 = format!("{:05.0} m", sim.0.distance);
     }
     if let Ok(mut text) = gear.single_mut() {
         text.0 = match sim.0.gear() {
             Gear::Low => "LOW".to_string(),
-            Gear::High => "HIGH (turbo)".to_string(),
+            Gear::High => "HIGH".to_string(),
         };
     }
-    if let Ok(mut text) = lap.single_mut() {
+    if let Ok(mut text) = session.single_mut() {
         text.0 = format!(
-            "TIME {} | CYCLES {}",
+            "TIME {} | CYCLES {:02}",
             format_time(sim.0.session_remaining),
             sim.0.day_cycles
         );
     }
-    let active = sim.0.nitro_active();
+    if let Ok(mut text) = traffic.single_mut() {
+        text.0 = format!(
+            "PASS {:03} | BUMP {:03}",
+            sim.0.cars_passed, sim.0.cars_bumped
+        );
+    }
+    let active = crate::nitro_effects_active(&sim.0);
     let active_frac = (sim.0.nitro_t / tuning.0.nitro_duration_secs).clamp(0.0, 1.0);
-    let full_blink = sim.0.nitro_charges == 3 && !active;
-    let blink_on = !full_blink || (time.elapsed_secs() * 4.0).floor() as i32 % 2 == 0;
+    let full_pulse = 0.5 + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU * 1.5).sin();
+    if let Ok(mut halo) = meter_halo.single_mut() {
+        let alpha = if sim.0.nitro_charges == 3 && !active {
+            0.10 + 0.22 * full_pulse
+        } else {
+            0.0
+        };
+        halo.color = Color::srgba(0.10, 0.86, 1.0, alpha);
+    }
+    let pickup_pulse = nitro_pickup_pulse(effects.nitro_pickup_glow);
     for (segment, mut tf, mut sp) in &mut nitro {
         let i = segment.0;
         let frac = if i < sim.0.nitro_charges {
@@ -964,11 +1227,26 @@ fn sync_hud(
         let w = if frac > 0.0 { 34.0 * frac } else { 34.0 };
         tf.translation.x = NITRO_X_LEFT + i as f32 * 40.0 + w * 0.5;
         sp.custom_size = Some(Vec2::new(w, 14.0));
+        tf.scale = if effects.nitro_segment == Some(i) {
+            Vec3::splat(1.0 + 0.22 * pickup_pulse)
+        } else {
+            Vec3::ONE
+        };
         sp.color = if frac > 0.0 {
-            Color::srgba(0.10, 0.86, 1.0, if blink_on { 1.0 } else { 0.28 })
+            Color::srgb(0.10, 0.86 + 0.14 * pickup_pulse, 1.0)
         } else {
             Color::srgb(0.10, 0.16, 0.20)
         };
+    }
+    for (halo, mut tf, mut sprite) in &mut segment_halos {
+        let selected = effects.nitro_segment == Some(halo.0);
+        let fade = (effects.nitro_pickup_glow / crate::NITRO_PICKUP_GLOW_SECS).clamp(0.0, 1.0);
+        tf.scale = Vec3::splat(if selected {
+            1.0 + 0.18 * pickup_pulse
+        } else {
+            1.0
+        });
+        sprite.color = Color::srgba(0.45, 0.95, 1.0, if selected { 0.65 * fade } else { 0.0 });
     }
     if let Ok(mut text) = status.single_mut() {
         **text = if sim.0.paused {
@@ -997,6 +1275,11 @@ fn sync_hud(
     }
 }
 
+fn nitro_pickup_pulse(remaining: f32) -> f32 {
+    let progress = 1.0 - (remaining / crate::NITRO_PICKUP_GLOW_SECS).clamp(0.0, 1.0);
+    (progress * std::f32::consts::PI).sin().max(0.0)
+}
+
 /// scalar multiply in linear space (dim for night)
 fn scale_color(c: Color, k: f32) -> Color {
     let l = c.to_linear();
@@ -1018,14 +1301,70 @@ fn blend4(cols: [Color; 4], w: [f32; 4]) -> Color {
     Color::LinearRgba(LinearRgba::rgb(r, g, b))
 }
 
+fn weather_weights(transition: WeatherTransition) -> [f32; 3] {
+    fn index(kind: WeatherKind) -> usize {
+        match kind {
+            WeatherKind::Clear => 0,
+            WeatherKind::Cloudy => 1,
+            WeatherKind::Rain => 2,
+        }
+    }
+    let mut weights = [0.0; 3];
+    if transition.from == transition.to {
+        weights[index(transition.to)] = 1.0;
+    } else {
+        weights[index(transition.from)] = 1.0 - transition.blend;
+        weights[index(transition.to)] = transition.blend;
+    }
+    weights
+}
+
+fn rain_visibility(rain: f32, winter: f32) -> f32 {
+    rain.clamp(0.0, 1.0) * (1.0 - winter.clamp(0.0, 1.0))
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_environment(
     sim: Res<Sim>,
     time: Res<Time>,
     mut colors: ResMut<Palette>,
-    mut sky: Query<&mut Sprite, (With<SkyBand>, Without<SkyObject>)>,
-    mut sky_objs: Query<&mut Sprite, (With<SkyObject>, Without<SkyBand>, Without<Cloud>)>,
-    mut clouds: Query<&mut Sprite, (With<Cloud>, Without<SkyBand>, Without<SkyObject>)>,
+    mut visual_weather: ResMut<WeatherVisuals>,
+    mut sky: Query<
+        &mut Sprite,
+        (
+            With<SkyBand>,
+            Without<SkyObject>,
+            Without<Cloud>,
+            Without<HazeStrip>,
+            Without<SnowFlake>,
+            Without<RainStreak>,
+            Without<RoadSheen>,
+        ),
+    >,
+    mut sky_objs: Query<
+        &mut Sprite,
+        (
+            With<SkyObject>,
+            Without<SkyBand>,
+            Without<Cloud>,
+            Without<HazeStrip>,
+            Without<SnowFlake>,
+            Without<RainStreak>,
+            Without<RoadSheen>,
+        ),
+    >,
+    mut clouds: Query<
+        (&mut Transform, &mut Sprite),
+        (
+            With<Cloud>,
+            Without<SkyBand>,
+            Without<SkyObject>,
+            Without<HazeStrip>,
+            Without<SnowFlake>,
+            Without<RainStreak>,
+            Without<RoadSheen>,
+        ),
+    >,
     mut haze: Query<
         &mut Sprite,
         (
@@ -1034,6 +1373,8 @@ fn sync_environment(
             Without<SkyObject>,
             Without<SnowFlake>,
             Without<Cloud>,
+            Without<RainStreak>,
+            Without<RoadSheen>,
         ),
     >,
     mut snow: Query<
@@ -1044,6 +1385,31 @@ fn sync_environment(
             Without<SkyBand>,
             Without<SkyObject>,
             Without<Cloud>,
+            Without<RainStreak>,
+            Without<RoadSheen>,
+        ),
+    >,
+    mut rain: Query<
+        (&RainStreak, &mut Transform, &mut Sprite),
+        (
+            Without<SkyBand>,
+            Without<SkyObject>,
+            Without<Cloud>,
+            Without<HazeStrip>,
+            Without<SnowFlake>,
+            Without<RoadSheen>,
+        ),
+    >,
+    mut sheen: Query<
+        &mut Sprite,
+        (
+            With<RoadSheen>,
+            Without<SkyBand>,
+            Without<SkyObject>,
+            Without<Cloud>,
+            Without<HazeStrip>,
+            Without<SnowFlake>,
+            Without<RainStreak>,
         ),
     >,
 ) {
@@ -1053,7 +1419,16 @@ fn sync_environment(
 
     let winter = w[3];
     let autumn = w[2];
-    let bright = 0.35 + 0.65 * day;
+    let weather = weather_weights(sim.0.weather());
+    let (clear, cloudy, rain_amount) = (weather[0], weather[1], weather[2]);
+    let overcast = (cloudy + rain_amount).clamp(0.0, 1.0);
+    let rain_visible = rain_visibility(rain_amount, winter);
+    visual_weather.clear = clear;
+    visual_weather.cloudy = cloudy;
+    visual_weather.rain = rain_amount;
+    visual_weather.rain_visible = rain_visible;
+    let weather_dim = 1.0 - cloudy * 0.12 - rain_amount * 0.22;
+    let bright = (0.35 + 0.65 * day) * weather_dim;
 
     // ground colors across seasons, dimmed by night
     let g1 = blend4(
@@ -1100,6 +1475,7 @@ fn sync_environment(
         // autumn: warm shift; winter: desaturated gray-blue
         c = c.mix(&Color::srgb(0.9, 0.6, 0.35), autumn * 0.22);
         c = c.mix(&Color::srgb(0.55, 0.6, 0.68), winter * 0.45);
+        c = c.mix(&Color::srgb(0.35, 0.41, 0.50), overcast * 0.38);
         sp.color = c;
     }
 
@@ -1127,21 +1503,32 @@ fn sync_environment(
         // stars
         sp.color = scale_color(star, ((1.0 - day) * 0.9).max(0.0));
     }
-    for mut sp in clouds.iter_mut() {
-        let a = (0.85 * (day * 1.2).clamp(0.0, 1.0)).min(0.85);
-        sp.color = Color::srgba(0.95, 0.96, 1.0, a);
+    let dt = time.delta_secs();
+    for (i, (mut tf, mut sp)) in clouds.iter_mut().enumerate() {
+        let density = 0.08 * clear + 0.68 * cloudy + 0.86 * rain_amount;
+        let night_visibility = 0.35 + day * 0.65;
+        sp.color = Color::srgba(
+            0.78 + day * 0.17,
+            0.82 + day * 0.14,
+            0.88 + day * 0.10,
+            (density * night_visibility).clamp(0.0, 0.9),
+        );
+        tf.translation.x += (8.0 + (i % 4) as f32 * 2.5) * dt;
+        if tf.translation.x > 530.0 {
+            tf.translation.x = -530.0;
+        }
     }
 
     // haze: denser in winter and at dawn/dusk
     if let Ok(mut sp) = haze.single_mut() {
-        let haze_amt = (0.18 + winter * 0.35 + autumn * 0.18) * (0.65 + 0.35 * (1.0 - day));
+        let haze_amt =
+            (0.18 + winter * 0.35 + autumn * 0.18 + overcast * 0.18) * (0.65 + 0.35 * (1.0 - day));
         let c = Color::srgb(0.75, 0.8, 0.88).mix(&Color::srgb(1.0, 1.0, 1.0), winter * 0.5);
         sp.color = c.with_alpha(haze_amt.clamp(0.0, 0.75));
     }
 
     // snow: fall while winter holds weight
     let fall = 90.0 + winter * 60.0;
-    let dt = time.delta_secs();
     for (k, (mut tf, mut sp)) in snow.iter_mut().enumerate() {
         let drift = ((k % 5) as f32 - 2.0) * 14.0;
         tf.translation.y -= fall * dt;
@@ -1151,6 +1538,21 @@ fn sync_environment(
             tf.translation.x = -480.0 + (k * 53 % 960) as f32;
         }
         sp.color = Color::srgba(0.95, 0.97, 1.0, (winter * 0.9).clamp(0.0, 1.0));
+    }
+
+    for (drop, mut tf, mut sp) in &mut rain {
+        let speed = 260.0 + (drop.0 % 9) as f32 * 10.0;
+        let drift = 60.0 + (drop.0 % 7) as f32 * 5.0;
+        tf.translation.y -= speed * dt;
+        tf.translation.x -= drift * dt;
+        if tf.translation.y < -320.0 || tf.translation.x < -510.0 {
+            tf.translation.y = 320.0 + (drop.0 % 11) as f32 * 8.0;
+            tf.translation.x = -440.0 + (drop.0 * 67 % 940) as f32;
+        }
+        sp.color = Color::srgba(0.72, 0.88, 1.0, rain_visible * (0.34 + day * 0.18));
+    }
+    for mut sp in &mut sheen {
+        sp.color = Color::srgba(0.55, 0.78, 0.92, rain_visible * 0.20);
     }
 }
 
@@ -1191,10 +1593,88 @@ pub fn add_view_systems(app: &mut App) {
             sync_palms,
             sync_hazards,
             sync_nitro_pickup,
+            sync_nitro_visual_intensity,
+            sync_nitro_exhaust,
+            sync_nitro_speed_lines,
             sync_flash,
             sync_drum_overlays,
             sync_hud,
         )
             .chain(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weather_crossfade_weights_are_normalized() {
+        let weights = weather_weights(WeatherTransition {
+            from: WeatherKind::Clear,
+            to: WeatherKind::Rain,
+            blend: 0.25,
+            slot: 1,
+        });
+        assert_eq!(weights, [0.75, 0.0, 0.25]);
+        assert!((weights.iter().sum::<f32>() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn settled_weather_has_one_full_weight() {
+        assert_eq!(
+            weather_weights(WeatherTransition {
+                from: WeatherKind::Cloudy,
+                to: WeatherKind::Cloudy,
+                blend: 1.0,
+                slot: 2,
+            }),
+            [0.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn winter_suppresses_rain_streaks_without_changing_weather_state() {
+        assert_eq!(rain_visibility(1.0, 0.0), 1.0);
+        assert_eq!(rain_visibility(1.0, 1.0), 0.0);
+        assert!((rain_visibility(0.8, 0.25) - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn pickup_glow_peaks_halfway_and_ends_cleanly() {
+        assert!(nitro_pickup_pulse(crate::NITRO_PICKUP_GLOW_SECS) < 1e-6);
+        assert!((nitro_pickup_pulse(crate::NITRO_PICKUP_GLOW_SECS * 0.5) - 1.0).abs() < 1e-6);
+        assert!(nitro_pickup_pulse(0.0) < 1e-6);
+    }
+
+    #[test]
+    fn nitro_exhaust_layers_are_nested_and_respond_to_charge() {
+        let outer = exhaust_shape(0, -1.0, 0.25, 1.0);
+        let cyan = exhaust_shape(1, -1.0, 0.25, 1.0);
+        let core = exhaust_shape(2, -1.0, 0.25, 1.0);
+        assert!(outer.size.x > cyan.size.x && cyan.size.x > core.size.x);
+        assert!(outer.size.y > cyan.size.y && cyan.size.y > core.size.y);
+        let draining = exhaust_shape(0, -1.0, 0.25, 0.1);
+        assert!(outer.size.y > draining.size.y);
+        assert!(outer.center_y < CAR_Y - 20.0);
+    }
+
+    #[test]
+    fn nitro_visual_envelope_attacks_and_releases_without_overshoot() {
+        let attack = ease_toward(0.0, 1.0, 1.0 / 60.0, 0.09);
+        let release = ease_toward(attack, 0.0, 1.0 / 60.0, 0.24);
+        assert!(attack > 0.0 && attack < 1.0);
+        assert!(release >= 0.0 && release < attack);
+    }
+
+    #[test]
+    fn speed_lines_stay_edge_biased_and_scale_with_intensity() {
+        for index in 0..SPEED_LINE_POOL {
+            let (position, _, _) = speed_line_geometry(index, 1.25, 1.0);
+            assert!(position.x.abs() >= 270.0);
+        }
+        let (_, faint, _) = speed_line_geometry(3, 1.25, 0.1);
+        let (_, strong, _) = speed_line_geometry(3, 1.25, 1.0);
+        assert!(strong.y > faint.y);
+    }
 }
