@@ -231,9 +231,10 @@ hit events; full-loop screenshot sequence QA.
 Fine control/gameplay tweaks happen ONLY after the rest of the plan is done
 (one dedicated tuning session before/at M13). Queue:
 
-- Car sprite reads too big and/or hitbox too punishing (user feedback after
-  first playtest; candidates: car size 120x56 -> ~100x48,
-  `car_half_width` 0.17 -> ~0.14, `collision_forgiveness` 0.25 -> ~0.40).
+- Resolved through later playtests: the car settled at a 96 px silhouette,
+  the near road widened from 380 to 420 px, and the collision geometry moved
+  to `car_half_width` 0.20 with 0.25 forgiveness so it remains forgiving but
+  no longer feels visibly narrower than the sprite.
 - On-screen gamepad indicator ("analog OK") was dropped with the M4 spike
   HUD; state JSON still has `pad`. Re-add a small HUD hint.
 - Crash flash alpha 0.85 reads heavy in captures; consider ~0.6.

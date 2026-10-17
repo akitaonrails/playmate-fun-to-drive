@@ -11,9 +11,11 @@ use game_core::{Gear, Phase, WeatherKind, WeatherTransition};
 use crate::{Sim, TuningRes};
 
 pub const M_PER_PX: f32 = 0.08;
-pub const HALF_ROAD_PX: f32 = 190.0;
+pub const HALF_ROAD_PX: f32 = 210.0;
 pub const CAR_Y: f32 = -215.0;
 pub const HORIZON_Y: f32 = 120.0;
+const PLAYER_CAR_WIDTH_PX: f32 = 96.0;
+const TRAFFIC_CAR_WIDTH_PX: f32 = 56.0;
 
 // pseudo-3D projection (classic OutRun style): geometric row spacing,
 // cumulative curve bend, sprites scaled by distance
@@ -747,7 +749,10 @@ pub fn setup(mut commands: Commands) {
 
     // ---- the fixed player car "decal" (composite) ----
     commands.spawn((
-        Sprite::from_color(Color::srgb(0.86, 0.10, 0.08), Vec2::new(92.0, 30.0)),
+        Sprite::from_color(
+            Color::srgb(0.86, 0.10, 0.08),
+            Vec2::new(PLAYER_CAR_WIDTH_PX - 4.0, 30.0),
+        ),
         Transform::from_xyz(0.0, CAR_Y - 4.0, 0.5),
         CarPart,
     ));
@@ -1183,7 +1188,7 @@ fn sync_hazards(
                 Color::srgb(0.93, 0.91, 0.85),
                 Color::srgb(1.0, 0.9, 0.4),
                 Color::srgb(0.15, 0.22, 0.35),
-                56.0,
+                TRAFFIC_CAR_WIDTH_PX,
                 x,
                 y,
                 s,
@@ -2191,6 +2196,22 @@ mod tests {
         assert!((speedometer_angle(60.0) - 90.0_f32.to_radians()).abs() < 1e-5);
         assert!((speedometer_angle(120.0) + 45.0_f32.to_radians()).abs() < 1e-5);
         assert!(speedometer_angle(0.0) > speedometer_angle(120.0));
+    }
+
+    #[test]
+    fn collision_band_tracks_visible_car_widths_on_the_wider_road() {
+        let tuning = game_core::Tuning::default();
+        let effective_hit_px = (tuning.car_half_width + tuning.hazard_half_width)
+            * (1.0 - tuning.collision_forgiveness)
+            * HALF_ROAD_PX;
+        let visible_overlap_px = (PLAYER_CAR_WIDTH_PX + TRAFFIC_CAR_WIDTH_PX) * 0.5;
+        let ratio = effective_hit_px / visible_overlap_px;
+
+        assert_eq!(HALF_ROAD_PX, 210.0);
+        assert!(
+            (0.65..=0.75).contains(&ratio),
+            "collision band should be forgiving but visually honest: {ratio}"
+        );
     }
 
     #[test]

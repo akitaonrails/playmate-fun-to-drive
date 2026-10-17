@@ -15,6 +15,9 @@
   100 degrees to expose its front quarter.
 - Added analog LT braking while preserving automatic acceleration; braking
   below the HIGH-gear stall threshold requires a LOW-gear recovery.
+- Widened the projected road by roughly 10%, spread its lanes and scenery
+  through the shared projection, and widened the player collision band to
+  better match the visible car while retaining near-miss forgiveness.
 
 All notable changes. Format loosely based on Keep a Changelog; one entry per
 milestone (docs/PLAN.md).
