@@ -5,6 +5,17 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.3.0] — 2026-10-18
+
+- Added run-randomized Tokyo and Paris pixel-art horizons with distinct
+  landmarks, windows, and signage. A run keeps one city identity while its
+  palette and visibility respond to day/night, weather, and season.
+- Replaced the toy view's plain rear wall with a lightweight nighttime dorm
+  composition: moonlit curtained window and skyline, shelf and books, abstract
+  racing print, and warm fairy lights.
+- Corrected the toy camera to use dim-indoor exposure and lifted the room's
+  blue-violet wall lighting so the dark screen bezel remains distinguishable.
+
 ## [0.2.1] — 2026-10-17
 
 - Softened the dorm-room darkness around the toy and added a subtle warm,

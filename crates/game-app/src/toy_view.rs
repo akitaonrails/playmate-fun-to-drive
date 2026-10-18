@@ -3,7 +3,7 @@
 //! wheel/gear parts to prove pivots. T toggles game/toy view.
 
 use bevy::asset::io::embedded::EmbeddedAssetRegistry;
-use bevy::camera::RenderTarget;
+use bevy::camera::{Exposure, RenderTarget};
 
 use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::post_process::bloom::{Bloom, BloomPrefilter};
@@ -192,6 +192,10 @@ pub fn setup(
         // ACES is shader-only, preserving HDR-to-display contrast without the
         // compressed LUT assets (and zstd decoder) required by TonyMcMapface.
         bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
+        // One stop darker than Bevy's indoor preset: bright enough for the
+        // toy-scale practical lights to register, while retaining the dorm-at-
+        // night mood and keeping the emissive screen as the brightest surface.
+        Exposure { ev100: 8.0 },
         ToyCamera,
     ));
     if quality.bloom {
@@ -213,7 +217,7 @@ pub fn setup(
         Transform::from_xyz(1.1, 1.8, 1.4).looking_at(Vec3::ZERO, Vec3::Y),
         DirectionalLight {
             color: Color::srgb(0.42, 0.52, 0.78),
-            illuminance: 195.0,
+            illuminance: 300.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -225,7 +229,7 @@ pub fn setup(
     commands.spawn((
         SpotLight {
             color: Color::srgb(1.0, 0.80, 0.58),
-            intensity: 730.0,
+            intensity: 1_100.0,
             // Stops before the rear wall, so it reads as a pool on the toy
             // and desk instead of making the entire room uniformly bright.
             range: 0.72,
@@ -241,15 +245,29 @@ pub fn setup(
     commands.spawn((
         PointLight {
             color: Color::srgb(0.35, 0.53, 1.0),
-            intensity: 24.0,
+            intensity: 40.0,
             range: 0.8,
             ..default()
         },
         Transform::from_xyz(-0.35, 0.32, -0.42),
     ));
+    // A small amber practical-light spill paints one side of the rear wall.
+    // It is intentionally behind the toy so the room gains depth and a lived-
+    // in dorm mood without competing with the screen or flattening the shell.
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(1.0, 0.58, 0.34),
+            intensity: 160.0,
+            range: 0.85,
+            radius: 0.12,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(0.32, 0.42, -0.28),
+    ));
     commands.spawn(AmbientLight {
         color: Color::srgb(0.24, 0.29, 0.48),
-        brightness: 5.0,
+        brightness: 8.0,
         ..default()
     });
 }
@@ -299,6 +317,67 @@ pub fn setup_diorama(
         perceptual_roughness: 0.3,
         ..default()
     });
+    let window_glass = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.018, 0.032, 0.070),
+        emissive: LinearRgba::new(0.004, 0.009, 0.026, 1.0),
+        perceptual_roughness: 0.22,
+        ..default()
+    });
+    let room_trim = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.095, 0.085, 0.105),
+        perceptual_roughness: 0.82,
+        ..default()
+    });
+    let curtain = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.16, 0.025, 0.052),
+        perceptual_roughness: 0.92,
+        ..default()
+    });
+    let skyline = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.012, 0.018, 0.036),
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    let warm_glow = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.58, 0.22),
+        emissive: LinearRgba::new(0.48, 0.19, 0.035, 1.0),
+        perceptual_roughness: 0.48,
+        ..default()
+    });
+    let shelf_wood = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.20, 0.075, 0.038),
+        perceptual_roughness: 0.78,
+        ..default()
+    });
+    let poster_navy = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.055, 0.075, 0.13),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    let poster_coral = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.72, 0.16, 0.19),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let poster_cream = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.80, 0.67, 0.46),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    let book_materials = [
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.12, 0.28, 0.35),
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.56, 0.16, 0.12),
+            ..default()
+        }),
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.46, 0.36, 0.12),
+            ..default()
+        }),
+    ];
     commands
         .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
         .with_children(|parent| {
@@ -369,7 +448,7 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.075, 0.060, 0.052),
+                    base_color: Color::srgb(0.110, 0.080, 0.065),
                     perceptual_roughness: 0.72,
                     ..default()
                 })),
@@ -379,12 +458,121 @@ pub fn setup_diorama(
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.025, 0.030, 0.052),
+                    base_color: Color::srgb(0.075, 0.085, 0.135),
                     perceptual_roughness: 1.0,
                     ..default()
                 })),
                 Transform::from_xyz(0.0, 0.25, -0.55),
             ));
+
+            // Moonlit dorm window: simple layered cuboids keep the physical
+            // room readable without introducing textures or asset loads.
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.35, 0.225, 0.008))),
+                MeshMaterial3d(room_trim.clone()),
+                Transform::from_xyz(-0.305, 0.335, -0.535),
+            ));
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.315, 0.192, 0.008))),
+                MeshMaterial3d(window_glass.clone()),
+                Transform::from_xyz(-0.305, 0.335, -0.526),
+            ));
+            for (size, position) in [
+                (
+                    Vec3::new(0.012, 0.205, 0.010),
+                    Vec3::new(-0.305, 0.335, -0.516),
+                ),
+                (
+                    Vec3::new(0.328, 0.010, 0.010),
+                    Vec3::new(-0.305, 0.335, -0.516),
+                ),
+            ] {
+                parent.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                    MeshMaterial3d(room_trim.clone()),
+                    Transform::from_translation(position),
+                ));
+            }
+            for index in 0..11 {
+                let width = 0.018 + (index * 7 % 12) as f32 * 0.001;
+                let height = 0.025 + (index * 11 % 48) as f32 * 0.001;
+                let x = -0.445 + index as f32 * 0.028;
+                parent.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(width, height, 0.006))),
+                    MeshMaterial3d(skyline.clone()),
+                    Transform::from_xyz(x, 0.255 + height * 0.5, -0.510),
+                ));
+                if index % 2 == 0 {
+                    parent.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.004, 0.004, 0.004))),
+                        MeshMaterial3d(warm_glow.clone()),
+                        Transform::from_xyz(x, 0.272 + height * 0.5, -0.505),
+                    ));
+                }
+            }
+            for x in [-0.492, -0.118] {
+                parent.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(0.052, 0.25, 0.018))),
+                    MeshMaterial3d(curtain.clone()),
+                    Transform::from_xyz(x, 0.335, -0.505),
+                ));
+            }
+
+            // A small asymmetrical shelf and abstract racing print explain the
+            // warm practical light while keeping the screen-center wall quiet.
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.285, 0.014, 0.055))),
+                MeshMaterial3d(shelf_wood.clone()),
+                Transform::from_xyz(0.315, 0.365, -0.505),
+            ));
+            for (index, x) in [0.235, 0.280, 0.326].into_iter().enumerate() {
+                let height = 0.070 + index as f32 * 0.012;
+                parent.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(0.034, height, 0.035))),
+                    MeshMaterial3d(book_materials[index].clone()),
+                    Transform::from_xyz(x, 0.407 + height * 0.5, -0.500),
+                ));
+            }
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.19, 0.13, 0.008))),
+                MeshMaterial3d(room_trim.clone()),
+                Transform::from_xyz(0.325, 0.205, -0.526),
+            ));
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.170, 0.110, 0.007))),
+                MeshMaterial3d(poster_navy.clone()),
+                Transform::from_xyz(0.325, 0.205, -0.516),
+            ));
+            for (material, size, position) in [
+                (
+                    poster_coral.clone(),
+                    Vec3::new(0.13, 0.018, 0.005),
+                    Vec3::new(0.315, 0.225, -0.510),
+                ),
+                (
+                    poster_cream.clone(),
+                    Vec3::new(0.085, 0.014, 0.005),
+                    Vec3::new(0.350, 0.190, -0.510),
+                ),
+            ] {
+                parent.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(size.x, size.y, size.z))),
+                    MeshMaterial3d(material),
+                    Transform::from_translation(position),
+                ));
+            }
+            parent.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.78, 0.002, 0.003))),
+                MeshMaterial3d(room_trim.clone()),
+                Transform::from_xyz(0.0, 0.490, -0.520),
+            ));
+            for index in 0..9 {
+                parent.spawn((
+                    Mesh3d(meshes.add(Sphere::new(0.006).mesh().ico(1).unwrap())),
+                    MeshMaterial3d(warm_glow.clone()),
+                    Transform::from_xyz(-0.36 + index as f32 * 0.09, 0.485, -0.510),
+                ));
+            }
         });
 }
 

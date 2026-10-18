@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
-    <img src="docs/screenshots/v021-toy-night.png" alt="Fun to Drive running inside its 3D dashboard toy" width="900">
+    <img src="docs/screenshots/v030-city-room.png" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
   </a>
 </p>
 

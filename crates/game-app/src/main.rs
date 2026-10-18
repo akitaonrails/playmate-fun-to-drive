@@ -34,6 +34,45 @@ struct RunConfig {
     qa_duration: Option<f32>,
 }
 
+/// Presentation-only entropy for selecting a different horizon on each new
+/// menu-confirmed run without changing the deterministic road or leaderboard.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct SceneryRun {
+    pub(crate) entropy: u64,
+    pub(crate) serial: u64,
+}
+
+impl SceneryRun {
+    fn new(qa_mode: bool) -> Self {
+        Self {
+            entropy: if qa_mode {
+                20_261_015
+            } else {
+                runtime_scenery_entropy()
+            },
+            serial: 0,
+        }
+    }
+
+    fn advance(&mut self) {
+        self.serial = self.serial.wrapping_add(1);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_scenery_entropy() -> u64 {
+    js_sys::Date::now().to_bits() ^ js_sys::Math::random().to_bits().rotate_left(23)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn runtime_scenery_entropy() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(20_261_015, |duration| duration.as_nanos() as u64)
+}
+
 /// Rendering adapter selected at startup. `?quality=low` keeps gameplay
 /// unchanged while reducing the toy view's offscreen GPU cost.
 #[derive(Resource, Debug, Clone, Copy)]
@@ -262,10 +301,11 @@ fn main() {
     )
     .add_plugins(MaterialPlugin::<toy_view::CrtScreenMaterial>::default())
     .add_plugins(audio::ArcadeAudioPlugin)
-    .insert_resource(ClearColor(Color::srgb(0.008, 0.011, 0.022)))
+    .insert_resource(ClearColor(Color::srgb(0.025, 0.031, 0.055)))
     .insert_resource(TuningRes(tuning))
     .insert_resource(control_tuning)
     .insert_resource(RunConfig { qa_duration })
+    .insert_resource(SceneryRun::new(qa_mode))
     .insert_resource(render_quality)
     .insert_resource(LeaderboardState {
         entries: leaderboard,
@@ -462,6 +502,7 @@ fn handle_end_input(
     tuning: Res<TuningRes>,
     controls: Res<ControlTuning>,
     config: Res<RunConfig>,
+    mut scenery: ResMut<SceneryRun>,
     mut end: ResMut<EndSession>,
     mut leaderboard: ResMut<LeaderboardState>,
     mut display: ResMut<DisplaySettings>,
@@ -509,6 +550,7 @@ fn handle_end_input(
             if confirm {
                 audio_events.emit(audio::AudioCue::MenuConfirm);
                 audio_events.emit(audio::AudioCue::RunStart);
+                scenery.advance();
                 let difficulty = Difficulty::ALL[end.0.difficulty_index];
                 if let Some(duration) = config.qa_duration {
                     sim.0 = Game::with_road_for_duration(
@@ -732,6 +774,15 @@ mod tests {
         assert_eq!(menu_index_after_input(2, false, true), 2);
         assert_eq!(menu_index_after_input(1, true, true), 1);
         assert_eq!(difficulty_index(Difficulty::Medium), 1);
+    }
+
+    #[test]
+    fn qa_scenery_seed_is_repeatable_and_fresh_runs_advance() {
+        let mut scenery = SceneryRun::new(true);
+        assert_eq!(scenery.entropy, 20_261_015);
+        assert_eq!(scenery.serial, 0);
+        scenery.advance();
+        assert_eq!(scenery.serial, 1);
     }
 
     #[test]
