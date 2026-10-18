@@ -213,28 +213,29 @@ pub fn setup(
         Transform::from_xyz(1.1, 1.8, 1.4).looking_at(Vec3::ZERO, Vec3::Y),
         DirectionalLight {
             color: Color::srgb(0.42, 0.52, 0.78),
-            illuminance: 140.0,
+            illuminance: 195.0,
             shadow_maps_enabled: true,
             ..default()
         },
         bevy::light::CascadeShadowConfig::default(),
     ));
-    // Warm desk lamp focused on the toy: the narrow pool of light adds the
-    // requested contrast while leaving the desk edges and wall subdued.
+    // A very dim overhead lamp grazes the toy from the upper-right. The
+    // off-axis pool breaks the bilateral symmetry and reveals the red shell,
+    // while its short range leaves the rear wall in nighttime darkness.
     commands.spawn((
         SpotLight {
-            color: Color::srgb(1.0, 0.77, 0.50),
-            intensity: 360.0,
+            color: Color::srgb(1.0, 0.80, 0.58),
+            intensity: 730.0,
             // Stops before the rear wall, so it reads as a pool on the toy
             // and desk instead of making the entire room uniformly bright.
-            range: 0.55,
-            radius: 0.06,
-            inner_angle: 0.26,
-            outer_angle: 0.56,
+            range: 0.72,
+            radius: 0.08,
+            inner_angle: 0.30,
+            outer_angle: 0.62,
             shadow_maps_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.23, 0.32, 0.30).looking_at(Vec3::new(0.0, 0.055, 0.0), Vec3::Y),
+        Transform::from_xyz(0.30, 0.48, 0.24).looking_at(Vec3::new(-0.035, 0.065, 0.0), Vec3::Y),
     ));
     // Low cool rim separates the dark shell from the wall.
     commands.spawn((
@@ -248,7 +249,7 @@ pub fn setup(
     ));
     commands.spawn(AmbientLight {
         color: Color::srgb(0.24, 0.29, 0.48),
-        brightness: 3.0,
+        brightness: 5.0,
         ..default()
     });
 }

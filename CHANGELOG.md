@@ -5,6 +5,12 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.2.1] — 2026-10-17
+
+- Softened the dorm-room darkness around the toy and added a subtle warm,
+  off-axis overhead light that reveals the red shell without washing out the
+  screen or rear wall.
+
 ## [0.2.0] — 2026-10-17
 
 - Removed the unused KTX2/zstd texture-decoding path from the web build and
