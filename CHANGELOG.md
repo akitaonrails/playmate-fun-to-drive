@@ -5,6 +5,12 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.4.0] — 2026-10-18
+
+- Rebuilt road curvature around true perspective arcs: curvature now integrates
+  through heading into lateral displacement, while the authored loop uses eased
+  entries, sustained mixed-radius corners, and a flowing opposing S-section.
+
 ## [0.3.0] — 2026-10-18
 
 - Added run-randomized Tokyo and Paris pixel-art horizons with distinct

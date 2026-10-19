@@ -6,6 +6,11 @@ use crate::rng::Rng;
 
 pub const CURVE_SAMPLES: usize = 128;
 
+fn smoothstep(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HazardKind {
     Oncoming,
@@ -166,39 +171,90 @@ impl RoadLoop {
     /// A designed arcade course: a fair opening straight followed by broad
     /// sweepers, three sustained short-radius corners, and an opposing S-bend.
     /// Curve magnitude represents inverse radius; segment length represents
-    /// sweep, so the high-magnitude plateaus read as decisive 90-degree turns.
+    /// sweep. Every corner has a deliberate eased entry, constant-radius body,
+    /// and eased exit so the road reads as one continuous ribbon rather than a
+    /// sequence of abruptly shifted straight sections.
     fn technical_curve(direction: f32) -> Vec<f32> {
-        let n = CURVE_SAMPLES as f32;
-        let mut raw = vec![0.0f32; CURVE_SAMPLES];
-        for (i, v) in raw.iter_mut().enumerate() {
-            let t = i as f32 / n;
-            *v = if (0.15..0.30).contains(&t) {
-                0.68 * direction // long-radius sweeper
-            } else if (0.29..0.44).contains(&t) {
-                -direction // first tight 90-degree corner
-            } else if (0.48..0.58).contains(&t) {
-                0.92 * direction // fast S entry
-            } else if (0.58..0.69).contains(&t) {
-                -0.92 * direction // fast S exit
-            } else if (0.73..0.86).contains(&t) {
-                direction // second tight 90-degree corner
-            } else if (0.89..0.96).contains(&t) {
-                -0.76 * direction // sharp final bend before the seam
-            } else {
-                0.0
-            };
+        #[derive(Clone, Copy)]
+        struct Corner {
+            start: f32,
+            full: f32,
+            release: f32,
+            end: f32,
+            curvature: f32,
         }
-        // Two circular smoothing passes give readable corner entry/exit while
-        // preserving materially different radii and straight sections.
-        for _ in 0..2 {
-            let previous = raw.clone();
-            for i in 0..CURVE_SAMPLES {
-                let before = previous[(i + CURVE_SAMPLES - 1) % CURVE_SAMPLES];
-                let after = previous[(i + 1) % CURVE_SAMPLES];
-                raw[i] = (previous[i] * 4.0 + before + after) / 6.0;
+
+        let corners = [
+            // Long, readable opening sweeper.
+            Corner {
+                start: 0.13,
+                full: 0.17,
+                release: 0.27,
+                end: 0.31,
+                curvature: 0.66 * direction,
+            },
+            // A tighter opposing corner after only a short breath.
+            Corner {
+                start: 0.32,
+                full: 0.35,
+                release: 0.42,
+                end: 0.46,
+                curvature: -direction,
+            },
+            // Overlapping releases create one fluid left-right S transition.
+            Corner {
+                start: 0.49,
+                full: 0.52,
+                release: 0.58,
+                end: 0.62,
+                curvature: 0.90 * direction,
+            },
+            Corner {
+                start: 0.58,
+                full: 0.62,
+                release: 0.68,
+                end: 0.72,
+                curvature: -0.90 * direction,
+            },
+            Corner {
+                start: 0.75,
+                full: 0.78,
+                release: 0.85,
+                end: 0.88,
+                curvature: direction,
+            },
+            // Finish with a medium-radius bend and settle before the seam.
+            Corner {
+                start: 0.90,
+                full: 0.925,
+                release: 0.955,
+                end: 0.985,
+                curvature: -0.78 * direction,
+            },
+        ];
+        let envelope = |t: f32, corner: Corner| {
+            if !(corner.start..corner.end).contains(&t) {
+                return 0.0;
             }
-        }
-        raw
+            if t < corner.full {
+                smoothstep((t - corner.start) / (corner.full - corner.start))
+            } else if t <= corner.release {
+                1.0
+            } else {
+                1.0 - smoothstep((t - corner.release) / (corner.end - corner.release))
+            }
+        };
+
+        (0..CURVE_SAMPLES)
+            .map(|index| {
+                let t = index as f32 / CURVE_SAMPLES as f32;
+                corners
+                    .iter()
+                    .map(|corner| corner.curvature * envelope(t, *corner))
+                    .sum::<f32>()
+                    .clamp(-1.0, 1.0)
+            })
+            .collect()
     }
 
     /// Flat loop with explicit hazards: deterministic course for tests and
@@ -357,13 +413,20 @@ mod tests {
         let curved = r.curve.iter().filter(|value| value.abs() >= 0.55).count();
         let sharp = r.curve.iter().filter(|value| value.abs() >= 0.85).count();
         assert!(
-            curved >= CURVE_SAMPLES * 3 / 5,
-            "most of the loop should turn"
+            curved >= CURVE_SAMPLES / 2,
+            "at least half the loop should be in a readable corner"
         );
         assert!(
-            sharp >= CURVE_SAMPLES / 3,
+            sharp >= CURVE_SAMPLES / 4,
             "tight corners should be frequent"
         );
+        let largest_step = r
+            .curve
+            .iter()
+            .zip(r.curve.iter().cycle().skip(1))
+            .map(|(left, right)| (right - left).abs())
+            .fold(0.0f32, f32::max);
+        assert!(largest_step < 0.55, "corner transitions must remain eased");
     }
 
     #[test]

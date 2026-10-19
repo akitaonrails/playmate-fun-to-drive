@@ -26,7 +26,11 @@ const TRAFFIC_CAR_WIDTH_PX: f32 = 56.0;
 pub const ROWS: usize = 30;
 pub const D_MIN: f32 = 2.2; // meters to the nearest row
 pub const S_FAR: f32 = 0.045; // scale at the horizon row
-pub const CURVE_BEND: f32 = 0.075; // lateral half-widths gained per curve-meter
+
+// Converts integrated world-space curvature into normalized lateral road
+// displacement. Curvature is integrated twice below (heading, then position),
+// matching a real constant-radius arc under perspective.
+pub const CURVE_BEND: f32 = 0.0085;
 const ELEVATION_PX_PER_M: f32 = 105.0;
 
 fn row_scale(i: usize) -> f32 {
@@ -254,8 +258,8 @@ pub struct Proj {
     pub rows_x: [f32; ROWS],
     /// projected lower edge of each road row after terrain elevation
     pub rows_y: [f32; ROWS],
-    /// cumulative curve at each row distance (half-width units)
-    pub cum: [f32; ROWS],
+    /// Integrated lateral bend at each row distance (curvature -> heading -> x).
+    pub bend: [f32; ROWS],
     scales: [f32; ROWS],
     distances: [f32; ROWS],
 }
@@ -267,7 +271,7 @@ impl Default for Proj {
         Self {
             rows_x: [0.0; ROWS],
             rows_y: [0.0; ROWS],
-            cum: [0.0; ROWS],
+            bend: [0.0; ROWS],
             scales,
             distances,
         }
@@ -284,20 +288,20 @@ impl Proj {
         if s < S_FAR * 1.05 {
             return None;
         }
-        // interpolate cumulative bend at d via the row table
-        let cum = {
+        // Interpolate the twice-integrated lateral bend at d via the row table.
+        let bend = {
             // rows are ordered near(0)..far(ROWS-1); d decreases with index
-            let mut val = self.cum[ROWS - 1];
+            let mut val = self.bend[ROWS - 1];
             for i in 0..ROWS {
                 let di = self.distances[i];
                 if d <= di {
                     let d0 = if i == 0 { D_MIN } else { self.distances[i - 1] };
                     let t = if di > d0 { (d - d0) / (di - d0) } else { 1.0 };
-                    let c0 = if i == 0 { 0.0 } else { self.cum[i - 1] };
-                    val = c0 + (self.cum[i] - c0) * t;
+                    let b0 = if i == 0 { 0.0 } else { self.bend[i - 1] };
+                    val = b0 + (self.bend[i] - b0) * t;
                     break;
                 }
-                val = self.cum[i];
+                val = self.bend[i];
             }
             val
         };
@@ -316,7 +320,7 @@ impl Proj {
             }
             val
         };
-        Some((y, s, road_x + CURVE_BEND * cum))
+        Some((y, s, road_x + CURVE_BEND * bend))
     }
 }
 
@@ -1165,6 +1169,19 @@ pub fn setup(mut commands: Commands) {
     }
 }
 
+fn advance_curve_projection(
+    heading: f32,
+    lateral: f32,
+    curvature: f32,
+    distance: f32,
+) -> (f32, f32) {
+    let next_heading = heading + curvature * distance;
+    // Trapezoidal integration keeps transitions smooth even across the large
+    // far-row gaps in the perspective table.
+    let next_lateral = lateral + (heading + next_heading) * 0.5 * distance;
+    (next_heading, next_lateral)
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_roads(
     sim: Res<Sim>,
@@ -1202,20 +1219,30 @@ fn sync_roads(
         ),
     >,
 ) {
-    // walk rows near->far, accumulating the curve bend (classic pseudo-3D:
-    // the bend is CUMULATIVE, so the road sweeps smoothly instead of
-    // zig-zagging row to row)
-    let mut cum = 0.0f32;
+    // Walk near -> far, integrating curvature into heading and heading into
+    // lateral position. One integration makes a constant-radius corner look
+    // like a shifted straight after perspective scaling; the second produces
+    // the characteristic expanding arcade-racer sweep toward the horizon.
+    let mut heading = 0.0f32;
+    let mut lateral = 0.0f32;
     let player_elevation = sim.0.road.elevation_at(sim.0.distance);
     for i in 0..ROWS {
         let s = proj.scales[i];
         let d = proj.distances[i];
+        let previous_d = if i == 0 { D_MIN } else { proj.distances[i - 1] };
+        let delta = d - previous_d;
+        let sample_d = previous_d + delta * 0.5;
         let pos = sim.0.distance + d;
-        cum += sim.0.road.curve_at(pos) * (d - if i == 0 { D_MIN } else { proj.distances[i - 1] });
-        proj.rows_x[i] = HALF_ROAD_PX * s * (sim.0.road_x + CURVE_BEND * cum);
+        (heading, lateral) = advance_curve_projection(
+            heading,
+            lateral,
+            sim.0.road.curve_at(sim.0.distance + sample_d),
+            delta,
+        );
+        proj.rows_x[i] = HALF_ROAD_PX * s * (sim.0.road_x + CURVE_BEND * lateral);
         let relative_elevation = sim.0.road.elevation_at(pos) - player_elevation;
         proj.rows_y[i] = elevated_row_y(s, relative_elevation);
-        proj.cum[i] = cum;
+        proj.bend[i] = lateral;
     }
 
     for (i, (mut tf, mut sp)) in rows.iter_mut().enumerate() {
@@ -2777,6 +2804,30 @@ mod tests {
         assert!(elevated_row_y(scale, 0.8) > flat);
         assert!(elevated_row_y(scale, -0.8) < flat);
         assert!((elevated_row_y(scale, 0.8) - flat) < 25.0);
+    }
+
+    #[test]
+    fn constant_curvature_produces_an_arc_instead_of_a_shifted_straight() {
+        let (heading_1, lateral_1) = advance_curve_projection(0.0, 0.0, 1.0, 1.0);
+        let (heading_2, lateral_2) = advance_curve_projection(heading_1, lateral_1, 1.0, 1.0);
+        let (heading_3, lateral_3) = advance_curve_projection(heading_2, lateral_2, 1.0, 1.0);
+
+        assert_eq!((heading_1, lateral_1), (1.0, 0.5));
+        assert_eq!((heading_2, lateral_2), (2.0, 2.0));
+        assert_eq!((heading_3, lateral_3), (3.0, 4.5));
+        assert!(lateral_3 - lateral_2 > lateral_2 - lateral_1);
+    }
+
+    #[test]
+    fn opposing_curve_unwinds_heading_continuously() {
+        let (heading, lateral) = advance_curve_projection(0.0, 0.0, 1.0, 2.0);
+        let (heading, unwind_lateral) = advance_curve_projection(heading, lateral, -1.0, 2.0);
+
+        assert_eq!(heading, 0.0);
+        assert!(
+            unwind_lateral > lateral,
+            "the ribbon must not snap sideways"
+        );
     }
 
     #[test]
