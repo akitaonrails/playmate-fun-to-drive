@@ -9,11 +9,12 @@ const valueAfter = (name, fallback) => {
 };
 const url = valueAfter(
   'url',
-  'http://127.0.0.1:4173/?quality=low&qa_session_secs=30&qa_start_environment_time=99',
+  'http://127.0.0.1:4173/?quality=low&qa_session_secs=30&qa_start_environment_time=99.8',
 );
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
+// Keep the scene's 16:10 shape while reducing SwiftShader work on hosted CI.
+const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
 const failures = [];
 page.on('pageerror', (error) => failures.push(error.message));
 
@@ -42,7 +43,9 @@ try {
     { timeout: 15_000 },
   );
   await page.waitForFunction(() => window.__FTD_STATE__?.audio_music_players === 1, null, {
-    timeout: 15_000,
+    // The fade is simulation-time bounded, but very slow software renderers
+    // can need substantially more wall time to submit enough frames.
+    timeout: 60_000,
   });
 
   const after = await page.evaluate(() => window.__FTD_STATE__);
@@ -52,6 +55,10 @@ try {
   console.log(
     `browser endurance: OK (cycle=${after.day_cycles}, env=${after.environment_time.toFixed(2)}, players=${after.audio_music_players})`,
   );
+} catch (error) {
+  const state = await page.evaluate(() => window.__FTD_STATE__ ?? null).catch(() => null);
+  console.error(`browser endurance state at failure: ${JSON.stringify(state)}`);
+  throw error;
 } finally {
   await browser.close();
 }

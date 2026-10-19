@@ -22,7 +22,7 @@ server_pid=$!
 for _ in {1..50}; do
   if curl --fail --silent --output /dev/null "http://127.0.0.1:$port/"; then
     npm --prefix "$project_root/tools/screenshots" run endurance -- \
-      --url "http://127.0.0.1:$port/?quality=low&qa_session_secs=30&qa_start_environment_time=99"
+      --url "http://127.0.0.1:$port/?quality=low&qa_session_secs=30&qa_start_environment_time=99.8"
     exit 0
   fi
   sleep 0.1
