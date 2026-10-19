@@ -5,6 +5,34 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.6.0] — 2026-10-19
+
+- Added a full in-screen pause presentation with clear keyboard/gamepad help,
+  plus safe-area-aware touch PAUSE/RESUME and RESTART buttons. Select or Escape
+  now returns to run selection with the prior simulation fully reset, while
+  Start also restarts from the final leaderboard.
+- Made each run begin in the season and day/night phase reported by the
+  player's local date, clock, and timezone. Southern Hemisphere timezone
+  regions receive the corresponding inverted meteorological season.
+- Corrected Jump Kick to rotate the car sprite as a simple circle in the
+  screen plane, enlarged both collectible collision bands, and made Jump Kick
+  glow more clearly against traffic.
+- Kept the dorm-room wall, window, props, and room lighting stationary while
+  steering and crash dynamics move only the dashboard toy.
+- Improved mobile performance by defaulting coarse-pointer devices to the
+  lower pixel budget, disabling CRT bloom until explicitly enabled, avoiding
+  excessive device-pixel-ratio rendering, and reducing shadow work.
+- Fixed soundtrack selection to follow the actual environment cycle, cancelled
+  active COLD-AIR thrust on a crash, and made environment-start accounting
+  preserve competitive cycle scores.
+- Rebuilt the foreground road apron so its edges continue widening in
+  perspective, kept headlight projection independent from road curves, and
+  increased season-aware roadside scenery density.
+- Expanded pause, reset, environment, collision, visual projection, mobile
+  quality, music lifecycle, and browser-bridge regression coverage.
+- Replaced the README hero screenshot and animated/full playthrough with the
+  latest v0.6.0 captures.
+
 ## [0.5.1] — 2026-10-19
 
 - Fixed the browser freeze at the first day/night soundtrack transition by

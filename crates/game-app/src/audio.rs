@@ -374,7 +374,7 @@ fn sync_music_players(
     mut state: ResMut<AudioState>,
     players: Query<(Entity, &AudioLayer)>,
 ) {
-    let desired = (sim.0.day_cycles % MUSIC_TRACKS as u64) as u8;
+    let desired = (sim.0.environment_cycle_index() % MUSIC_TRACKS as u64) as u8;
     let mut present = [false; MUSIC_TRACKS];
     for (_, layer) in &players {
         if let AudioLayer::Music(index) = layer {
@@ -522,7 +522,7 @@ fn update_mix(
         brake: frame.state.brake,
         off_road: sim.0.off_road_intensity(&tuning.0),
         nitro: crate::nitro_effects_active(&sim.0),
-        music_track: (sim.0.day_cycles % MUSIC_TRACKS as u64) as usize,
+        music_track: (sim.0.environment_cycle_index() % MUSIC_TRACKS as u64) as usize,
     });
 
     let alpha = 1.0 - (-time.delta_secs() * 9.0).exp();

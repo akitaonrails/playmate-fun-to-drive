@@ -62,6 +62,35 @@ impl SceneryRun {
     fn advance(&mut self) {
         self.serial = self.serial.wrapping_add(1);
     }
+
+    fn environment_start(self, calendar: bridge::LocalCalendar) -> f32 {
+        calendar_environment_start(calendar)
+    }
+}
+
+fn calendar_environment_start(calendar: bridge::LocalCalendar) -> f32 {
+    let month = calendar.month.clamp(1, 12);
+    let day = calendar.day.clamp(1, 31);
+    // Meteorological seasons: Mar/Jun/Sep/Dec in the north, offset by six
+    // months in the south. Progress through the real season is preserved.
+    let northern_season = ((month + 9) % 12) / 3;
+    let season = if calendar.southern {
+        (northern_season + 2) % 4
+    } else {
+        northern_season
+    };
+    let month_in_season = (month + 9) % 3;
+    let season_progress = (month_in_season as f32 + (day - 1) as f32 / 31.0) / 3.0;
+    let season_offset = season_progress * game_core::environment::SEASON_SECS;
+    let day_cycle = (season_offset / game_core::environment::DAY_SECS).floor();
+    let local_day =
+        (calendar.hour.min(23) as f32 * 60.0 + calendar.minute.min(59) as f32) / (24.0 * 60.0);
+    // The environment's phase peaks at 0.25; shift civil noon there so local
+    // midnight maps to deep night and local sunrise/sunset straddle the fades.
+    let environment_day_phase = (local_day + 0.75).fract();
+    season as f32 * game_core::environment::SEASON_SECS
+        + day_cycle * game_core::environment::DAY_SECS
+        + environment_day_phase * game_core::environment::DAY_SECS
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -88,8 +117,11 @@ pub(crate) struct RenderQuality {
 }
 
 impl RenderQuality {
-    fn from_query(value: Option<&str>) -> Self {
-        if value.is_some_and(|value| value.eq_ignore_ascii_case("low")) {
+    fn from_query(value: Option<&str>, coarse_pointer: bool) -> Self {
+        let explicit_high = value.is_some_and(|value| value.eq_ignore_ascii_case("high"));
+        let low = value.is_some_and(|value| value.eq_ignore_ascii_case("low"))
+            || (coarse_pointer && !explicit_high);
+        if low {
             Self {
                 game_width: 720,
                 game_height: 450,
@@ -398,7 +430,9 @@ fn main() {
         .validate()
         .expect("built-in control tuning must be valid");
     let qa_parameter = bridge::query_param("qa_session_secs");
-    let render_quality = RenderQuality::from_query(bridge::query_param("quality").as_deref());
+    let coarse_pointer = bridge::coarse_pointer();
+    let render_quality =
+        RenderQuality::from_query(bridge::query_param("quality").as_deref(), coarse_pointer);
     let (qa_mode, qa_duration) = session::qa_mode_and_duration(qa_parameter.as_deref());
     let qa_start_environment_time = qa_mode
         .then(|| bridge::query_param("qa_start_environment_time"))
@@ -423,7 +457,8 @@ fn main() {
     };
     let mut app = App::new();
     let audio_muted = bridge::load_local(audio::STORAGE_KEY).0.as_deref() == Some("muted");
-    let crt_enabled = bridge::load_local(toy_view::CRT_STORAGE_KEY).0.as_deref() != Some("off");
+    let crt_setting = bridge::load_local(toy_view::CRT_STORAGE_KEY).0;
+    let crt_enabled = initial_crt_enabled(crt_setting.as_deref(), coarse_pointer);
 
     app.add_plugins(
         DefaultPlugins
@@ -437,7 +472,11 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Fun to Drive".into(),
-                    resolution: bevy::window::WindowResolution::new(960, 600),
+                    // Pixel art gains no useful detail from a 3x mobile DPR,
+                    // while the extra fragments make bloom/CRT/3D needlessly
+                    // expensive. Render one physical pixel per CSS pixel.
+                    resolution: bevy::window::WindowResolution::new(960, 600)
+                        .with_scale_factor_override(1.0),
                     ..default()
                 }),
                 ..default()
@@ -532,6 +571,14 @@ fn main() {
     app.run();
 }
 
+fn initial_crt_enabled(stored: Option<&str>, coarse_pointer: bool) -> bool {
+    match stored {
+        Some("on") => true,
+        Some("off") => false,
+        _ => !coarse_pointer,
+    }
+}
+
 fn tick_menu_idle(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -570,6 +617,7 @@ fn gather_input(
     end: Res<EndSession>,
     touch: Res<TouchInput>,
     launch: Res<LaunchSequence>,
+    sim: Res<Sim>,
 ) {
     if end.0.mode != EndMode::Playing || launch.active {
         frame.state.steer = 0.0;
@@ -630,7 +678,11 @@ fn gather_input(
             frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::Select) {
-            frame.state.reset = true;
+            // During pause, Select is handled by the menu flow below and
+            // returns to run selection instead of silently restarting.
+            if !sim.0.paused {
+                frame.state.reset = true;
+            }
             frame.pad_seen = true;
         }
         if pad.just_pressed(GamepadButton::North) {
@@ -747,7 +799,29 @@ fn handle_end_input(
     mut launch: ResMut<LaunchSequence>,
 ) {
     match end.0.mode {
-        EndMode::Playing => {}
+        EndMode::Playing => {
+            let select = pads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::Select));
+            let start = pads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::Start));
+            if restart_to_menu_requested(
+                sim.0.paused,
+                select,
+                start,
+                keys.just_pressed(KeyCode::Escape),
+                touch.restart,
+            ) {
+                audio_events.emit(audio::AudioCue::MenuConfirm);
+                end.0.mode = EndMode::DifficultySelect;
+                end.0.difficulty_index = difficulty_index(sim.0.difficulty());
+                end.0.initials = session::Initials::default();
+                sim.0.return_to_ready(&tuning.0);
+                frame.state = InputState::default();
+                frame.menu_axis = MenuAxisLatch::default();
+            }
+        }
         EndMode::DifficultySelect => {
             let previous_index = end.0.difficulty_index;
             let menu_axis = pads
@@ -814,9 +888,11 @@ fn handle_end_input(
                     sim.0.restart_with_difficulty(difficulty, &tuning.0);
                 }
                 if let Some(environment_time) = config.qa_start_environment_time {
-                    sim.0.environment_time = environment_time;
+                    sim.0.set_environment_progress(environment_time);
                     sim.0.distance = environment_time * tuning.0.scroll_speed_low;
-                    sim.0.day_cycles = (environment_time / game_core::environment::DAY_SECS) as u64;
+                } else {
+                    sim.0
+                        .set_environment_start(scenery.environment_start(bridge::local_calendar()));
                 }
                 end.0.mode = EndMode::Playing;
                 launch.active = true;
@@ -859,11 +935,16 @@ fn handle_end_input(
             }
         }
         EndMode::Leaderboard => {
-            if touch.restart
-                || touch.confirm
-                || keys.just_pressed(KeyCode::KeyR)
-                || keys.just_pressed(KeyCode::Enter)
-            {
+            let start = pads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::Start));
+            if leaderboard_restart_requested(
+                touch.restart,
+                touch.confirm,
+                keys.just_pressed(KeyCode::KeyR),
+                keys.just_pressed(KeyCode::Enter),
+                start,
+            ) {
                 audio_events.emit(audio::AudioCue::MenuConfirm);
                 end.0.mode = EndMode::DifficultySelect;
                 end.0.difficulty_index = difficulty_index(sim.0.difficulty());
@@ -872,6 +953,26 @@ fn handle_end_input(
             }
         }
     }
+}
+
+fn restart_to_menu_requested(
+    paused: bool,
+    select: bool,
+    start: bool,
+    escape: bool,
+    touch_restart: bool,
+) -> bool {
+    touch_restart || escape || (select && (paused || start))
+}
+
+fn leaderboard_restart_requested(
+    touch_restart: bool,
+    touch_confirm: bool,
+    key_r: bool,
+    enter: bool,
+    gamepad_start: bool,
+) -> bool {
+    touch_restart || touch_confirm || key_r || enter || gamepad_start
 }
 
 fn difficulty_index(difficulty: Difficulty) -> usize {
@@ -1059,8 +1160,76 @@ mod tests {
         let mut scenery = SceneryRun::new(true);
         assert_eq!(scenery.entropy, 20_261_015);
         assert_eq!(scenery.serial, 0);
+        let calendar = bridge::LocalCalendar {
+            month: 10,
+            day: 19,
+            hour: 2,
+            minute: 30,
+            southern: true,
+        };
+        let first = scenery.environment_start(calendar);
         scenery.advance();
         assert_eq!(scenery.serial, 1);
+        let second = scenery.environment_start(calendar);
+        assert!((0.0..game_core::environment::YEAR_SECS).contains(&first));
+        assert!((0.0..game_core::environment::YEAR_SECS).contains(&second));
+        assert_eq!(first, second);
+        assert!(game_core::environment::season_index(first) < 1.0);
+        assert!(game_core::environment::season_index(second) < 1.0);
+    }
+
+    #[test]
+    fn local_date_selects_the_correct_hemisphere_season() {
+        let northern_october = calendar_environment_start(bridge::LocalCalendar {
+            month: 10,
+            day: 19,
+            hour: 12,
+            minute: 0,
+            southern: false,
+        });
+        let southern_october = calendar_environment_start(bridge::LocalCalendar {
+            month: 10,
+            day: 19,
+            hour: 12,
+            minute: 0,
+            southern: true,
+        });
+        assert!((2.0..3.0).contains(&game_core::environment::season_index(northern_october)));
+        assert!((0.0..1.0).contains(&game_core::environment::season_index(southern_october)));
+    }
+
+    #[test]
+    fn local_clock_selects_matching_daylight() {
+        let at = |hour| {
+            calendar_environment_start(bridge::LocalCalendar {
+                month: 10,
+                day: 19,
+                hour,
+                minute: 0,
+                southern: true,
+            })
+        };
+        assert!(game_core::environment::daylight(at(12)) > 0.99);
+        assert!(game_core::environment::daylight(at(0)) < 0.01);
+        let dawn = game_core::environment::daylight(at(6));
+        let dusk = game_core::environment::daylight(at(18));
+        assert!((dawn - 0.5).abs() < 0.01);
+        assert!((dusk - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn pause_select_and_leaderboard_start_have_distinct_navigation() {
+        assert!(restart_to_menu_requested(true, true, false, false, false));
+        assert!(restart_to_menu_requested(false, true, true, false, false));
+        assert!(restart_to_menu_requested(false, false, false, true, false));
+        assert!(restart_to_menu_requested(false, false, false, false, true));
+        assert!(!restart_to_menu_requested(false, true, false, false, false));
+        assert!(leaderboard_restart_requested(
+            false, false, false, false, true
+        ));
+        assert!(!leaderboard_restart_requested(
+            false, false, false, false, false
+        ));
     }
 
     #[test]
@@ -1165,8 +1334,8 @@ mod tests {
 
     #[test]
     fn low_quality_preserves_aspect_and_disables_bloom() {
-        let high = RenderQuality::from_query(None);
-        let low = RenderQuality::from_query(Some("LOW"));
+        let high = RenderQuality::from_query(None, false);
+        let low = RenderQuality::from_query(Some("LOW"), false);
         assert!(high.bloom);
         assert!(!low.bloom);
         assert!(low.game_width < high.game_width);
@@ -1174,6 +1343,20 @@ mod tests {
             high.game_width * low.game_height,
             low.game_width * high.game_height
         );
+    }
+
+    #[test]
+    fn coarse_pointer_defaults_low_but_explicit_high_wins() {
+        assert!(!RenderQuality::from_query(None, true).bloom);
+        assert!(RenderQuality::from_query(Some("high"), true).bloom);
+    }
+
+    #[test]
+    fn mobile_defaults_crt_off_but_respects_saved_choice() {
+        assert!(!initial_crt_enabled(None, true));
+        assert!(initial_crt_enabled(None, false));
+        assert!(initial_crt_enabled(Some("on"), true));
+        assert!(!initial_crt_enabled(Some("off"), false));
     }
 
     #[test]

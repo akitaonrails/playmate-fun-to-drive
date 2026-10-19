@@ -20,6 +20,7 @@ use crate::Sim;
 
 pub const CRT_STORAGE_KEY: &str = "fun-to-drive.crt.v1";
 const CRT_SHADER_PATH: &str = "shaders/crt_screen.wesl";
+const ROADSTER_FRONT_LAMP_X: [f32; 2] = [-0.008, 0.008];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -119,6 +120,11 @@ pub struct ToyCamera;
 /// Parent of the whole 3D diorama (desk + toy scene); hidden in game mode.
 #[derive(Component)]
 pub struct ToyRoot;
+
+/// Static dorm-room scene root. Steering/crash pose is deliberately applied
+/// only to `ToyRoot`, which is a child of this unmoving environment.
+#[derive(Component)]
+pub struct RoomRoot;
 
 /// Captured rest rotation of a glTF part; wiggles are applied in local space
 /// on top of it every frame (no compounding).
@@ -224,7 +230,7 @@ pub fn setup(
         DirectionalLight {
             color: Color::srgb(0.42, 0.52, 0.78),
             illuminance: 300.0,
-            shadow_maps_enabled: true,
+            shadow_maps_enabled: quality.bloom,
             ..default()
         },
         bevy::light::CascadeShadowConfig::default(),
@@ -242,7 +248,7 @@ pub fn setup(
             radius: 0.08,
             inner_angle: 0.30,
             outer_angle: 0.62,
-            shadow_maps_enabled: true,
+            shadow_maps_enabled: quality.bloom,
             ..default()
         },
         Transform::from_xyz(0.30, 0.48, 0.24).looking_at(Vec3::new(-0.035, 0.065, 0.0), Vec3::Y),
@@ -403,119 +409,116 @@ pub fn setup_diorama(
         }),
     ];
     commands
-        .spawn((Visibility::Hidden, ToyRoot, Transform::IDENTITY))
+        .spawn((Visibility::Hidden, RoomRoot, Transform::IDENTITY))
         .with_children(|parent| {
-            // The tube is a real local light source, not just a bright pixel
-            // surface. Its cool spill catches the inner black bezel, wheel,
-            // and controls while the material itself remains dark plastic.
-            parent.spawn((
-                PointLight {
-                    color: Color::srgb(0.45, 0.72, 1.0),
-                    intensity: 88.0,
-                    range: 0.38,
-                    radius: 0.035,
-                    shadow_maps_enabled: false,
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 0.177, 0.074),
-            ));
             parent
-                .spawn((
-                    Transform::from_xyz(0.048, 0.0815, 0.050)
-                        // The camera sits on +Z while the model nose is -Z.
-                        // Keep it 25 degrees off a head-on view for a front
-                        // three-quarter hero angle that reveals the wheel and
-                        // side wedge without losing the light signature.
-                        .with_rotation(Quat::from_rotation_y(155.0_f32.to_radians())),
-                    Visibility::Visible,
-                    SportsCarOrnament,
-                ))
-                .with_children(|car| {
-                    // Black undertray below a long, extremely low silver wedge.
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.031, 0.003, 0.044))),
-                        MeshMaterial3d(tire.clone()),
-                        Transform::from_xyz(0.0, 0.003, 0.0),
+                .spawn((Transform::IDENTITY, Visibility::Visible, ToyRoot))
+                .with_children(|toy| {
+                    // The tube is a real local light source, not just a bright
+                    // pixel surface. It moves with the toy, unlike the room.
+                    toy.spawn((
+                        PointLight {
+                            color: Color::srgb(0.45, 0.72, 1.0),
+                            intensity: 88.0,
+                            range: 0.38,
+                            radius: 0.035,
+                            shadow_maps_enabled: false,
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, 0.177, 0.074),
                     ));
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.029, 0.005, 0.040))),
-                        MeshMaterial3d(body.clone()),
-                        Transform::from_xyz(0.0, 0.006, -0.001),
-                    ));
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.025, 0.004, 0.019))),
-                        MeshMaterial3d(body_shadow.clone()),
-                        Transform::from_xyz(0.0, 0.009, -0.010)
-                            .with_rotation(Quat::from_rotation_x(-0.10)),
-                    ));
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.019, 0.005, 0.019))),
-                        MeshMaterial3d(canopy.clone()),
-                        Transform::from_xyz(0.0, 0.011, -0.002)
-                            .with_rotation(Quat::from_rotation_x(-0.06)),
-                    ));
-                    // Huge wheels with visible silver hubs.
-                    for x in [-0.014, 0.014] {
-                        for z in [-0.012, 0.012] {
+                    toy.spawn((
+                        Transform::from_xyz(0.048, 0.0815, 0.050)
+                            // The camera sits on +Z while the model nose is -Z.
+                            // Keep it 25 degrees off a head-on view for a front
+                            // three-quarter hero angle.
+                            .with_rotation(Quat::from_rotation_y(155.0_f32.to_radians())),
+                        Visibility::Visible,
+                        SportsCarOrnament,
+                    ))
+                    .with_children(|car| {
+                        // Black undertray below a long, extremely low silver wedge.
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.031, 0.003, 0.044))),
+                            MeshMaterial3d(tire.clone()),
+                            Transform::from_xyz(0.0, 0.003, 0.0),
+                        ));
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.029, 0.005, 0.040))),
+                            MeshMaterial3d(body.clone()),
+                            Transform::from_xyz(0.0, 0.006, -0.001),
+                        ));
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.025, 0.004, 0.019))),
+                            MeshMaterial3d(body_shadow.clone()),
+                            Transform::from_xyz(0.0, 0.009, -0.010)
+                                .with_rotation(Quat::from_rotation_x(-0.10)),
+                        ));
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.019, 0.005, 0.019))),
+                            MeshMaterial3d(canopy.clone()),
+                            Transform::from_xyz(0.0, 0.011, -0.002)
+                                .with_rotation(Quat::from_rotation_x(-0.06)),
+                        ));
+                        // Huge wheels with visible silver hubs.
+                        for x in [-0.014, 0.014] {
+                            for z in [-0.012, 0.012] {
+                                car.spawn((
+                                    Mesh3d(meshes.add(Cylinder::new(0.0062, 0.004))),
+                                    MeshMaterial3d(tire.clone()),
+                                    Transform::from_xyz(x, 0.006, z).with_rotation(
+                                        Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                                    ),
+                                ));
+                                car.spawn((
+                                    Mesh3d(meshes.add(Cylinder::new(0.0032, 0.0043))),
+                                    MeshMaterial3d(body_shadow.clone()),
+                                    Transform::from_xyz(x, 0.006, z).with_rotation(
+                                        Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                                    ),
+                                ));
+                            }
+                        }
+                        // Raised rear wing, its two supports, and the uninterrupted
+                        // red blade make the model identifiable even at 4 cm long.
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.035, 0.0018, 0.004))),
+                            MeshMaterial3d(tire.clone()),
+                            Transform::from_xyz(0.0, 0.016, 0.020),
+                        ));
+                        for x in [-0.011, 0.011] {
                             car.spawn((
-                                Mesh3d(meshes.add(Cylinder::new(0.0062, 0.004))),
+                                Mesh3d(meshes.add(Cuboid::new(0.0018, 0.007, 0.0018))),
                                 MeshMaterial3d(tire.clone()),
-                                Transform::from_xyz(x, 0.006, z).with_rotation(
-                                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
-                                ),
+                                Transform::from_xyz(x, 0.0125, 0.019),
                             ));
+                        }
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.027, 0.0016, 0.0014))),
+                            MeshMaterial3d(lamp.clone()),
+                            Transform::from_xyz(0.0, 0.009, 0.0206),
+                        ));
+                        // Four rear outlets under the light blade.
+                        for x in [-0.009, -0.003, 0.003, 0.009] {
                             car.spawn((
-                                Mesh3d(meshes.add(Cylinder::new(0.0032, 0.0043))),
-                                MeshMaterial3d(body_shadow.clone()),
-                                Transform::from_xyz(x, 0.006, z).with_rotation(
-                                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                                Mesh3d(meshes.add(Cylinder::new(0.0017, 0.0012))),
+                                MeshMaterial3d(tire.clone()),
+                                Transform::from_xyz(x, 0.006, 0.0215).with_rotation(
+                                    Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
                                 ),
                             ));
                         }
-                    }
-                    // Raised rear wing, its two supports, and the uninterrupted
-                    // red blade make the model identifiable even at 4 cm long.
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.035, 0.0018, 0.004))),
-                        MeshMaterial3d(tire.clone()),
-                        Transform::from_xyz(0.0, 0.016, 0.020),
-                    ));
-                    for x in [-0.011, 0.011] {
-                        car.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.0018, 0.007, 0.0018))),
-                            MeshMaterial3d(tire.clone()),
-                            Transform::from_xyz(x, 0.0125, 0.019),
-                        ));
-                    }
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.027, 0.0016, 0.0014))),
-                        MeshMaterial3d(lamp.clone()),
-                        Transform::from_xyz(0.0, 0.009, 0.0206),
-                    ));
-                    // Four rear outlets under the light blade.
-                    for x in [-0.009, -0.003, 0.003, 0.009] {
-                        car.spawn((
-                            Mesh3d(meshes.add(Cylinder::new(0.0017, 0.0012))),
-                            MeshMaterial3d(tire.clone()),
-                            Transform::from_xyz(x, 0.006, 0.0215)
-                                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                        ));
-                    }
-                    // Thin triangular-looking front lamps are approximated by
-                    // angled light slivers on the low nose.
-                    for x in [-0.008, 0.008] {
-                        car.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.007, 0.0013, 0.0012))),
-                            MeshMaterial3d(headlight.clone()),
-                            Transform::from_xyz(x, 0.008, -0.0212)
-                                .with_rotation(Quat::from_rotation_y(-x.signum() * 0.18)),
-                        ));
-                    }
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.020, 0.0012, 0.0012))),
-                        MeshMaterial3d(headlight.clone()),
-                        Transform::from_xyz(0.0, 0.0068, -0.0214),
-                    ));
+                        // Thin triangular-looking front lamps are approximated by
+                        // angled light slivers on the low nose.
+                        for x in ROADSTER_FRONT_LAMP_X {
+                            car.spawn((
+                                Mesh3d(meshes.add(Cuboid::new(0.007, 0.0013, 0.0012))),
+                                MeshMaterial3d(headlight.clone()),
+                                Transform::from_xyz(x, 0.008, -0.0212)
+                                    .with_rotation(Quat::from_rotation_y(-x.signum() * 0.18)),
+                            ));
+                        }
+                    });
                 });
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
@@ -698,8 +701,8 @@ pub fn toggle_mode(
     game_image: Res<GameImage>,
     mut game_cam: Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
     mut toy_cam: Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
-    mut toy_root: Query<&mut Visibility, With<ToyRoot>>,
-    mut hud_texts: Query<&mut Visibility, (With<crate::view::StatusText>, Without<ToyRoot>)>,
+    mut room_root: Query<&mut Visibility, With<RoomRoot>>,
+    mut hud_texts: Query<&mut Visibility, (With<crate::view::StatusText>, Without<RoomRoot>)>,
     mut applied_mode: Local<Option<ViewMode>>,
 ) {
     if keys.just_pressed(KeyCode::KeyT) {
@@ -718,7 +721,7 @@ pub fn toggle_mode(
         &game_image,
         &mut game_cam,
         &mut toy_cam,
-        &mut toy_root,
+        &mut room_root,
         &mut hud_texts,
     );
 }
@@ -730,8 +733,8 @@ fn apply_mode(
     game_image: &Res<GameImage>,
     game_cam: &mut Query<(Entity, &mut Camera), (With<GameCamera>, Without<ToyCamera>)>,
     toy_cam: &mut Query<&mut Camera, (With<ToyCamera>, Without<GameCamera>)>,
-    toy_root: &mut Query<&mut Visibility, With<ToyRoot>>,
-    hud_texts: &mut Query<&mut Visibility, (With<crate::view::StatusText>, Without<ToyRoot>)>,
+    room_root: &mut Query<&mut Visibility, With<RoomRoot>>,
+    hud_texts: &mut Query<&mut Visibility, (With<crate::view::StatusText>, Without<RoomRoot>)>,
 ) {
     let toy = state.mode == ViewMode::Toy;
     let _ = toy;
@@ -750,7 +753,7 @@ fn apply_mode(
     if let Ok(mut cam) = toy_cam.single_mut() {
         cam.is_active = toy;
     }
-    if let Ok(mut vis) = toy_root.single_mut() {
+    if let Ok(mut vis) = room_root.single_mut() {
         *vis = if toy {
             Visibility::Visible
         } else {

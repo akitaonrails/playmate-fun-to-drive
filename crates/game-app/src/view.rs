@@ -46,7 +46,7 @@ fn elevated_row_y(scale: f32, relative_elevation: f32) -> f32 {
     scale_to_y(scale) + relative_elevation * ELEVATION_PX_PER_M * scale
 }
 const VIEW_TOP: f32 = 322.0;
-const ROADSIDE_DECOR_PROPS: usize = 18;
+const ROADSIDE_DECOR_PROPS: usize = 24;
 const ROADSIDE_DECOR_PARTS_PER_PROP: usize = 3;
 const DECOR_BILLBOARD_POOL: usize = 6;
 const HAZARD_POOL: usize = 40;
@@ -87,7 +87,20 @@ struct GrassRow;
 
 /// Fills the screen below the nearest projected row (foreground apron).
 #[derive(Component)]
-struct Apron;
+struct Apron {
+    segment: usize,
+    kind: ApronKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApronKind {
+    Grass,
+    Road,
+    LeftRumble,
+    RightRumble,
+}
+
+const APRON_SEGMENTS: usize = 10;
 
 #[derive(Component)]
 struct HazardPart(u8);
@@ -212,6 +225,8 @@ struct CooldownText;
 
 #[derive(Component)]
 struct DifficultyOverlayRoot;
+#[derive(Component)]
+struct PauseOverlayRoot;
 #[derive(Component)]
 struct DifficultyCard(usize);
 #[derive(Component)]
@@ -661,6 +676,54 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
         });
 }
 
+fn spawn_pause_overlay(commands: &mut Commands) {
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, 25.0),
+            Visibility::Hidden,
+            PauseOverlayRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.005, 0.01, 0.025, 0.66),
+                    Vec2::new(960.0, 600.0),
+                ),
+                Transform::default(),
+            ));
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.025, 0.08, 0.14, 0.96),
+                    Vec2::new(620.0, 250.0),
+                ),
+                Transform::from_xyz(0.0, 0.0, 0.1),
+            ));
+            parent.spawn((
+                Sprite::from_color(Color::srgba(0.20, 0.90, 1.0, 0.92), Vec2::new(624.0, 4.0)),
+                Transform::from_xyz(0.0, 123.0, 0.2),
+            ));
+            parent.spawn((
+                Text2d::new("PAUSED"),
+                TextFont {
+                    font_size: FontSize::Px(48.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.96, 1.0)),
+                Transform::from_xyz(0.0, 62.0, 0.3),
+            ));
+            parent.spawn((
+                Text2d::new("START / P   RESUME\nSELECT / ESC   RESTART"),
+                TextFont {
+                    font_size: FontSize::Px(22.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.90, 0.56)),
+                TextLayout::justify(Justify::Center),
+                Transform::from_xyz(0.0, -39.0, 0.3),
+            ));
+        });
+}
+
 pub fn setup(mut commands: Commands) {
     commands.insert_resource(palette());
     commands.init_resource::<Proj>();
@@ -865,29 +928,25 @@ pub fn setup(mut commands: Commands) {
         }
     }
 
-    // ---- foreground apron (below the nearest row, static geometry) ----
+    // ---- foreground apron (below the nearest row) ----
     let apron_h = CAR_Y - (-322.0);
-    for (w, z, marker_apply) in [(960.0f32, -4.4, false), (HALF_ROAD_PX * 2.0, -4.0, true)] {
-        let _ = marker_apply;
-        commands.spawn((
-            Sprite {
-                custom_size: Some(Vec2::new(w, apron_h + 2.0)),
-                ..default()
-            },
-            Transform::from_xyz(0.0, -322.0 + apron_h * 0.5, z),
-            Apron,
-        ));
-    }
-    for side in [-1.0f32, 1.0] {
-        commands.spawn((
-            Sprite {
-                custom_size: Some(Vec2::new(16.0, apron_h + 2.0)),
-                ..default()
-            },
-            Transform::from_xyz(0.0, -322.0 + apron_h * 0.5, -3.9),
-            Apron,
-        ));
-        let _ = side;
+    let segment_h = apron_h / APRON_SEGMENTS as f32;
+    for segment in 0..APRON_SEGMENTS {
+        for (kind, z) in [
+            (ApronKind::Grass, -4.4),
+            (ApronKind::Road, -4.0),
+            (ApronKind::LeftRumble, -3.9),
+            (ApronKind::RightRumble, -3.9),
+        ] {
+            commands.spawn((
+                Sprite {
+                    custom_size: Some(Vec2::new(1.0, segment_h + 1.5)),
+                    ..default()
+                },
+                Transform::from_xyz(0.0, -322.0 + segment_h * (segment as f32 + 0.5), z),
+                Apron { segment, kind },
+            ));
+        }
     }
 
     // Terminal Roadster set piece: a building facade unfolds from the
@@ -1252,6 +1311,7 @@ pub fn setup(mut commands: Commands) {
     ));
 
     spawn_difficulty_overlay(&mut commands);
+    spawn_pause_overlay(&mut commands);
 
     // Session-end presentation is rendered into the same 960x600 texture as
     // gameplay, so it remains legible in both flat and toy-screen views.
@@ -1383,6 +1443,10 @@ fn advance_curve_projection(
     (next_heading, next_lateral)
 }
 
+fn apron_road_half_width(vertical_t: f32) -> f32 {
+    HALF_ROAD_PX + (1.0 - vertical_t.clamp(0.0, 1.0)) * 58.0
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_roads(
     sim: Res<Sim>,
@@ -1410,7 +1474,7 @@ fn sync_roads(
         ),
     >,
     mut apron: Query<
-        (&mut Transform, &mut Sprite),
+        (&Apron, &mut Transform, &mut Sprite),
         (
             With<Apron>,
             Without<RoadRow>,
@@ -1488,35 +1552,47 @@ fn sync_roads(
     if let Some(&x0) = proj.rows_x.first() {
         let pos0 = sim.0.distance + D_MIN;
         let on0 = ((pos0 / 3.5).floor() as i64).rem_euclid(2) == 0;
-        for (idx, (mut tf, mut sp)) in apron.iter_mut().enumerate() {
+        for (apron, mut tf, mut sp) in &mut apron {
             let apron_bottom = -322.0;
-            let h = (proj.rows_y[0] - apron_bottom).max(1.0);
-            tf.translation.y = apron_bottom + h * 0.5;
-            if let Some(size) = sp.custom_size.as_mut() {
-                size.y = h + 2.0;
-            }
-            let w = sp.custom_size.map(|c| c.x).unwrap_or(0.0);
-            if w > 900.0 {
-                // grass
-                tf.translation.x = 0.0;
-                sp.color = if on0 { colors.grass_a } else { colors.grass_b };
-            } else if w > 100.0 {
-                // road band
-                tf.translation.x = x0;
-                sp.color = if on0 {
-                    colors.asphalt_a
-                } else {
-                    colors.asphalt_b
-                };
-            } else {
-                // rumble strips
-                let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
-                tf.translation.x = x0 + side * (HALF_ROAD_PX - 8.0);
-                sp.color = if on0 {
-                    colors.rumble_red
-                } else {
-                    colors.rumble_white
-                };
+            let total_h = (proj.rows_y[0] - apron_bottom).max(1.0);
+            let segment_h = total_h / APRON_SEGMENTS as f32;
+            let vertical_t = (apron.segment as f32 + 0.5) / APRON_SEGMENTS as f32;
+            // t=0 is the bottom edge closest to the viewer; taper smoothly to
+            // the exact row-0 width so the road never pinches at the seam.
+            let road_half = apron_road_half_width(vertical_t);
+            let rumble_width = 16.0 + (1.0 - vertical_t) * 7.0;
+            tf.translation.y = apron_bottom + segment_h * (apron.segment as f32 + 0.5);
+            let size = sp.custom_size.get_or_insert(Vec2::ONE);
+            size.y = segment_h + 1.5;
+            match apron.kind {
+                ApronKind::Grass => {
+                    tf.translation.x = 0.0;
+                    size.x = 960.0;
+                    sp.color = if on0 { colors.grass_a } else { colors.grass_b };
+                }
+                ApronKind::Road => {
+                    tf.translation.x = x0;
+                    size.x = road_half * 2.0;
+                    sp.color = if on0 {
+                        colors.asphalt_a
+                    } else {
+                        colors.asphalt_b
+                    };
+                }
+                ApronKind::LeftRumble | ApronKind::RightRumble => {
+                    let side = if apron.kind == ApronKind::LeftRumble {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    tf.translation.x = x0 + side * (road_half - rumble_width * 0.5);
+                    size.x = rumble_width;
+                    sp.color = if on0 {
+                        colors.rumble_red
+                    } else {
+                        colors.rumble_white
+                    };
+                }
             }
         }
     }
@@ -1825,22 +1901,28 @@ fn sync_jump_pickup(
     for (part, mut transform, mut sprite, mut visibility) in parts.by_ref() {
         let (color, size, dx, dy, z) = match part.0 {
             0 => (
-                Color::srgba(1.0, 0.10, 0.72, 0.14 + pulse * 0.20),
-                Vec2::new((64.0 * item_scale).max(6.0), (64.0 * item_scale).max(6.0)),
+                Color::srgba(1.0, 0.08, 0.72, 0.28 + pulse * 0.34),
+                Vec2::new(
+                    ((82.0 + pulse * 14.0) * item_scale).max(8.0),
+                    ((82.0 + pulse * 14.0) * item_scale).max(8.0),
+                ),
                 0.0,
                 0.0,
                 -2.30,
             ),
             1 => (
-                Color::srgb(0.96, 0.16, 0.64),
-                Vec2::new((30.0 * item_scale).max(3.0), (34.0 * item_scale).max(4.0)),
+                Color::linear_rgb(1.55, 0.10, 0.82),
+                Vec2::new((37.0 * item_scale).max(4.0), (42.0 * item_scale).max(5.0)),
                 0.0,
                 0.0,
                 -2.25,
             ),
             2 => (
-                Color::srgb(1.0, 0.82, 0.96),
-                Vec2::new((28.0 * item_scale).max(3.0), (7.0 * item_scale).max(1.0)),
+                Color::linear_rgb(2.0, 1.55, 2.0),
+                Vec2::new(
+                    ((30.0 + pulse * 12.0) * item_scale).max(3.0),
+                    (6.0 * item_scale).max(1.0),
+                ),
                 0.0,
                 0.0,
                 -2.22,
@@ -1861,6 +1943,11 @@ fn sync_jump_pickup(
             ),
         };
         transform.translation = Vec3::new(x + dx, y + dy, z);
+        transform.rotation = if part.0 == 2 {
+            Quat::from_rotation_z(time.elapsed_secs() * 2.4)
+        } else {
+            Quat::IDENTITY
+        };
         sprite.color = color;
         sprite.custom_size = Some(size);
         *visibility = Visibility::Visible;
@@ -1873,7 +1960,7 @@ fn sync_jump_pickup(
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct JumpPose {
     height: f32,
-    longitudinal_spin: f32,
+    sprite_spin: f32,
     scale: Vec3,
     shadow_scale: f32,
     shadow_alpha: f32,
@@ -1883,7 +1970,7 @@ fn jump_pose(progress: f32) -> JumpPose {
     if !(0.0..1.0).contains(&progress) {
         return JumpPose {
             height: 0.0,
-            longitudinal_spin: 0.0,
+            sprite_spin: 0.0,
             scale: Vec3::ONE,
             shadow_scale: 1.0,
             shadow_alpha: 0.28,
@@ -1896,7 +1983,7 @@ fn jump_pose(progress: f32) -> JumpPose {
     let landing_squash = ((p - 0.90).max(0.0) / 0.10).powi(2);
     JumpPose {
         height: 104.0 * height_unit,
-        longitudinal_spin: std::f32::consts::TAU * eased_spin,
+        sprite_spin: std::f32::consts::TAU * eased_spin,
         scale: Vec3::new(
             1.0 + 0.10 * (launch_squash + landing_squash),
             1.0 - 0.12 * (launch_squash + landing_squash),
@@ -1914,7 +2001,7 @@ fn cold_air_hop_pose(progress: f32) -> JumpPose {
     let height_unit = (std::f32::consts::PI * progress).sin().max(0.0);
     JumpPose {
         height: 42.0 * height_unit,
-        longitudinal_spin: 0.0,
+        sprite_spin: 0.0,
         scale: Vec3::new(1.0 - 0.025 * height_unit, 1.0 + 0.045 * height_unit, 1.0),
         shadow_scale: 1.0 - 0.28 * height_unit,
         shadow_alpha: 0.28 * (1.0 - 0.48 * height_unit),
@@ -1959,10 +2046,8 @@ fn sync_jump_car(
             CAR_Y + pose.height + finish_height + launch_height,
             0.5,
         );
-        // The sprite faces up-screen, so its local Y vector runs from rear to
-        // nose. Rotate around that longitudinal axis for a barrel-style Jump
-        // Kick; rotating around Z would merely spin the car flat on-screen.
-        transform.rotation = Quat::from_axis_angle(Vec3::Y, pose.longitudinal_spin);
+        // This is intentionally a simple 2D sprite spin in the screen plane.
+        transform.rotation = Quat::from_rotation_z(pose.sprite_spin);
         transform.scale = pose.scale * (1.0 - 0.18 * climb);
     }
     if let Ok((mut transform, mut sprite)) = shadow.single_mut() {
@@ -2238,14 +2323,21 @@ struct RoadsideDecorPart {
     rotation: f32,
 }
 
-fn roadside_decor_count(theme: backdrop::RoadsideTheme) -> usize {
-    match theme {
-        backdrop::RoadsideTheme::Forest => 18,
-        backdrop::RoadsideTheme::Sakura => 14,
-        backdrop::RoadsideTheme::City => 12,
-        backdrop::RoadsideTheme::Winter => 8,
-        backdrop::RoadsideTheme::OpenRoad => 10,
-    }
+fn roadside_decor_count(theme: backdrop::RoadsideTheme, season: usize) -> usize {
+    let base = match theme {
+        backdrop::RoadsideTheme::Forest => 24,
+        backdrop::RoadsideTheme::Sakura => 22,
+        backdrop::RoadsideTheme::City => 18,
+        backdrop::RoadsideTheme::Winter => 12,
+        backdrop::RoadsideTheme::OpenRoad => 16,
+    };
+    let seasonal_delta = match season % 4 {
+        0 => 2, // spring growth
+        1 => 0,
+        2 => -2, // autumn thins out
+        _ => -4, // sparse winter silhouettes
+    };
+    (base + seasonal_delta).clamp(2, ROADSIDE_DECOR_PROPS as i32) as usize
 }
 
 fn roadside_decor_part(
@@ -2377,7 +2469,8 @@ fn sync_palms(
 ) {
     let lp = sim.0.loop_pos();
     let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
-    let count = roadside_decor_count(theme);
+    let season = game_core::environment::season_index(sim.0.environment_time).floor() as usize;
+    let count = roadside_decor_count(theme, season);
     let night = 1.0 - game_core::environment::daylight(sim.0.environment_time);
     let mut spots = [None; ROADSIDE_DECOR_PROPS];
     let mut spot_count = 0;
@@ -2387,7 +2480,7 @@ fn sync_palms(
     let scroll = lp.rem_euclid(spacing);
     for k in 0..pairs {
         for side_sign in [-1.0f32, 1.0] {
-            let spread = 1.30 + (k % 4) as f32 * 0.34;
+            let spread = 1.28 + (k % 6) as f32 * 0.28;
             let side = side_sign * spread;
             let side_stagger = if side < 0.0 { spacing * 0.48 } else { 0.0 };
             let ahead = 4.5 + (k as f32 * spacing + side_stagger - scroll).rem_euclid(visible_span);
@@ -2432,9 +2525,10 @@ fn sync_decor_billboards(
 ) {
     let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
     let count = match theme {
-        backdrop::RoadsideTheme::City => 4,
-        backdrop::RoadsideTheme::Forest | backdrop::RoadsideTheme::Sakura => 2,
-        backdrop::RoadsideTheme::OpenRoad | backdrop::RoadsideTheme::Winter => 1,
+        backdrop::RoadsideTheme::City => 5,
+        backdrop::RoadsideTheme::Forest | backdrop::RoadsideTheme::Sakura => 3,
+        backdrop::RoadsideTheme::OpenRoad => 2,
+        backdrop::RoadsideTheme::Winter => 1,
     };
     let loop_position = sim.0.loop_pos();
     for (sign, mut transform, mut visibility) in &mut signs {
@@ -2611,7 +2705,7 @@ fn sync_hud(
         } else if audio.muted {
             "SOUND OFF | M to unmute"
         } else if sim.0.paused {
-            "PAUSED | Start/P resume | Select/R restart"
+            "PAUSED | Start/P resume | Select/Esc restart"
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
@@ -2649,6 +2743,30 @@ fn sync_countdown_style(
     );
     color.0 = style.color;
     transform.scale = Vec3::splat(style.scale);
+}
+
+fn pause_overlay_visible(paused: bool, playing: bool) -> bool {
+    paused && playing
+}
+
+fn sync_pause_overlay(
+    sim: Res<Sim>,
+    end: Res<crate::EndSession>,
+    mut root: Query<&mut Visibility, With<PauseOverlayRoot>>,
+) {
+    if !sim.is_changed() && !end.is_changed() {
+        return;
+    }
+    if let Ok(mut visibility) = root.single_mut() {
+        *visibility = if pause_overlay_visible(
+            sim.0.paused,
+            end.0.mode == crate::session::EndMode::Playing,
+        ) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
 }
 
 fn sync_end_overlay(
@@ -2706,7 +2824,9 @@ fn sync_end_overlay(
                 crate::session::EndMode::NameEntry => {
                     "A-Z enters letters  |  BACKSPACE edits".to_string()
                 }
-                crate::session::EndMode::Leaderboard => "R or ENTER starts a new run".to_string(),
+                crate::session::EndMode::Leaderboard => {
+                    "START, R, or ENTER returns to run select".to_string()
+                }
                 crate::session::EndMode::DifficultySelect => String::new(),
                 crate::session::EndMode::Playing => String::new(),
             },
@@ -2821,8 +2941,8 @@ fn fog_band_geometry(index: usize) -> (f32, Vec2, f32) {
 }
 
 fn projected_headlight_geometry(layer: usize, y0: f32, y1: f32) -> (Vec2, Vec2, f32) {
-    let height = (y1 - y0).max(1.5);
-    let center_y = y0 + height * 0.5;
+    let row_height = (y1 - y0).max(1.5);
+    let center_y = y0 + row_height * 0.5;
     let road_depth = HORIZON_Y - CAR_Y;
     let fade_start_y = CAR_Y + road_depth * 0.32;
     let beam_end_y = CAR_Y + road_depth * 0.50;
@@ -2833,12 +2953,16 @@ fn projected_headlight_geometry(layer: usize, y0: f32, y1: f32) -> (Vec2, Vec2, 
     } else {
         outer_width * 0.62
     };
+    // The beam is rendered as deliberate pixel bands. Keep the bands thin at
+    // the bumper, then grow them with projected distance so they describe a
+    // ground-plane cone instead of a stack of equally heavy rectangles.
+    let band_height = 2.5 + smoothstep(distance) * if layer == 0 { 13.5 } else { 10.0 };
     let near_fade = ((center_y - CAR_Y) / 55.0).clamp(0.0, 1.0);
     let far_fade = 1.0 - ((center_y - fade_start_y) / (beam_end_y - fade_start_y)).clamp(0.0, 1.0);
     let layer_strength = if layer == 0 { 0.28 } else { 0.72 };
     (
         Vec2::new(0.0, center_y),
-        Vec2::new(layer_width.max(2.0), height + 1.5),
+        Vec2::new(layer_width.max(2.0), band_height),
         near_fade * far_fade * layer_strength,
     )
 }
@@ -3532,13 +3656,20 @@ pub fn add_view_systems(app: &mut App) {
     );
     app.add_systems(
         Update,
-        (sync_decor_billboards, sync_wall_climb).in_set(ViewSet::Presentation),
+        (sync_decor_billboards, sync_wall_climb, sync_pause_overlay).in_set(ViewSet::Presentation),
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pause_overlay_only_appears_during_a_paused_run() {
+        assert!(pause_overlay_visible(true, true));
+        assert!(!pause_overlay_visible(false, true));
+        assert!(!pause_overlay_visible(true, false));
+    }
 
     #[test]
     fn every_difficulty_finishes_lane_changes_near_the_horizon() {
@@ -3633,8 +3764,16 @@ mod tests {
 
     #[test]
     fn contextual_roadside_decor_is_larger_and_density_tracks_scenery() {
-        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Forest), 18);
-        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Winter), 8);
+        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Forest, 0), 24);
+        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Winter, 3), 8);
+        assert!(
+            roadside_decor_count(backdrop::RoadsideTheme::OpenRoad, 0)
+                > roadside_decor_count(backdrop::RoadsideTheme::OpenRoad, 2)
+        );
+        assert!(
+            roadside_decor_count(backdrop::RoadsideTheme::OpenRoad, 2)
+                > roadside_decor_count(backdrop::RoadsideTheme::OpenRoad, 3)
+        );
         let forest = roadside_decor_part(backdrop::RoadsideTheme::Forest, 1, 0.0, 1.0);
         let sakura = roadside_decor_part(backdrop::RoadsideTheme::Sakura, 1, 0.0, 1.0);
         let winter = roadside_decor_part(backdrop::RoadsideTheme::Winter, 1, 0.0, 1.0);
@@ -3651,13 +3790,13 @@ mod tests {
             backdrop::RoadsideTheme::OpenRoad,
         ]
         .into_iter()
-        .map(roadside_decor_count)
+        .map(|theme| roadside_decor_count(theme, 1))
         .max()
         .unwrap();
         assert!(densest_theme <= ROADSIDE_DECOR_PROPS);
         assert_eq!(
             ROADSIDE_DECOR_PROPS * ROADSIDE_DECOR_PARTS_PER_PROP,
-            54,
+            72,
             "the startup pool must reserve every part of every prop"
         );
     }
@@ -3690,6 +3829,15 @@ mod tests {
             (0.65..=0.75).contains(&ratio),
             "collision band should be forgiving but visually honest: {ratio}"
         );
+    }
+
+    #[test]
+    fn foreground_road_keeps_widening_toward_the_bottom_edge() {
+        let at_row_zero = apron_road_half_width(1.0);
+        let middle = apron_road_half_width(0.5);
+        let bottom = apron_road_half_width(0.0);
+        assert_eq!(at_row_zero, HALF_ROAD_PX);
+        assert!(bottom > middle && middle > at_row_zero);
     }
 
     #[test]
@@ -3807,6 +3955,10 @@ mod tests {
         let (_, inner, _) = projected_headlight_geometry(1, -105.0, -85.0);
 
         assert!(middle.x > near.x);
+        assert!(
+            middle.y > near.y,
+            "headlight bands must deepen into the cone"
+        );
         assert!(inner.x < middle.x);
         assert!(middle_weight > near_weight);
         assert_eq!(far_weight, 0.0);
@@ -3844,15 +3996,14 @@ mod tests {
         let end = jump_pose(1.0);
         assert_eq!(start.height, 0.0);
         assert!(apex.height > 100.0);
-        assert!((apex.longitudinal_spin - std::f32::consts::PI).abs() < 1e-5);
+        assert!((apex.sprite_spin - std::f32::consts::PI).abs() < 1e-5);
         let quarter = jump_pose(0.326_351_82); // smoothstep(p) = 0.25
-        let rotation = Quat::from_axis_angle(Vec3::Y, quarter.longitudinal_spin);
-        assert!((rotation * Vec3::Y - Vec3::Y).length() < 1e-5);
-        assert!((rotation * Vec3::X + Vec3::Z).length() < 1e-4);
+        let rotation = Quat::from_rotation_z(quarter.sprite_spin);
+        assert!((rotation * Vec3::X - Vec3::Y).length() < 1e-4);
         assert!(apex.shadow_scale < start.shadow_scale);
         assert!(apex.shadow_alpha < start.shadow_alpha);
         assert_eq!(end.height, 0.0);
-        assert_eq!(end.longitudinal_spin, 0.0);
+        assert_eq!(end.sprite_spin, 0.0);
         assert_eq!(end.scale, Vec3::ONE);
     }
 
@@ -3861,7 +4012,7 @@ mod tests {
         let crest = cold_air_hop_pose(0.5);
         assert!(crest.height > 40.0);
         assert!(crest.height < jump_pose(0.5).height * 0.5);
-        assert_eq!(crest.longitudinal_spin, 0.0);
+        assert_eq!(crest.sprite_spin, 0.0);
         assert!(crest.shadow_scale < 1.0);
         assert_eq!(cold_air_hop_pose(1.0), jump_pose(0.0));
     }

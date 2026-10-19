@@ -22,6 +22,51 @@ pub struct TouchSnapshot {
     pub submit_seq: u32,
 }
 
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(default)]
+pub struct LocalCalendar {
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub southern: bool,
+}
+
+impl Default for LocalCalendar {
+    fn default() -> Self {
+        Self {
+            month: 3,
+            day: 20,
+            hour: 12,
+            minute: 0,
+            southern: false,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn local_calendar() -> LocalCalendar {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    let Ok(function) = js_sys::Reflect::get(&global, &"__ftdLocalCalendar".into()) else {
+        return LocalCalendar::default();
+    };
+    let Ok(function) = function.dyn_into::<js_sys::Function>() else {
+        return LocalCalendar::default();
+    };
+    function
+        .call0(&global)
+        .ok()
+        .and_then(|value| value.as_string())
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn local_calendar() -> LocalCalendar {
+    LocalCalendar::default()
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn touch_snapshot() -> TouchSnapshot {
     use wasm_bindgen::JsCast;
@@ -43,6 +88,28 @@ pub fn touch_snapshot() -> TouchSnapshot {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn touch_snapshot() -> TouchSnapshot {
     TouchSnapshot::default()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn coarse_pointer() -> bool {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    let Ok(function) = js_sys::Reflect::get(&global, &"__ftdCoarsePointer".into()) else {
+        return false;
+    };
+    let Ok(function) = function.dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    function
+        .call0(&global)
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn coarse_pointer() -> bool {
+    false
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -175,6 +242,26 @@ mod tests {
         assert!(html.contains("'pointercancel', 'lostpointercapture'"));
         assert!(html.contains("env(safe-area-inset-left)"));
         assert!(html.contains(">COLD-AIR</button>"));
+        assert!(html.contains("__ftdCoarsePointer"));
+        assert!(html.contains("id=\"touch-pause\""));
+        assert!(html.contains("id=\"touch-restart\""));
+        assert!(html.contains("pulse('pause_seq')"));
+        assert!(html.contains("pulse('restart_seq')"));
+        assert!(html.contains("body.touch-enabled canvas"));
+    }
+
+    #[test]
+    fn local_calendar_bridge_precedes_wasm_and_detects_hemisphere() {
+        let html = include_str!("../index.html");
+        let calendar = html.find("__ftdLocalCalendar").expect("calendar bridge");
+        let wasm = html
+            .find("data-trunk rel=\"rust\"")
+            .expect("trunk wasm link");
+        assert!(calendar < wasm);
+        assert!(html.contains("America\\/(Argentina\\/|Sao_Paulo"));
+        assert!(html.contains("now.getMonth() + 1"));
+        assert!(html.contains("now.getHours()"));
+        assert!(html.contains("now.getMinutes()"));
     }
 
     #[test]

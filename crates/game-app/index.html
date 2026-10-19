@@ -18,6 +18,10 @@
       canvas { display: block; position: fixed; left: 50%; top: 50%;
         width: min(100vw, 160vh) !important; height: min(100vh, 62.5vw) !important;
         transform: translate(-50%, -50%); }
+      /* Touch play prioritizes the actual LCD. Enlarge the authored scene and
+         bias it downward so the toy shell may crop while the game stays large. */
+      body.touch-enabled canvas { top: 63%;
+        transform: translate(-50%, -50%) scale(1.18); }
       #loading {
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: #9aa3b2;
@@ -73,10 +77,19 @@
       #touch-driving .actions #touch-brake { height: clamp(72px, 21vh, 112px); }
       #touch-driving .actions #touch-shift { height: clamp(94px, 27vh, 140px); border-radius: 18px;
         line-height: 1.55; }
+      #touch-driving .session-actions { position: absolute;
+        top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+        display: flex; gap: 9px; pointer-events: auto; }
+      #touch-driving .session-actions .touch-button { min-width: 88px; height: 44px;
+        padding: 0 13px; border-radius: 10px; font-size: 12px;
+        background: rgba(6,12,22,.48); }
+      #touch-driving #touch-restart { color: rgba(255,210,150,.78);
+        border-color: rgba(255,185,105,.38); }
       #touch-jump.ready { color: #ffb5e0; border-color: rgba(255,82,181,.72);
         box-shadow: 0 0 18px rgba(255,42,155,.22); }
       #touch-screen-tap { position: absolute; left: 23%; top: 16%; width: 54%; height: 48%;
         pointer-events: auto; touch-action: none; background: transparent; border: 0; }
+      body.touch-enabled #touch-screen-tap { left: 18%; top: 23%; width: 64%; height: 57%; }
       body.direct-game #touch-screen-tap { left: 12%; top: 8%; width: 76%; height: 65%; }
       #touch-menu, #touch-name, #touch-leaderboard { display: none; position: absolute; left: 50%;
         bottom: max(22px, env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -113,6 +126,10 @@
     <button id="fullscreen-toggle" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
     <div id="touch-driving" class="touch-layer" aria-label="Touch driving controls">
       <button id="touch-screen-tap" aria-label="Tap game screen to pause or resume"></button>
+      <div class="session-actions" aria-label="Session controls">
+        <button id="touch-pause" class="touch-button" aria-label="Pause game">PAUSE</button>
+        <button id="touch-restart" class="touch-button" aria-label="Return to run selection">RESTART</button>
+      </div>
       <div class="steer">
         <button id="touch-left" class="touch-button" aria-label="Steer left">◀</button>
         <button id="touch-right" class="touch-button" aria-label="Steer right">▶</button>
@@ -149,7 +166,7 @@
       <div id="loading-text">spinning up the drum...</div>
       <div class="hint">first load prepares the game — later loads are cached</div>
       <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y cold-air &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
-      <div class="hint">slower GPU? append <code>?quality=low</code> to disable bloom and reduce toy-view resolution</div>
+      <div class="hint">mobile uses an optimized pixel budget automatically; append <code>?quality=high</code> to override</div>
     </div>
     <script>
       // CPAL creates its Web Audio context during Bevy startup, often before
@@ -190,6 +207,19 @@
         const storedTouch = (() => {
           try { return localStorage.getItem(storageKey); } catch (_) { return null; }
         })();
+        window.__ftdCoarsePointer = () => matchMedia('(pointer: coarse)').matches;
+        window.__ftdLocalCalendar = () => {
+          const now = new Date();
+          const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+          const southern = /^(Antarctica\/|Australia\/|Pacific\/(Auckland|Chatham)|America\/(Argentina\/|Sao_Paulo|Montevideo|Asuncion|Santiago|Punta_Arenas)|Africa\/(Johannesburg|Maseru|Mbabane|Windhoek|Gaborone|Maputo|Harare|Lusaka|Lilongwe|Blantyre))/.test(zone);
+          return JSON.stringify({
+            month: now.getMonth() + 1,
+            day: now.getDate(),
+            hour: now.getHours(),
+            minute: now.getMinutes(),
+            southern
+          });
+        };
         const state = {
           enabled: storedTouch === 'on' ||
             (storedTouch === null && matchMedia('(pointer: coarse)').matches),
@@ -219,6 +249,12 @@
         for (const [id, key] of [['touch-nitro','nitro_seq'], ['touch-jump','jump_seq']]) {
           byId(id).addEventListener('pointerdown', event => { event.preventDefault(); pulse(key); });
         }
+        byId('touch-pause').addEventListener('pointerdown', event => {
+          event.preventDefault(); pulse('pause_seq');
+        });
+        byId('touch-restart').addEventListener('pointerdown', event => {
+          event.preventDefault(); pulse('restart_seq');
+        });
         const shifts = new Map();
         const shift = byId('touch-shift');
         shift.addEventListener('pointerdown', event => {
@@ -283,6 +319,8 @@
           byId('touch-name').classList.toggle('active', game.end_mode === 'name_entry');
           byId('touch-leaderboard').classList.toggle('active', game.end_mode === 'leaderboard');
           byId('touch-jump').classList.toggle('ready', Boolean(game.jump_charge));
+          byId('touch-pause').textContent = game.paused ? 'RESUME' : 'PAUSE';
+          byId('touch-pause').setAttribute('aria-label', game.paused ? 'Resume game' : 'Pause game');
           byId('touch-crt').textContent = game.crt_enabled ? 'CRT ON' : 'CRT OFF';
           document.body.classList.toggle('direct-game', !game.toy);
           document.querySelectorAll('[data-difficulty]').forEach(button =>

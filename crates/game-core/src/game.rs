@@ -218,6 +218,9 @@ pub struct Game {
     pub session_remaining: f32,
     /// Performance-driven environment clock; LOW speed advances at real time.
     pub environment_time: f32,
+    /// Environment clock at the start of this run. Visuals may begin at any
+    /// point in the year, while competitive cycle counting still starts at 0.
+    environment_origin: f32,
     pub day_cycles: u64,
     pub cars_passed: u64,
     pub cars_bumped: u64,
@@ -290,6 +293,7 @@ impl Game {
             road_x: 0.0,
             session_remaining: duration_secs,
             environment_time: 0.0,
+            environment_origin: 0.0,
             day_cycles: 0,
             cars_passed: 0,
             cars_bumped: 0,
@@ -337,6 +341,30 @@ impl Game {
 
     pub fn difficulty(&self) -> Difficulty {
         self.difficulty
+    }
+
+    /// Start the visual environment at an arbitrary point in its year without
+    /// awarding already elapsed day/night cycles to the run score.
+    pub fn set_environment_start(&mut self, environment_time: f32) {
+        let start = environment_time
+            .max(0.0)
+            .rem_euclid(crate::environment::YEAR_SECS);
+        self.environment_time = start;
+        self.environment_origin = start;
+        self.day_cycles = 0;
+    }
+
+    /// Restore an absolute environment clock, including its completed-cycle
+    /// count. Used by deterministic QA scenarios that begin near a boundary.
+    pub fn set_environment_progress(&mut self, environment_time: f32) {
+        self.environment_time = environment_time.max(0.0);
+        self.environment_origin = 0.0;
+        self.day_cycles = (self.environment_time / DAY_SECS).floor() as u64;
+    }
+
+    /// Absolute day/night cycle used by presentation systems such as music.
+    pub fn environment_cycle_index(&self) -> u64 {
+        (self.environment_time / DAY_SECS).floor().max(0.0) as u64
     }
 
     fn rare_event_salt(&self) -> u64 {
@@ -523,6 +551,10 @@ impl Game {
         self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index, t);
     }
 
+    fn overlaps_pickup(&self, lane: f32, pickup_half_width: f32, t: &Tuning) -> bool {
+        (lane + self.road_x).abs() < t.car_half_width + pickup_half_width
+    }
+
     fn jump_pickup_for_cycle(&self, cycle: u64, t: &Tuning) -> Option<(f32, f32)> {
         let mut hash =
             self.seed ^ cycle.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x4A55_4D50_4B49_434B;
@@ -649,6 +681,7 @@ impl Game {
         self.road_x = 0.0;
         self.session_remaining = self.session_duration;
         self.environment_time = 0.0;
+        self.environment_origin = 0.0;
         self.day_cycles = 0;
         self.cars_passed = 0;
         self.cars_bumped = 0;
@@ -678,6 +711,14 @@ impl Game {
         self.difficulty = difficulty;
         self.session_duration = difficulty.duration_secs();
         self.start_run(t);
+    }
+
+    /// Clear the active run while preserving the selected course/difficulty.
+    /// The next menu confirmation can then start from a clean Ready state.
+    pub fn return_to_ready(&mut self, t: &Tuning) {
+        self.start_run(t);
+        self.phase = Phase::Ready;
+        self.paused = false;
     }
 
     fn update_recovery_readiness(&mut self, t: &Tuning) {
@@ -918,7 +959,9 @@ impl Game {
         let distance_delta = target * dt + (initial_speed - target) * ramp_secs * (1.0 - decay);
         self.distance += distance_delta;
         self.environment_time += distance_delta / t.scroll_speed_low;
-        self.day_cycles = (self.environment_time / DAY_SECS).floor().max(0.0) as u64;
+        self.day_cycles = ((self.environment_time - self.environment_origin) / DAY_SECS)
+            .floor()
+            .max(0.0) as u64;
         let pos = self.loop_pos();
 
         // road lateral dynamics: road drifts toward the printed curve target;
@@ -943,9 +986,9 @@ impl Game {
         // keeps appearances occasional and guarantees more than four per
         // 100-second light cycle at LOW speed.
         while self.distance >= self.next_nitro_distance {
-            let x_eff = self.next_nitro_lane + self.road_x;
-            let pickup_band = t.car_half_width + t.nitro_pickup_half_width;
-            if x_eff.abs() < pickup_band && self.nitro_charges < t.nitro_capacity {
+            if self.overlaps_pickup(self.next_nitro_lane, t.nitro_pickup_half_width, t)
+                && self.nitro_charges < t.nitro_capacity
+            {
                 self.nitro_charges += 1;
                 ev.nitro_collected_segment = self.nitro_charges.checked_sub(1);
             }
@@ -956,9 +999,9 @@ impl Game {
             .next_jump_distance
             .is_some_and(|distance| self.distance >= distance)
         {
-            let x_eff = self.next_jump_lane + self.road_x;
-            let pickup_band = t.car_half_width + t.jump_pickup_half_width;
-            if x_eff.abs() < pickup_band && !self.jump_charge {
+            if self.overlaps_pickup(self.next_jump_lane, t.jump_pickup_half_width, t)
+                && !self.jump_charge
+            {
                 self.jump_charge = true;
                 ev.jump_collected = true;
             }
@@ -1090,6 +1133,15 @@ impl Game {
         self.road_x = (self.road_x + d * t.bump_lateral_kick)
             .clamp(-t.max_lateral_offset, t.max_lateral_offset);
         self.speed *= t.bump_speed_retention;
+        // A collision immediately extinguishes the cold-air burn. Charges
+        // were already consumed at ignition, and the normal cooldown still
+        // applies so a crash cannot be used to retrigger the boost early.
+        if self.nitro_t > 0.0 {
+            self.nitro_t = 0.0;
+            self.nitro_cooldown = self.nitro_cooldown.max(t.nitro_cooldown_secs);
+            self.cold_air_hop_t = 0.0;
+            self.cold_air_hop_lockout_t = 0.0;
+        }
         self.recovery = match self.gear {
             Gear::High => Recovery::NeedLow,
             Gear::Low => Recovery::BuildSpeed,
@@ -1207,6 +1259,22 @@ mod tests {
         assert!(started.jump_started);
         assert!(!game.jump_charge);
         assert!(game.jump_active());
+    }
+
+    #[test]
+    fn pickup_hitboxes_accept_a_small_visible_edge_overlap() {
+        let (mut game, tuning) = game(50);
+        game.road_x = 0.0;
+
+        let nitro_edge = tuning.car_half_width + tuning.nitro_pickup_half_width;
+        assert!(game.overlaps_pickup(nitro_edge - 0.001, tuning.nitro_pickup_half_width, &tuning));
+        assert!(!game.overlaps_pickup(nitro_edge + 0.001, tuning.nitro_pickup_half_width, &tuning));
+
+        let jump_edge = tuning.car_half_width + tuning.jump_pickup_half_width;
+        assert!(game.overlaps_pickup(jump_edge - 0.001, tuning.jump_pickup_half_width, &tuning));
+        assert!(!game.overlaps_pickup(jump_edge + 0.001, tuning.jump_pickup_half_width, &tuning));
+        assert!(tuning.nitro_pickup_half_width > 0.20);
+        assert!(tuning.jump_pickup_half_width > 0.20);
     }
 
     #[test]
@@ -1866,6 +1934,37 @@ mod tests {
         assert!(ev.started);
         assert!(!g.paused);
         assert_eq!(g.distance, 0.0);
+    }
+
+    #[test]
+    fn returning_to_menu_clears_the_run_and_stays_ready() {
+        let (mut game, tuning) = game(241);
+        game.start_run(&tuning);
+        game.speed = 18.0;
+        game.distance = 321.0;
+        game.environment_time = 77.0;
+        game.day_cycles = 3;
+        game.cars_passed = 9;
+        game.nitro_charges = 3;
+        game.nitro_t = 1.5;
+        game.paused = true;
+
+        game.return_to_ready(&tuning);
+
+        assert_eq!(game.phase, Phase::Ready);
+        assert!(!game.paused);
+        assert_eq!(game.speed, 0.0);
+        assert_eq!(game.distance, 0.0);
+        assert_eq!(game.environment_time, 0.0);
+        assert_eq!(game.day_cycles, 0);
+        assert_eq!(game.cars_passed, 0);
+        assert_eq!(game.nitro_charges, 0);
+        assert_eq!(game.nitro_t, 0.0);
+        assert_eq!(game.session_remaining, game.session_duration());
+
+        let events = game.step(&InputState::default(), 1.0, &tuning);
+        assert_eq!(game.phase, Phase::Ready);
+        assert!(!events.started);
     }
 
     #[test]
@@ -2621,6 +2720,50 @@ mod tests {
         g.bump(&mut StepEvents::default(), &t, -1.0);
         g.bump(&mut StepEvents::default(), &t, 1.0);
         assert_eq!(g.recovery(), Recovery::NeedLow);
+    }
+
+    #[test]
+    fn crash_extinguishes_active_cold_air_and_starts_cooldown() {
+        let (mut game, tuning) = game(630);
+        game.start_run(&tuning);
+        game.nitro_t = 2.5;
+        game.cold_air_hop_t = 0.4;
+        let mut events = StepEvents::default();
+
+        game.bump(&mut events, &tuning, 1.0);
+
+        assert_eq!(game.nitro_t, 0.0);
+        assert_eq!(game.cold_air_hop_t, 0.0);
+        assert_eq!(game.nitro_cooldown, tuning.nitro_cooldown_secs);
+        assert_eq!(events.bump_direction, Some(1.0));
+    }
+
+    #[test]
+    fn randomized_environment_start_does_not_pre_score_cycles() {
+        let tuning = Tuning::default();
+        let mut game = Game::with_road(
+            631,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &tuning,
+        );
+        game.start_run(&tuning);
+        let start = crate::environment::SEASON_SECS * 3.5;
+        game.set_environment_start(start);
+
+        assert_eq!(game.environment_time, start);
+        assert_eq!(game.day_cycles, 0);
+        assert_eq!(game.environment_cycle_index(), 10);
+
+        game.speed = tuning.scroll_speed_low;
+        run_seconds(
+            &mut game,
+            crate::environment::DAY_SECS + 0.1,
+            &idle(),
+            &tuning,
+        );
+        assert_eq!(game.day_cycles, 1);
+        assert!(game.environment_cycle_index() >= 11);
     }
 
     #[test]

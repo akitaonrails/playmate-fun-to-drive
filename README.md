@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
-    <img src="docs/screenshots/v051-gameplay.webp" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
+    <img src="docs/screenshots/v060-gameplay.webp" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
   </a>
 </p>
 
@@ -18,13 +18,13 @@
 ## Gameplay
 
 <p align="center">
-  <a href="docs/media/playthrough.mp4">
-    <img src="docs/media/playthrough-preview.webp" alt="Animated preview of a Fun to Drive playthrough" width="720">
+  <a href="docs/media/playthrough-v060.mp4">
+    <img src="docs/media/playthrough-preview-v060.webp" alt="Animated preview of a Fun to Drive playthrough" width="720">
   </a>
 </p>
 
 <p align="center">
-  <strong><a href="docs/media/playthrough.mp4">▶ Watch the full 2:18 playthrough with sound</a></strong>
+  <strong><a href="docs/media/playthrough-v060.mp4">▶ Watch the full 2:10 playthrough with sound</a></strong>
 </p>
 
 A web/WASM recreation of the 80s/90s electromechanical dashboard driving
@@ -45,6 +45,8 @@ and tense industrial styles.
 At time-up, enter three initials for the local top-10 leaderboard for that
 difficulty (top five shown on the toy screen). Easy, Medium, and Hard keep
 separate local top-10 boards.
+Each run begins in the real-world season and day/night phase reported by the
+player's local system date, clock, and timezone.
 
 ## Controls
 
@@ -56,7 +58,9 @@ separate local top-10 boards.
 | B / Space | Use a collected Jump Kick: leap, spin, and clear traffic—unless you land on it |
 | A-Z / Backspace / Enter | Enter and submit three initials after time-up |
 | Left/Right + Enter | Select and start Easy / Medium / Hard |
-| R | Restart while driving; return to difficulty selection from the leaderboard |
+| P / Start | Pause or resume; the pause screen lists the available session controls |
+| R | Restart the current run |
+| Escape / Select while paused | Return to difficulty selection and reset the run |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
 | M | Mute / unmute audio |
@@ -64,7 +68,7 @@ separate local top-10 boards.
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
 | Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, rumble on bumps |
-| Touch | Enable with the upper-left button; left thumb steers, right thumb swipes LOW/HIGH and holds brake, with COLD-AIR/JUMP KICK buttons above the shift area; tap the game screen to pause |
+| Touch | Enable with the upper-left button; left thumb steers, right thumb shifts and brakes, COLD-AIR/JUMP KICK sit above the shift area, and dedicated PAUSE/RESUME and RESTART buttons sit at the top |
 
 ## Run it
 
