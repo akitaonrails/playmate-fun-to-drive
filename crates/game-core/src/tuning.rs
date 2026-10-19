@@ -24,8 +24,18 @@ pub struct Tuning {
     pub low_overrev_start: f32,
     /// Time constant of the speed ramp between gears (seconds).
     pub gear_ramp_secs: f32,
+    /// LOW gear uses a slightly gentler launch ramp than HIGH gear.
+    pub low_gear_ramp_secs: f32,
     /// Time constant while braking; larger than the gear ramp for a gradual stop.
     pub brake_ramp_secs: f32,
+    /// A calm, sustained straight lets HIGH gear creep from roughly 87 mph
+    /// past the speedometer's 88 mark.
+    pub straightaway_charge_secs: f32,
+    pub straightaway_curve_threshold: f32,
+    pub straightaway_steer_threshold: f32,
+    pub straightaway_speed_multiplier: f32,
+    pub normal_high_speed_cap: f32,
+    pub straightaway_high_speed_cap: f32,
     /// How strongly the printed curve pulls the road aside at the car row.
     pub curve_gain: f32,
     /// Fractional target-speed response per unit of road grade. Positive
@@ -66,6 +76,8 @@ pub struct Tuning {
     pub nitro_pickup_half_width: f32,
     pub nitro_lane_offset: f32,
     pub nitro_capacity: u8,
+    /// Minimum longitudinal separation between a pickup and traffic.
+    pub pickup_traffic_clearance_m: f32,
     /// Rare single-charge Jump Kick pickup and airborne behavior.
     pub jump_spawn_chance_easy_percent: u8,
     pub jump_spawn_chance_medium_percent: u8,
@@ -86,6 +98,9 @@ pub struct Tuning {
     pub traffic_easy: TrafficMotion,
     pub traffic_medium: TrafficMotion,
     pub traffic_hard: TrafficMotion,
+    /// Additional generated traffic cars relative to Easy.
+    pub traffic_medium_extra: u8,
+    pub traffic_hard_extra: u8,
     /// Crash/bump response.
     pub bump_target_speed_factor: f32,
     pub bump_lateral_kick: f32,
@@ -139,7 +154,14 @@ impl Default for Tuning {
             downshift_unsafe_retention: 0.82,
             low_overrev_start: 11.0,
             gear_ramp_secs: 0.6,
+            low_gear_ramp_secs: 0.68,
             brake_ramp_secs: 1.05,
+            straightaway_charge_secs: 2.4,
+            straightaway_curve_threshold: 0.12,
+            straightaway_steer_threshold: 0.14,
+            straightaway_speed_multiplier: 1.035,
+            normal_high_speed_cap: 87.0 / 3.6,
+            straightaway_high_speed_cap: 89.5 / 3.6,
             curve_gain: 1.20,
             slope_speed_gain: 1.75,
             slope_speed_min_factor: 0.89,
@@ -164,6 +186,7 @@ impl Default for Tuning {
             nitro_pickup_half_width: 0.24,
             nitro_lane_offset: 0.62,
             nitro_capacity: 3,
+            pickup_traffic_clearance_m: 5.0,
             jump_spawn_chance_easy_percent: 58,
             jump_spawn_chance_medium_percent: 48,
             jump_spawn_chance_hard_percent: 42,
@@ -190,6 +213,8 @@ impl Default for Tuning {
                 change_end_m: 18.0,
                 ..TrafficMotion::default()
             },
+            traffic_medium_extra: 1,
+            traffic_hard_extra: 2,
             bump_target_speed_factor: 0.35,
             bump_lateral_kick: 0.38,
             bump_speed_retention: 0.45,
@@ -256,8 +281,24 @@ impl Tuning {
         if !(0.1..=2.0).contains(&self.gear_ramp_secs) {
             return Err("gear_ramp_secs out of [0.1, 2.0]");
         }
+        if !(self.gear_ramp_secs..=2.0).contains(&self.low_gear_ramp_secs) {
+            return Err("low_gear_ramp_secs must be at least the HIGH gear ramp");
+        }
         if !(self.gear_ramp_secs..=3.0).contains(&self.brake_ramp_secs) {
             return Err("brake_ramp_secs must be gradual and at most 3 seconds");
+        }
+        if !(1.0..=5.0).contains(&self.straightaway_charge_secs)
+            || !(0.02..=0.25).contains(&self.straightaway_curve_threshold)
+            || !(0.05..=0.35).contains(&self.straightaway_steer_threshold)
+            || !(1.0..=1.08).contains(&self.straightaway_speed_multiplier)
+        {
+            return Err("straightaway overdrive tuning out of range");
+        }
+        if self.normal_high_speed_cap < self.scroll_speed_high
+            || self.straightaway_high_speed_cap <= 88.0 / 3.6
+            || self.straightaway_high_speed_cap <= self.normal_high_speed_cap
+        {
+            return Err("high-speed caps must preserve the 87/88 mph progression");
         }
         if !(0.0..=2.0).contains(&self.curve_gain) {
             return Err("curve_gain out of [0, 2]");
@@ -334,6 +375,9 @@ impl Tuning {
         if !(1..=8).contains(&self.nitro_capacity) {
             return Err("nitro_capacity out of [1, 8]");
         }
+        if !(2.0..=10.0).contains(&self.pickup_traffic_clearance_m) {
+            return Err("pickup_traffic_clearance_m out of [2, 10]");
+        }
         if self.jump_spawn_chance_easy_percent > 100
             || self.jump_spawn_chance_medium_percent > 100
             || self.jump_spawn_chance_hard_percent > 100
@@ -385,6 +429,9 @@ impl Tuning {
             && self.traffic_medium.chance_percent <= self.traffic_hard.chance_percent)
         {
             return Err("traffic chance must increase with difficulty");
+        }
+        if self.traffic_medium_extra > self.traffic_hard_extra || self.traffic_hard_extra > 4 {
+            return Err("traffic density extras must increase gently with difficulty");
         }
         if !(0.0..=1.0).contains(&self.bump_target_speed_factor)
             || !(0.0..=1.0).contains(&self.bump_speed_retention)
@@ -606,6 +653,27 @@ mod tests {
             },
             Tuning {
                 nitro_capacity: 0,
+                ..Tuning::default()
+            },
+            Tuning {
+                pickup_traffic_clearance_m: 0.0,
+                ..Tuning::default()
+            },
+            Tuning {
+                low_gear_ramp_secs: 0.2,
+                ..Tuning::default()
+            },
+            Tuning {
+                straightaway_speed_multiplier: 1.5,
+                ..Tuning::default()
+            },
+            Tuning {
+                straightaway_high_speed_cap: 88.0 / 3.6,
+                ..Tuning::default()
+            },
+            Tuning {
+                traffic_medium_extra: 3,
+                traffic_hard_extra: 2,
                 ..Tuning::default()
             },
             Tuning {

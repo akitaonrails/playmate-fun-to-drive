@@ -179,6 +179,15 @@ tone "$work_dir/confirm_a.wav" 0.20 square 440 -13
 tone "$work_dir/confirm_b.wav" 0.20 square 660 -14
 mix_to_ogg "$output_dir/menu_confirm.ogg" "$work_dir/confirm_a.wav" "$work_dir/confirm_b.wav"
 
+# Toy power switch: a dry plastic click followed by a very short tube thump.
+noise "$work_dir/power_click.wav" 0.045 white -8
+sox -R "$work_dir/power_click.wav" "$work_dir/power_click_f.wav" \
+  highpass 1200 lowpass 5200 fade t 0 0.045 0.025
+tone "$work_dir/power_thump.wav" 0.16 square 82-46 -17
+sox -R "$work_dir/power_thump.wav" "$work_dir/power_thump_p.wav" pad 0.025 0
+mix_to_ogg "$output_dir/toy_power.ogg" "$work_dir/power_click_f.wav" \
+  "$work_dir/power_thump_p.wav"
+
 tone "$work_dir/run_a.wav" 0.34 square 220-660 -13
 tone "$work_dir/run_b.wav" 0.34 square 330-990 -16
 noise "$work_dir/run_c.wav" 0.34 white -20

@@ -62,6 +62,9 @@ const SPEED_LINE_FAR_ROW: usize = 5;
 const VISIBILITY_BANDS: usize = 8;
 const HEADLIGHT_LAYERS: usize = 2;
 const PICKUP_VISUAL_SCALE: f32 = 1.22;
+const TIME_TRAVEL_SPEED_MPH: f32 = 88.0;
+const TIME_TRAVEL_DURATION_SECS: f32 = 2.25;
+const TIME_TRAIL_SEGMENTS: usize = 14;
 
 fn pickup_visual_scale(projection_scale: f32) -> f32 {
     projection_scale * PICKUP_VISUAL_SCALE
@@ -143,6 +146,15 @@ struct PlayerCarRoot;
 
 #[derive(Component)]
 struct PlayerCarShadow;
+
+#[derive(Component)]
+struct TimeCarRoot;
+
+#[derive(Component)]
+struct TimeTrail(usize);
+
+#[derive(Component)]
+struct TimeFlash;
 
 #[derive(Component)]
 struct WallClimbSurface;
@@ -298,6 +310,51 @@ pub struct RoadVisibilityVisuals {
 #[derive(Resource, Default)]
 pub struct NitroVisuals {
     pub intensity: f32,
+}
+
+/// Once-per-session state for the 88 mph time-machine easter egg.
+#[derive(Resource, Default)]
+struct TimeTravelVisuals {
+    triggered: bool,
+    active_secs: f32,
+    was_running: bool,
+    last_distance: f32,
+}
+
+impl TimeTravelVisuals {
+    fn active(&self) -> bool {
+        self.triggered && self.active_secs < TIME_TRAVEL_DURATION_SECS
+    }
+
+    fn update(
+        &mut self,
+        running: bool,
+        paused: bool,
+        distance: f32,
+        displayed_mph: f32,
+        straightaway_ready: bool,
+        dt: f32,
+    ) {
+        let new_session = running && (!self.was_running || distance + 0.5 < self.last_distance);
+        if new_session {
+            self.triggered = false;
+            self.active_secs = TIME_TRAVEL_DURATION_SECS;
+        }
+        if !running {
+            self.was_running = false;
+            return;
+        }
+        if !paused {
+            if !self.triggered && displayed_mph >= TIME_TRAVEL_SPEED_MPH && straightaway_ready {
+                self.triggered = true;
+                self.active_secs = 0.0;
+            } else if self.active() {
+                self.active_secs = (self.active_secs + dt.max(0.0)).min(TIME_TRAVEL_DURATION_SECS);
+            }
+        }
+        self.was_running = true;
+        self.last_distance = distance;
+    }
 }
 
 /// M10 rolling-tube overlays: bands printed on the drum + recess shading.
@@ -733,6 +790,7 @@ pub fn setup(mut commands: Commands) {
     commands.init_resource::<WeatherVisuals>();
     commands.init_resource::<RoadVisibilityVisuals>();
     commands.init_resource::<NitroVisuals>();
+    commands.init_resource::<TimeTravelVisuals>();
     commands.init_resource::<InstrumentVisuals>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
@@ -1168,6 +1226,70 @@ pub fn setup(mut commands: Commands) {
                 ));
             }
         });
+
+    // Stainless-steel time-machine homage. It is pooled at startup and only
+    // becomes visible for the once-per-session 88 mph straightaway pass.
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, -330.0, 0.76),
+            Visibility::Hidden,
+            TimeCarRoot,
+        ))
+        .with_children(|car| {
+            for x in [-31.0f32, 31.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.025, 0.03, 0.04), Vec2::new(13.0, 24.0)),
+                    Transform::from_xyz(x, -2.0, -0.02),
+                ));
+            }
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.48, 0.52, 0.55), Vec2::new(72.0, 28.0)),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.72, 0.76, 0.78), Vec2::new(62.0, 17.0)),
+                Transform::from_xyz(0.0, 10.0, 0.02),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.035, 0.055, 0.075), Vec2::new(46.0, 12.0)),
+                Transform::from_xyz(0.0, 10.0, 0.04),
+            ));
+            for y in [3.0f32, 6.0, 9.0, 12.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.10, 0.12, 0.14), Vec2::new(50.0, 2.0)),
+                    Transform::from_xyz(0.0, y, 0.05),
+                ));
+            }
+            for x in [-22.0f32, 22.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.98, 0.10, 0.05), Vec2::new(18.0, 5.0)),
+                    Transform::from_xyz(x, -8.0, 0.06),
+                ));
+            }
+            car.spawn((
+                Sprite::from_color(Color::linear_rgb(0.15, 1.30, 2.10), Vec2::new(13.0, 13.0)),
+                Transform::from_xyz(0.0, -1.0, 0.07)
+                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.04, 0.05, 0.06), Vec2::new(76.0, 5.0)),
+                Transform::from_xyz(0.0, -15.0, 0.03),
+            ));
+        });
+    for index in 0..TIME_TRAIL_SEGMENTS {
+        commands.spawn((
+            Sprite::from_color(Color::srgba(0.18, 0.78, 1.0, 0.0), Vec2::ONE),
+            Transform::from_xyz(0.0, -330.0, 0.70),
+            Visibility::Hidden,
+            TimeTrail(index),
+        ));
+    }
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.72, 0.95, 1.0, 0.0), Vec2::ONE),
+        Transform::from_xyz(0.0, HORIZON_Y - 28.0, 0.84),
+        Visibility::Hidden,
+        TimeFlash,
+    ));
 
     // Twin layered jets sit behind the player car. They remain pooled and
     // hidden until nitro is active so both the flat and toy-screen views see
@@ -2062,6 +2184,110 @@ fn sync_jump_car(
             0.0,
             pose.shadow_alpha * (1.0 - climb) * altitude_fade,
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TimeCarPose {
+    position: Vec2,
+    scale: f32,
+    car_visible: bool,
+    flash: f32,
+}
+
+fn time_car_pose(progress: f32) -> TimeCarPose {
+    let progress = progress.clamp(0.0, 1.0);
+    let travel = smoothstep((progress / 0.78).clamp(0.0, 1.0));
+    TimeCarPose {
+        position: Vec2::new(
+            -62.0 + travel * 40.0 + (progress * std::f32::consts::TAU * 2.0).sin() * 5.0,
+            -330.0 + travel * 418.0,
+        ),
+        scale: 1.18 + (0.18 - 1.18) * travel,
+        car_visible: progress < 0.78,
+        flash: (1.0 - ((progress - 0.82) / 0.18).abs()).clamp(0.0, 1.0),
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn sync_time_travel(
+    time: Res<Time>,
+    sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    mut state: ResMut<TimeTravelVisuals>,
+    mut car: Query<(&mut Transform, &mut Visibility), With<TimeCarRoot>>,
+    mut trails: Query<
+        (&TimeTrail, &mut Transform, &mut Sprite, &mut Visibility),
+        (Without<TimeCarRoot>, Without<TimeFlash>),
+    >,
+    mut flash: Query<
+        (&mut Transform, &mut Sprite, &mut Visibility),
+        (With<TimeFlash>, Without<TimeCarRoot>, Without<TimeTrail>),
+    >,
+) {
+    let running = matches!(sim.0.phase, Phase::Running);
+    state.update(
+        running,
+        sim.0.paused,
+        sim.0.distance,
+        sim.0.speed * 3.6,
+        sim.0.straightaway_overdrive_ready(&tuning.0),
+        time.delta_secs(),
+    );
+
+    let active = running && state.active();
+    let progress = if active {
+        state.active_secs / TIME_TRAVEL_DURATION_SECS
+    } else {
+        1.0
+    };
+    let pose = time_car_pose(progress);
+    if let Ok((mut transform, mut visibility)) = car.single_mut() {
+        transform.translation = Vec3::new(
+            pose.position.x,
+            pose.position.y,
+            if pose.position.y < CAR_Y { 0.46 } else { 0.78 },
+        );
+        transform.scale = Vec3::splat(pose.scale);
+        *visibility = if active && pose.car_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for (trail, mut transform, mut sprite, mut visibility) in &mut trails {
+        if active && pose.car_visible {
+            let index = trail.0 as f32;
+            let side = if trail.0 % 2 == 0 { -1.0 } else { 1.0 };
+            let flicker = 0.65 + 0.35 * (time.elapsed_secs() * 24.0 + index * 1.91).sin().abs();
+            transform.translation = Vec3::new(
+                pose.position.x + side * (7.0 + (trail.0 % 4) as f32 * 3.0) * pose.scale,
+                pose.position.y - 8.0 - index * (5.5 + pose.scale * 5.0),
+                0.72,
+            );
+            transform.rotation = Quat::from_rotation_z(side * (0.22 + index * 0.018));
+            sprite.custom_size = Some(Vec2::new(
+                (2.5 * pose.scale).max(1.5),
+                (18.0 * pose.scale).max(5.0),
+            ));
+            sprite.color = Color::linear_rgba(0.16, 0.95, 2.2, 0.34 + flicker * 0.46);
+            *visibility = Visibility::Visible;
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+    if let Ok((mut transform, mut sprite, mut visibility)) = flash.single_mut() {
+        let size = 34.0 + pose.flash * 180.0;
+        transform.translation.x = pose.position.x;
+        transform.translation.y = pose.position.y;
+        transform.rotation = Quat::from_rotation_z(progress * 7.0);
+        sprite.custom_size = Some(Vec2::splat(size));
+        sprite.color = Color::linear_rgba(0.65, 1.25, 2.4, pose.flash * 0.92);
+        *visibility = if active && pose.flash > 0.01 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -3384,19 +3610,28 @@ fn low_shift_hint_active(gear: Gear, speed: f32, threshold: f32) -> bool {
     gear == Gear::Low && speed >= threshold * 0.92
 }
 
+fn speedometer_readout(displayed_mph: f32, time_travel_active: bool) -> String {
+    if time_travel_active {
+        "088 mph".to_string()
+    } else {
+        format!("{:03.0} mph", displayed_mph.min(999.0))
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_instruments(
     time: Res<Time>,
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     effects: Res<crate::VisualEffects>,
+    time_travel: Res<TimeTravelVisuals>,
     mut visuals: ResMut<InstrumentVisuals>,
     mut needle: Query<
         (&mut Transform, &mut Sprite),
         (With<SpeedNeedle>, Without<SpeedTick>, Without<CooldownFill>),
     >,
     mut digital: Query<
-        &mut Text2d,
+        (&mut Text2d, &mut TextColor),
         (
             With<SpeedDigital>,
             Without<GearPanelText>,
@@ -3437,9 +3672,11 @@ fn sync_instruments(
     >,
     mut ticks: Query<(&SpeedTick, &mut Sprite), (Without<SpeedNeedle>, Without<CooldownFill>)>,
 ) {
-    let kmh = sim.0.speed * 3.6;
-    let angle = speedometer_angle(kmh);
-    let danger = speedometer_danger(kmh, crate::nitro_effects_active(&sim.0));
+    // Deliberately retain the arcade dial's existing numbers while relabeling
+    // them as mph for the 88-speed easter egg.
+    let displayed_mph = sim.0.speed * 3.6;
+    let angle = speedometer_angle(displayed_mph);
+    let danger = speedometer_danger(displayed_mph, crate::nitro_effects_active(&sim.0));
     let dir = Vec2::new(angle.cos(), angle.sin());
     if let Ok((mut tf, mut sprite)) = needle.single_mut() {
         tf.translation.x = SPEED_CENTER.x + dir.x * 31.0;
@@ -3451,8 +3688,18 @@ fn sync_instruments(
             Color::srgb(1.0, 0.85, 0.28)
         };
     }
-    if let Ok(mut text) = digital.single_mut() {
-        text.0 = format!("{:03.0} km/h", kmh.min(999.0));
+    if let Ok((mut text, mut color)) = digital.single_mut() {
+        if time_travel.active() {
+            text.0 = speedometer_readout(displayed_mph, true);
+            color.0 = if (time.elapsed_secs() * 9.0).fract() < 0.55 {
+                Color::linear_rgb(2.2, 0.05, 0.03)
+            } else {
+                Color::srgb(1.0, 0.72, 0.32)
+            };
+        } else {
+            text.0 = speedometer_readout(displayed_mph, false);
+            color.0 = Color::srgb(0.95, 0.90, 0.70);
+        }
     }
     let hint_charging = matches!(sim.0.phase, Phase::Running)
         && sim.0.recovery() == game_core::Recovery::Normal
@@ -3525,7 +3772,7 @@ fn sync_instruments(
             };
         }
     }
-    visuals.speed_kmh = kmh;
+    visuals.speed_kmh = displayed_mph;
     visuals.needle_angle = angle;
     visuals.overrev = sim.0.low_overrev(&tuning.0);
     visuals.cooldown = sim.0.nitro_cooldown;
@@ -3537,6 +3784,7 @@ fn sync_instruments(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn sync_difficulty_overlay(
     end: Res<crate::EndSession>,
+    intro: Res<crate::toy_view::StartupIntro>,
     leaderboard: Res<crate::LeaderboardState>,
     display: Res<crate::DisplaySettings>,
     mut root: Query<&mut Visibility, With<DifficultyOverlayRoot>>,
@@ -3552,11 +3800,16 @@ fn sync_difficulty_overlay(
         ),
     >,
 ) {
-    if !end.is_changed() && !leaderboard.is_changed() && !display.is_changed() {
+    if !end.is_changed()
+        && !intro.is_changed()
+        && !leaderboard.is_changed()
+        && !display.is_changed()
+    {
         return;
     }
     if let Ok(mut visibility) = root.single_mut() {
-        *visibility = if end.0.mode == crate::session::EndMode::DifficultySelect {
+        *visibility = if end.0.mode == crate::session::EndMode::DifficultySelect && intro.complete()
+        {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -3642,7 +3895,12 @@ pub fn add_view_systems(app: &mut App) {
         (sync_environment, sync_road_visibility).in_set(ViewSet::Environment),
     );
     app.add_systems(Update, sync_roads.in_set(ViewSet::Projection));
-    app.add_systems(Update, sync_nitro_visual_intensity.in_set(ViewSet::Effects));
+    app.add_systems(
+        Update,
+        (sync_nitro_visual_intensity, sync_time_travel)
+            .chain()
+            .in_set(ViewSet::Effects),
+    );
     app.add_systems(
         Update,
         (
@@ -3823,11 +4081,45 @@ mod tests {
     }
 
     #[test]
-    fn speedometer_maps_true_kmh_across_full_sweep() {
+    fn speedometer_keeps_the_existing_numeric_sweep() {
         assert!((speedometer_angle(0.0) - 225.0_f32.to_radians()).abs() < 1e-5);
         assert!((speedometer_angle(60.0) - 90.0_f32.to_radians()).abs() < 1e-5);
         assert!((speedometer_angle(120.0) + 45.0_f32.to_radians()).abs() < 1e-5);
         assert!(speedometer_angle(0.0) > speedometer_angle(120.0));
+        assert_eq!(speedometer_readout(87.4, false), "087 mph");
+        assert_eq!(speedometer_readout(112.0, true), "088 mph");
+    }
+
+    #[test]
+    fn time_machine_triggers_once_per_session_only_on_a_ready_straight() {
+        let mut state = TimeTravelVisuals::default();
+        state.update(true, false, 10.0, 89.0, false, 0.1);
+        assert!(!state.active());
+        state.update(true, false, 11.0, 87.9, true, 0.1);
+        assert!(!state.active());
+        state.update(true, false, 12.0, 89.0, true, 0.1);
+        assert!(state.active());
+
+        state.update(true, false, 20.0, 92.0, true, TIME_TRAVEL_DURATION_SECS);
+        assert!(!state.active());
+        state.update(true, false, 21.0, 95.0, true, 1.0);
+        assert!(!state.active(), "the same session must not retrigger");
+
+        state.update(false, false, 21.0, 0.0, false, 0.1);
+        state.update(true, false, 0.0, 89.0, true, 0.1);
+        assert!(state.active(), "a fresh session may trigger again");
+    }
+
+    #[test]
+    fn time_machine_pass_vanishes_below_the_top_edge_in_a_flash() {
+        let start = time_car_pose(0.0);
+        let vanish = time_car_pose(0.78);
+        let flash = time_car_pose(0.82);
+        assert!(start.position.y < CAR_Y);
+        assert!(!vanish.car_visible);
+        assert!(vanish.position.y < VIEW_TOP);
+        assert!(flash.flash > 0.95);
+        assert!(flash.scale < start.scale);
     }
 
     #[test]

@@ -23,6 +23,10 @@ fn aperture_grille(pixel: vec2<f32>) -> vec3<f32> {
 @fragment
 fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let enabled = params.x;
+    let power = clamp(params.w, 0.0, 1.0);
+    if power <= 0.001 {
+        return vec4<f32>(0.0015, 0.002, 0.003, 1.0);
+    }
     let dimensions = vec2<f32>(textureDimensions(source));
     let clean = textureSample(source, source_sampler, mesh.uv).rgb;
     let uv = warped_uv(mesh.uv);
@@ -50,6 +54,16 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let rolling_beam = 1.0 + 0.055 * exp(-pow((uv.y - roll_y) * 24.0, 2.0));
     let crt = aberrated * scan * mask * vignette * rolling_beam * 1.34;
     let strength = clamp(params.z * 1.45, 0.55, 1.0);
-    let color = mix(clean, crt, enabled * strength) * params.w;
+    // Old tube startup: a hot horizontal trace appears first, blooms open
+    // vertically, then settles into the live picture with a brief flicker.
+    let opening = smoothstep(0.06, 0.72, power) * 0.5;
+    let distance_to_beam = abs(uv.y - 0.5);
+    let revealed = 1.0 - smoothstep(opening, opening + 0.025, distance_to_beam);
+    let hot_trace = exp(-pow(distance_to_beam * 115.0, 2.0)) * (1.0 - power) * 1.8;
+    let startup_flicker = 0.07 + 0.07 * sin(params.y * 92.0 + power * 31.0);
+    let flicker = 1.0 - (1.0 - power) * startup_flicker;
+    let exposure = 1.22 + params.z * 0.16;
+    let color = mix(clean, crt, enabled * strength) * exposure * revealed * flicker
+        + vec3<f32>(0.64, 0.83, 1.0) * hot_trace;
     return vec4<f32>(color, 1.0);
 }

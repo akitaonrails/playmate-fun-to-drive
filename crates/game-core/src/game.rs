@@ -230,6 +230,8 @@ pub struct Game {
     pub flash: f32,
     /// Seconds accumulated off the road, used for presentation/audio intensity.
     pub off_road: f32,
+    /// Seconds of calm HIGH-gear driving accumulated on the current straight.
+    pub straightaway_charge: f32,
     /// True while the run is paused (Start button / P).
     pub paused: bool,
     /// Bump slow-down timer + kick direction.
@@ -267,7 +269,12 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64, difficulty: Difficulty, t: &Tuning) -> Self {
         let mut rng = Rng::new(seed);
-        let road = RoadLoop::generate(&mut rng);
+        let traffic_bonus = match difficulty {
+            Difficulty::Easy => 0,
+            Difficulty::Medium => t.traffic_medium_extra,
+            Difficulty::Hard => t.traffic_hard_extra,
+        };
+        let road = RoadLoop::generate_with_traffic_bonus(&mut rng, traffic_bonus);
         Self::with_road(seed, road, difficulty, t)
     }
 
@@ -286,7 +293,7 @@ impl Game {
         t: &Tuning,
     ) -> Self {
         assert!(duration_secs.is_finite() && duration_secs > 0.0);
-        Game {
+        let mut game = Game {
             seed,
             phase: Phase::Ready,
             road,
@@ -301,6 +308,7 @@ impl Game {
             cars_bumped: 0,
             flash: 0.0,
             off_road: 0.0,
+            straightaway_charge: 0.0,
             paused: false,
             bump_t: 0.0,
             bump_dir: 0.0,
@@ -324,8 +332,15 @@ impl Game {
             session_duration: duration_secs,
             weather: WeatherSchedule::new(seed),
             result: None,
-        }
-        .with_initial_jump_pickup(t)
+        };
+        (game.next_nitro_distance, game.next_nitro_lane) = game.safe_pickup_placement(
+            game.next_nitro_distance,
+            game.next_nitro_lane,
+            t.nitro_lane_offset,
+            t.nitro_pickup_half_width,
+            t,
+        );
+        game.with_initial_jump_pickup(t)
     }
 
     fn with_initial_jump_pickup(mut self, t: &Tuning) -> Self {
@@ -550,11 +565,60 @@ impl Game {
     fn advance_nitro_pickup(&mut self, t: &Tuning) {
         self.nitro_pickup_index += 1;
         self.next_nitro_distance += t.nitro_pickup_interval_m;
-        self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index, t);
+        let preferred = Self::nitro_lane(self.seed, self.nitro_pickup_index, t);
+        (self.next_nitro_distance, self.next_nitro_lane) = self.safe_pickup_placement(
+            self.next_nitro_distance,
+            preferred,
+            t.nitro_lane_offset,
+            t.nitro_pickup_half_width,
+            t,
+        );
     }
 
     fn overlaps_pickup(&self, lane: f32, pickup_half_width: f32, t: &Tuning) -> bool {
         (lane + self.road_x).abs() < t.car_half_width + pickup_half_width
+    }
+
+    fn safe_pickup_placement(
+        &self,
+        distance: f32,
+        preferred: f32,
+        lane_offset: f32,
+        pickup_half_width: f32,
+        t: &Tuning,
+    ) -> (f32, f32) {
+        let lanes = [preferred, -lane_offset, 0.0, lane_offset];
+        let lateral_clearance = pickup_half_width + t.hazard_half_width;
+        // Try alternate lanes first, then nudge the item forward in small
+        // deterministic steps if a three-wide traffic pack blocks all lanes.
+        for distance_step in 0..=8 {
+            let candidate_distance = distance + distance_step as f32 * 2.0;
+            let pickup_pos = candidate_distance.rem_euclid(self.road.length);
+            for (index, lane) in lanes.into_iter().enumerate() {
+                if lanes[..index]
+                    .iter()
+                    .any(|previous| (previous - lane).abs() < f32::EPSILON)
+                {
+                    continue;
+                }
+                let clear = self.road.hazards.iter().all(|hazard| {
+                    if hazard.kind != HazardKind::Oncoming {
+                        return true;
+                    }
+                    let longitudinal = signed_loop_delta(hazard.s, pickup_pos, self.road.length);
+                    longitudinal.abs() > t.pickup_traffic_clearance_m
+                        || (self.hazard_x_at(hazard, longitudinal.max(0.0), t) - lane).abs()
+                            >= lateral_clearance
+                });
+                if clear {
+                    return (candidate_distance, lane);
+                }
+            }
+        }
+        // The generated road cannot saturate all three lanes for this entire
+        // 16 m search band, but retain a deterministic fallback for explicit
+        // adversarial test roads.
+        (distance + 18.0, preferred)
     }
 
     fn jump_pickup_for_cycle(&self, cycle: u64, t: &Tuning) -> Option<(f32, f32)> {
@@ -582,7 +646,14 @@ impl Game {
         };
         let distance = (cycle as f32 + phase) * DAY_SECS * t.scroll_speed_low;
         let lanes = [-t.jump_lane_offset, 0.0, t.jump_lane_offset];
-        let lane = lanes[(hash.rotate_left(41) % lanes.len() as u64) as usize];
+        let preferred = lanes[(hash.rotate_left(41) % lanes.len() as u64) as usize];
+        let (distance, lane) = self.safe_pickup_placement(
+            distance,
+            preferred,
+            t.jump_lane_offset,
+            t.jump_pickup_half_width,
+            t,
+        );
         Some((distance, lane))
     }
 
@@ -616,6 +687,19 @@ impl Game {
     pub fn slope_speed_factor(&self, tuning: &Tuning) -> f32 {
         (1.0 - self.road_grade() * tuning.slope_speed_gain)
             .clamp(tuning.slope_speed_min_factor, tuning.slope_speed_max_factor)
+    }
+
+    pub fn straightaway_overdrive_ready(&self, tuning: &Tuning) -> bool {
+        self.straightaway_charge >= tuning.straightaway_charge_secs
+    }
+
+    fn calm_straight(&self, input: &InputState, tuning: &Tuning) -> bool {
+        self.gear == Gear::High
+            && self.recovery == Recovery::Normal
+            && input.brake <= f32::EPSILON
+            && input.steer.abs() <= tuning.straightaway_steer_threshold
+            && self.road_x.abs() <= tuning.off_road_limit
+            && self.road.curve_at(self.loop_pos()).abs() <= tuning.straightaway_curve_threshold
     }
 
     pub fn off_road_intensity(&self, tuning: &Tuning) -> f32 {
@@ -694,6 +778,7 @@ impl Game {
         self.cars_bumped = 0;
         self.flash = 0.0;
         self.off_road = 0.0;
+        self.straightaway_charge = 0.0;
         self.bump_t = 0.0;
         self.bump_dir = 0.0;
         self.nitro_charges = 0;
@@ -701,7 +786,13 @@ impl Game {
         self.nitro_cooldown = 0.0;
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
-        self.next_nitro_lane = Self::nitro_lane(self.seed, 0, t);
+        (self.next_nitro_distance, self.next_nitro_lane) = self.safe_pickup_placement(
+            self.next_nitro_distance,
+            Self::nitro_lane(self.seed, 0, t),
+            t.nitro_lane_offset,
+            t.nitro_pickup_half_width,
+            t,
+        );
         self.jump_charge = false;
         self.jump_t = 0.0;
         self.cold_air_hop_t = 0.0;
@@ -835,6 +926,7 @@ impl Game {
             let bump_active = self.bump_t > 0.0;
             let jump_active = self.jump_t > 0.0;
             let cold_air_hop_active = self.cold_air_hop_t > 0.0;
+            let straightaway_charging = self.calm_straight(input, t);
             let mut interval = remaining;
             if nitro_active {
                 interval = interval.min(self.nitro_t);
@@ -847,6 +939,11 @@ impl Game {
             }
             if cold_air_hop_active {
                 interval = interval.min(self.cold_air_hop_t);
+            }
+            if straightaway_charging && !self.straightaway_overdrive_ready(t) {
+                interval = interval.min(t.straightaway_charge_secs - self.straightaway_charge);
+            } else if !straightaway_charging && self.straightaway_charge > 0.0 {
+                interval = interval.min(self.straightaway_charge * 0.5);
             }
 
             self.integrate_running_interval(
@@ -892,6 +989,12 @@ impl Game {
                     ev.cold_air_hop_landed = true;
                 }
             }
+            if straightaway_charging {
+                self.straightaway_charge =
+                    (self.straightaway_charge + interval).min(t.straightaway_charge_secs);
+            } else {
+                self.straightaway_charge = (self.straightaway_charge - interval * 2.0).max(0.0);
+            }
             remaining = (remaining - interval).max(0.0);
         }
         self.cold_air_hop_lockout_t = (self.cold_air_hop_lockout_t - dt).max(0.0);
@@ -932,6 +1035,12 @@ impl Game {
         if bump_active && self.recovery != Recovery::NeedLow {
             target *= t.bump_target_speed_factor;
         }
+        if self.straightaway_overdrive_ready(t)
+            && self.gear == Gear::High
+            && self.recovery == Recovery::Normal
+        {
+            target *= t.straightaway_speed_multiplier;
+        }
         if nitro_active && self.recovery == Recovery::Normal {
             target *= t.nitro_speed_multiplier;
         }
@@ -939,12 +1048,26 @@ impl Game {
             target *= t.jump_speed_multiplier;
         }
         target *= self.slope_speed_factor(t);
+        if self.gear == Gear::High
+            && self.recovery == Recovery::Normal
+            && !nitro_active
+            && !jump_active
+        {
+            let cap = if self.straightaway_overdrive_ready(t) {
+                t.straightaway_high_speed_cap
+            } else {
+                t.normal_high_speed_cap
+            };
+            target = target.min(cap);
+        }
         target *= off_road_speed_factor(self.road_x, t);
         let brake = input.brake.clamp(0.0, 1.0);
         target *= 1.0 - brake;
         let initial_speed = self.speed;
         let ramp_secs = if brake > 0.0 {
             t.brake_ramp_secs
+        } else if self.gear == Gear::Low {
+            t.low_gear_ramp_secs
         } else {
             t.gear_ramp_secs
         };
@@ -1141,6 +1264,7 @@ impl Game {
         self.bump_t = t.crash_flash_secs;
         self.bump_dir = d;
         self.off_road = 0.0;
+        self.straightaway_charge = 0.0;
         self.road_x = (self.road_x + d * t.bump_lateral_kick)
             .clamp(-t.max_lateral_offset, t.max_lateral_offset);
         self.speed *= t.bump_speed_retention;
@@ -1335,6 +1459,36 @@ mod tests {
         assert!(!game.overlaps_pickup(jump_edge + 0.001, tuning.jump_pickup_half_width, &tuning));
         assert!(tuning.nitro_pickup_half_width > 0.20);
         assert!(tuning.jump_pickup_half_width > 0.20);
+    }
+
+    #[test]
+    fn pickup_placement_moves_clear_of_three_wide_traffic() {
+        let tuning = Tuning::default();
+        let hazards = [-tuning.nitro_lane_offset, 0.0, tuning.nitro_lane_offset]
+            .map(|x| Hazard {
+                kind: HazardKind::Oncoming,
+                x,
+                s: tuning.nitro_pickup_first_m,
+            })
+            .to_vec();
+        let game = Game::with_road(
+            81,
+            RoadLoop::straight(200.0, hazards),
+            Difficulty::Hard,
+            &tuning,
+        );
+
+        assert!(game.next_nitro_distance > tuning.nitro_pickup_first_m);
+        for hazard in &game.road.hazards {
+            let delta = signed_loop_delta(
+                hazard.s,
+                game.next_nitro_distance.rem_euclid(game.road.length),
+                game.road.length,
+            );
+            let separated_laterally = (hazard.x - game.next_nitro_lane).abs()
+                >= tuning.nitro_pickup_half_width + tuning.hazard_half_width;
+            assert!(delta.abs() > tuning.pickup_traffic_clearance_m || separated_laterally);
+        }
     }
 
     #[test]
@@ -1554,6 +1708,73 @@ mod tests {
         run_seconds(&mut g2, 1.0, &idle(), &t2);
         assert!(v_high_after_1s > g2.speed, "HIGH must out-run LOW");
         assert!(v_high_after_1s <= t.scroll_speed_high * 1.001);
+    }
+
+    #[test]
+    fn low_gear_launch_is_gentler_than_the_high_gear_ramp() {
+        let t = Tuning::default();
+        let mut gentler = Game::with_road(
+            2,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        gentler.start_run(&t);
+        let mut original = gentler.clone();
+        let original_tuning = Tuning {
+            low_gear_ramp_secs: t.gear_ramp_secs,
+            ..t
+        };
+        run_seconds(&mut gentler, 0.5, &idle(), &t);
+        run_seconds(&mut original, 0.5, &idle(), &original_tuning);
+        assert!(gentler.speed < original.speed);
+        assert!(gentler.speed > original.speed * 0.9);
+    }
+
+    #[test]
+    fn sustained_straight_high_gear_creeps_past_88_on_the_unchanged_dial() {
+        let t = Tuning::default();
+        let mut game = Game::with_road(
+            2,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        game.start_run(&t);
+        game.gear = Gear::High;
+        game.speed = game.high_speed_target(&t);
+        assert!(game.speed * 3.6 < 88.0);
+
+        run_seconds(&mut game, 4.0, &idle(), &t);
+
+        assert!(game.straightaway_overdrive_ready(&t));
+        assert!(game.speed * 3.6 > 88.0);
+        assert!(game.speed * 3.6 < 91.0);
+    }
+
+    #[test]
+    fn steering_prevents_straightaway_overdrive() {
+        let t = Tuning::default();
+        let mut game = Game::with_road(
+            2,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        game.start_run(&t);
+        game.gear = Gear::High;
+        game.speed = game.high_speed_target(&t);
+        run_seconds(
+            &mut game,
+            4.0,
+            &InputState {
+                steer: 0.25,
+                ..idle()
+            },
+            &t,
+        );
+        assert!(!game.straightaway_overdrive_ready(&t));
+        assert!(game.speed * 3.6 < 88.0);
     }
 
     #[test]
@@ -2049,7 +2270,7 @@ mod tests {
             DT,
             &t,
         );
-        run_seconds(&mut high, 1.2, &idle(), &t);
+        run_seconds(&mut high, 1.4, &idle(), &t);
         high.step(
             &InputState {
                 gear_request: Some(Gear::High),
@@ -2962,10 +3183,10 @@ mod tests {
             &t,
         );
         let target = t.scroll_speed_low * t.nitro_speed_multiplier;
-        let decay = (-t.nitro_duration_secs / t.gear_ramp_secs).exp();
+        let decay = (-t.nitro_duration_secs / t.low_gear_ramp_secs).exp();
         let expected_speed = target + (t.scroll_speed_low - target) * decay;
         let expected_distance = target * t.nitro_duration_secs
-            + (t.scroll_speed_low - target) * t.gear_ramp_secs * (1.0 - decay);
+            + (t.scroll_speed_low - target) * t.low_gear_ramp_secs * (1.0 - decay);
 
         assert!(ev.nitro_started);
         assert!((g.speed - expected_speed).abs() < 0.0001);
@@ -3078,6 +3299,25 @@ mod tests {
             assert!(motion.change_end_m >= 18.0);
             assert!(motion.change_start_m - motion.change_end_m >= 16.0);
         }
+    }
+
+    #[test]
+    fn medium_and_hard_add_only_a_small_amount_of_traffic() {
+        let t = Tuning::default();
+        let traffic_count = |difficulty| {
+            Game::new(314, difficulty, &t)
+                .road
+                .hazards
+                .iter()
+                .filter(|hazard| hazard.kind == HazardKind::Oncoming)
+                .count()
+        };
+        let easy = traffic_count(Difficulty::Easy);
+        let medium = traffic_count(Difficulty::Medium);
+        let hard = traffic_count(Difficulty::Hard);
+        assert_eq!(medium, easy + usize::from(t.traffic_medium_extra));
+        assert_eq!(hard, easy + usize::from(t.traffic_hard_extra));
+        assert!(hard <= easy + 2, "difficulty increase must stay subtle");
     }
 
     fn rare_help_test_game(seed: u64) -> (Game, Tuning, u64) {

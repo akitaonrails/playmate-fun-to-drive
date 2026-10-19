@@ -492,6 +492,7 @@ fn main() {
         qa_start_environment_time,
     })
     .insert_resource(SceneryRun::new(qa_mode))
+    .insert_resource(toy_view::StartupIntro::new(!qa_mode))
     .insert_resource(render_quality)
     .insert_resource(LeaderboardState {
         entries: leaderboard,
@@ -502,12 +503,15 @@ fn main() {
     .insert_resource(Sim({
         // Seeded technical loop: mixed-radius corners, rolling elevation,
         // traffic, and collidable roadside scenery.
-        let mut rng = game_core::Rng::new(20261015);
-        let road = game_core::RoadLoop::generate(&mut rng);
         if let Some(duration) = qa_duration {
+            let mut rng = game_core::Rng::new(20261015);
+            let road = game_core::RoadLoop::generate_with_traffic_bonus(
+                &mut rng,
+                tuning.traffic_medium_extra,
+            );
             Game::with_road_for_duration(20261015, road, Difficulty::Medium, duration, &tuning)
         } else {
-            Game::with_road(20261015, road, Difficulty::Medium, &tuning)
+            Game::new(20261015, Difficulty::Medium, &tuning)
         }
     }))
     .init_resource::<FrameInput>()
@@ -550,6 +554,7 @@ fn main() {
         (
             tick_visual_effects,
             (toy_view::spawn_toy, toy_view::paint_screen).chain(),
+            toy_view::animate_startup_intro,
             toy_view::toggle_mode,
             (toy_view::apply_body_dynamics, toy_view::animate_parts).chain(),
             toy_view::turbo_lamp,
@@ -579,6 +584,7 @@ fn initial_crt_enabled(stored: Option<&str>, coarse_pointer: bool) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tick_menu_idle(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -586,9 +592,10 @@ fn tick_menu_idle(
     pads: Query<&Gamepad>,
     touch: Res<TouchInput>,
     end: Res<EndSession>,
+    intro: Res<toy_view::StartupIntro>,
     mut idle: ResMut<MenuIdle>,
 ) {
-    if end.0.mode != EndMode::DifficultySelect {
+    if end.0.mode != EndMode::DifficultySelect || !intro.complete() {
         idle.seconds = 0.0;
         return;
     }
@@ -797,7 +804,11 @@ fn handle_end_input(
     mut audio_events: ResMut<audio::AudioEvents>,
     touch: Res<TouchInput>,
     mut launch: ResMut<LaunchSequence>,
+    intro: Res<toy_view::StartupIntro>,
 ) {
+    if !intro.complete() {
+        return;
+    }
     match end.0.mode {
         EndMode::Playing => {
             let select = pads
@@ -885,7 +896,15 @@ fn handle_end_input(
                         &tuning.0,
                     );
                 } else {
-                    sim.0.restart_with_difficulty(difficulty, &tuning.0);
+                    sim.0 = Game::new(sim.0.seed, difficulty, &tuning.0);
+                    let _ = sim.0.step(
+                        &InputState {
+                            reset: true,
+                            ..default()
+                        },
+                        0.0,
+                        &tuning.0,
+                    );
                 }
                 if let Some(environment_time) = config.qa_start_environment_time {
                     sim.0.set_environment_progress(environment_time);

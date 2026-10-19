@@ -91,6 +91,12 @@ pub struct RoadLoop {
 
 impl RoadLoop {
     pub fn generate(rng: &mut Rng) -> Self {
+        Self::generate_with_traffic_bonus(rng, 0)
+    }
+
+    /// Generate the same authored loop with a small difficulty-specific
+    /// traffic increase. The bonus is deliberately bounded by tuning.
+    pub fn generate_with_traffic_bonus(rng: &mut Rng, traffic_bonus: u8) -> Self {
         let length = rng.range(180.0, 240.0);
         let direction = if rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
         let curve = Self::technical_curve(direction);
@@ -107,7 +113,7 @@ impl RoadLoop {
             );
         }
 
-        let traffic_count = rng.range(12.0, 17.0).round() as usize;
+        let traffic_count = rng.range(12.0, 17.0).round() as usize + usize::from(traffic_bonus);
         let scenery_count = rng.range(8.0, 13.0).round() as usize;
         let traffic_motion = TrafficMotion::default();
         debug_assert!(traffic_motion.validate().is_ok());

@@ -52,6 +52,7 @@ player's local system date, clock, and timezone.
 
 - Three timed difficulties with separate local leaderboards for day/night cycles, cars passed, cars bumped, and total score.
 - Manual LOW/HIGH shifting, analog braking, crash recovery, an analog speedometer, and gamepad rumble.
+- A one-time cinematic toy reveal that orbits from a full dashboard view into the driving camera, followed by an old-CRT power-on and switch click.
 - A three-charge **COLD-AIR** thruster with twin jets, near-car speed streaks, cooldown, and crest-launch behavior.
 - Rare **JUMP KICK** pickups that let the Roadster leap and spin over traffic—with a risky landing.
 - Continuously changing day/night cycles, real-world starting season and time of day, rolling terrain, and sharp procedural curves.
@@ -60,13 +61,14 @@ player's local system date, clock, and timezone.
 - Randomized city and landscape backdrops including Tokyo neon, Paris silhouettes, Vegas-style lights, mountains, forests, and open road.
 - Rare background events: shooting stars, bird flocks, a hurricane that can lift traffic and trees, and a nighttime UFO abduction.
 - Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and responsive ultrawide/mobile presentation.
+- A hidden 88 mph straightaway event: hold a clean line beyond the normal 87 mph ceiling to summon a blue-electric time machine once per session.
 
 ## Controls
 
 | Input | Action |
 |---|---|
 | Arrow Left/Right | Steer (tap = light nudge, hold = full lock ramp) |
-| Q / E | Select LOW / HIGH gear (HIGH unlocks at 10 m/s / 36 km/h) |
+| Q / E | Select LOW / HIGH gear (HIGH unlocks near the LOW-gear redline) |
 | Y | Fire the cold-air thruster after collecting all three charges |
 | B / Space | Use a collected Jump Kick: leap, spin, and clear traffic—unless you land on it |
 | A-Z / Backspace / Enter | Enter and submit three initials after time-up |

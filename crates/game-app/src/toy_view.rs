@@ -21,6 +21,12 @@ use crate::Sim;
 pub const CRT_STORAGE_KEY: &str = "fun-to-drive.crt.v1";
 const CRT_SHADER_PATH: &str = "shaders/crt_screen.wesl";
 const ROADSTER_FRONT_LAMP_X: [f32; 2] = [-0.008, 0.008];
+const INTRO_ORBIT_SECS: f32 = 5.2;
+const INTRO_CRT_POWER_SECS: f32 = 0.9;
+const INTRO_TOTAL_SECS: f32 = INTRO_ORBIT_SECS + INTRO_CRT_POWER_SECS;
+const INTRO_CAMERA_START_ANGLE: f32 = -1.30;
+const INTRO_CAMERA_START_RADIUS: f32 = 0.78;
+const SCREEN_GLOW_INTENSITY: f32 = 88.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -117,9 +123,44 @@ pub struct GameCamera;
 #[derive(Component)]
 pub struct ToyCamera;
 
+/// One-shot presentation sequence for a fresh page load. It deliberately
+/// lives outside the deterministic game state and is not reset with a run.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct StartupIntro {
+    elapsed: f32,
+    enabled: bool,
+}
+
+impl StartupIntro {
+    pub(crate) fn new(enabled: bool) -> Self {
+        Self {
+            elapsed: if enabled { 0.0 } else { INTRO_TOTAL_SECS },
+            enabled,
+        }
+    }
+
+    pub(crate) fn complete(self) -> bool {
+        !self.enabled || self.elapsed >= INTRO_TOTAL_SECS
+    }
+
+    fn camera_progress(self) -> f32 {
+        smoothstep01(self.elapsed / INTRO_ORBIT_SECS)
+    }
+
+    pub(crate) fn screen_power(self) -> f32 {
+        if !self.enabled {
+            return 1.0;
+        }
+        smoothstep01((self.elapsed - INTRO_ORBIT_SECS) / INTRO_CRT_POWER_SECS)
+    }
+}
+
 /// Parent of the whole 3D diorama (desk + toy scene); hidden in game mode.
 #[derive(Component)]
 pub struct ToyRoot;
+
+#[derive(Component)]
+pub struct ScreenGlowLight;
 
 /// Static dorm-room scene root. Steering/crash pose is deliberately applied
 /// only to `ToyRoot`, which is a child of this unmoving environment.
@@ -147,6 +188,25 @@ pub const SCREEN_H: f32 = 0.11875;
 const TOY_CAMERA_POSITION: Vec3 = Vec3::new(0.0, 0.183, 0.265);
 const TOY_CAMERA_TARGET: Vec3 = Vec3::new(0.0, 0.128, 0.02);
 
+fn smoothstep01(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
+}
+
+fn intro_camera_transform(progress: f32) -> Transform {
+    let progress = progress.clamp(0.0, 1.0);
+    let radius = INTRO_CAMERA_START_RADIUS
+        + (TOY_CAMERA_POSITION.z - TOY_CAMERA_TARGET.z - INTRO_CAMERA_START_RADIUS) * progress;
+    let angle = INTRO_CAMERA_START_ANGLE * (1.0 - progress);
+    let height = 0.34 + (TOY_CAMERA_POSITION.y - 0.34) * progress;
+    let position = Vec3::new(
+        TOY_CAMERA_TARGET.x + radius * angle.sin(),
+        height,
+        TOY_CAMERA_TARGET.z + radius * angle.cos(),
+    );
+    Transform::from_translation(position).looking_at(TOY_CAMERA_TARGET, Vec3::Y)
+}
+
 #[derive(Resource)]
 pub struct GameImage(pub Handle<Image>);
 
@@ -167,6 +227,7 @@ pub fn setup(
     assets: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
     quality: Res<crate::RenderQuality>,
+    intro: Res<StartupIntro>,
 ) {
     commands.init_resource::<ViewState>();
     let size = Extent3d {
@@ -200,7 +261,7 @@ pub fn setup(
             is_active: false,
             ..default()
         },
-        Transform::from_translation(TOY_CAMERA_POSITION).looking_at(TOY_CAMERA_TARGET, Vec3::Y),
+        intro_camera_transform(intro.camera_progress()),
         // ACES is shader-only, preserving HDR-to-display contrast without the
         // compressed LUT assets (and zstd decoder) required by TonyMcMapface.
         bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
@@ -419,13 +480,14 @@ pub fn setup_diorama(
                     toy.spawn((
                         PointLight {
                             color: Color::srgb(0.45, 0.72, 1.0),
-                            intensity: 88.0,
+                            intensity: 0.0,
                             range: 0.38,
                             radius: 0.035,
                             shadow_maps_enabled: false,
                             ..default()
                         },
                         Transform::from_xyz(0.0, 0.177, 0.074),
+                        ScreenGlowLight,
                     ));
                     toy.spawn((
                         Transform::from_xyz(0.048, 0.0815, 0.050)
@@ -882,6 +944,7 @@ pub fn paint_screen(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut crt_materials: ResMut<Assets<CrtScreenMaterial>>,
     display: Res<crate::DisplaySettings>,
+    intro: Res<StartupIntro>,
     mut mat_handle: ResMut<ScreenMatHandle>,
     mut paint_state: ResMut<ScreenPaintState>,
     screens: Query<(Entity, &Name), (With<Mesh3d>, Without<ScreenPainted>)>,
@@ -907,7 +970,12 @@ pub fn paint_screen(
         } else if name.as_str().starts_with("Screen") && !paint_state.screen {
             let mat = crt_materials.add(CrtScreenMaterial {
                 source: game_image.0.clone(),
-                params: Vec4::new(if display.crt_enabled { 1.0 } else { 0.0 }, 0.0, 0.5, 1.22),
+                params: Vec4::new(
+                    if display.crt_enabled { 1.0 } else { 0.0 },
+                    0.0,
+                    0.5,
+                    intro.screen_power(),
+                ),
             });
             mat_handle.0 = Some(mat.clone());
             commands
@@ -926,6 +994,7 @@ pub fn update_screen_mat(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     display: Res<crate::DisplaySettings>,
+    intro: Res<StartupIntro>,
     mut view: ResMut<ViewState>,
     mat_handle: Res<ScreenMatHandle>,
     mut materials: ResMut<Assets<CrtScreenMaterial>>,
@@ -945,8 +1014,38 @@ pub fn update_screen_mat(
             if display.crt_enabled { 1.0 } else { 0.0 },
             time.elapsed_secs(),
             view.toy_look,
-            1.22 + view.toy_look * 0.16,
+            intro.screen_power(),
         );
+    }
+}
+
+/// Holds on a wide three-quarter view until the toy and its screen are ready,
+/// then arcs into the authored play camera. The screen remains electrically
+/// dark during the orbit and powers up only after the camera settles.
+pub fn animate_startup_intro(
+    time: Res<Time>,
+    paint: Res<ScreenPaintState>,
+    mut intro: ResMut<StartupIntro>,
+    mut camera: Query<&mut Transform, With<ToyCamera>>,
+    mut screen_light: Query<&mut PointLight, With<ScreenGlowLight>>,
+    mut audio_events: ResMut<crate::audio::AudioEvents>,
+) {
+    if !paint.screen {
+        return;
+    }
+    if intro.enabled && intro.elapsed < INTRO_TOTAL_SECS {
+        let previous = intro.elapsed;
+        intro.elapsed = (intro.elapsed + time.delta_secs()).min(INTRO_TOTAL_SECS);
+        if previous < INTRO_ORBIT_SECS && intro.elapsed >= INTRO_ORBIT_SECS {
+            crate::bridge::resume_audio();
+            audio_events.emit(crate::audio::AudioCue::ToyPower);
+        }
+    }
+    if let Ok(mut transform) = camera.single_mut() {
+        *transform = intro_camera_transform(intro.camera_progress());
+    }
+    if let Ok(mut light) = screen_light.single_mut() {
+        light.intensity = SCREEN_GLOW_INTENSITY * intro.screen_power();
     }
 }
 
@@ -1119,6 +1218,47 @@ mod tests {
         let game = GAME_W as f32 / GAME_H as f32;
         let screen = SCREEN_W / SCREEN_H;
         assert!((game - screen).abs() < 1e-3, "{game} vs {screen}");
+    }
+
+    #[test]
+    fn startup_camera_reveals_the_whole_toy_then_lands_on_the_authored_view() {
+        let start = intro_camera_transform(0.0);
+        let middle = intro_camera_transform(0.5);
+        let end = intro_camera_transform(1.0);
+        let final_view =
+            Transform::from_translation(TOY_CAMERA_POSITION).looking_at(TOY_CAMERA_TARGET, Vec3::Y);
+
+        assert!(
+            start.translation.distance(TOY_CAMERA_TARGET)
+                > final_view.translation.distance(TOY_CAMERA_TARGET) * 2.5
+        );
+        assert!(start.translation.x < -0.5);
+        assert!(middle.translation.x < -0.1);
+        assert!(end.translation.abs_diff_eq(final_view.translation, 1e-6));
+        assert!(end.rotation.abs_diff_eq(final_view.rotation, 1e-6));
+    }
+
+    #[test]
+    fn startup_screen_stays_dark_until_camera_lands_then_opens() {
+        let mut intro = StartupIntro::new(true);
+        assert_eq!(intro.screen_power(), 0.0);
+        assert!(!intro.complete());
+
+        intro.elapsed = INTRO_ORBIT_SECS - 0.01;
+        assert_eq!(intro.screen_power(), 0.0);
+        intro.elapsed = INTRO_ORBIT_SECS + INTRO_CRT_POWER_SECS * 0.5;
+        assert!((intro.screen_power() - 0.5).abs() < 1e-5);
+        intro.elapsed = INTRO_TOTAL_SECS;
+        assert_eq!(intro.screen_power(), 1.0);
+        assert!(intro.complete());
+    }
+
+    #[test]
+    fn qa_mode_bypasses_the_page_load_intro() {
+        let intro = StartupIntro::new(false);
+        assert!(intro.complete());
+        assert_eq!(intro.camera_progress(), 1.0);
+        assert_eq!(intro.screen_power(), 1.0);
     }
 
     #[test]

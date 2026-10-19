@@ -5,6 +5,30 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.8.0] — 2026-10-19
+
+- Added a one-time page-load cinematic: the camera begins with the complete
+  dashboard toy in view, arcs around it while pushing in, lands exactly on the
+  normal play framing, then powers the dark screen on with an old-CRT trace,
+  screen-light bloom, and a dedicated 16-bit mechanical switch click before
+  revealing the difficulty menu.
+- Kept normal top speed near 87 on the unchanged speedometer scale. Holding a
+  calm line through a sustained straight now opens a small overdrive window
+  beyond 88; steering, braking, leaving the road, or crashing interrupts its
+  charge.
+- Added a once-per-session 88 mph event with a stainless time-machine-inspired
+  car racing past from behind, blue electrical trails, a bright disappearance
+  flash below the horizon, and a blinking red 088 readout.
+- Relabeled the speedometer to mph without converting its familiar numeric
+  sweep, slightly softened LOW-gear acceleration, and added a small amount of
+  traffic to Medium and Hard.
+- Prevented COLD-AIR and Jump Kick pickups from spawning on traffic, including
+  a deterministic alternate-lane and forward-clearance search when the
+  preferred lane is occupied.
+- Replaced the oversized generic Rust target cache in GitHub Actions with a
+  pinned Rust-aware cache that prunes non-reusable build artifacts and writes
+  only from the default branch.
+
 ## [0.7.0] — 2026-10-19
 
 - Increased rare Jump Kick availability across every difficulty while keeping
