@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="128" viewBox="0 0 720 128" role="img" aria-labelledby="title description">
+  <title id="title">Play Fun to Drive in your browser</title>
+  <desc id="description">Large cyan and yellow arcade-style play button</desc>
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#163956"/>
+      <stop offset="1" stop-color="#081724"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="12" width="704" height="108" rx="18" fill="#02080d" stroke="#09131b" stroke-width="8"/>
+  <rect x="12" y="8" width="696" height="108" rx="16" fill="url(#face)" stroke="#27e6ff" stroke-width="4"/>
+  <path d="M54 38 L54 86 L96 62 Z" fill="#ffe45c" stroke="#fff4a8" stroke-width="3" filter="url(#glow)"/>
+  <text x="124" y="72" fill="#f4fbff" font-family="monospace" font-size="34" font-weight="700" letter-spacing="2">PLAY IN YOUR BROWSER</text>
+  <text x="126" y="96" fill="#6ceeff" font-family="monospace" font-size="15" font-weight="700" letter-spacing="1">CLICK TO START • FULLSCREEN AVAILABLE</text>
+</svg>

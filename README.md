@@ -9,8 +9,10 @@
 </p>
 
 <p align="center">
-  <strong><a href="https://akitaonrails.github.io/playmate-fun-to-drive/">▶ Play in your browser</a></strong><br>
-  The hosted game includes a fullscreen button in its upper-right corner.
+  <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
+    <img src="docs/media/play-button.svg" alt="Play Fun to Drive in your browser" width="560">
+  </a><br>
+  The game includes a fullscreen button in its upper-right corner.
 </p>
 
 ## Gameplay
