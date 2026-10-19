@@ -71,18 +71,21 @@ indicator only if audio remains unavailable after that interaction.
 Add `M` / gamepad-compatible UI support for mute and persist only the audio
 preference locally. Audio must never affect simulation, score, or input timing.
 
-## Three-track soundtrack
+## Six-track soundtrack
 
-Ship three original compact PSG-style driving loops: `Sunset Drive`, `Neon
-Midnight`, and `Dawn Circuit`. Their square-wave leads, stepped bass figures,
-simple chord beds, and noise-channel drums evoke late-1980s road cabinets
-without quoting any existing melody or arrangement.
+Ship six original 100-second PSG-style driving arrangements: `Voltage Hearts`,
+`Coastal Splash`, `Passing Lights`, `Redline Overture`, `Overpass Anthem`, and
+`Static Signal`. Their distinct pop-rock, tropical fusion, city-pop, dramatic
+racing-rock, road-anthem, and industrial vocabularies use square/triangle/saw
+leads, stepped bass, chord beds, arpeggiators, and noise-channel drums without
+quoting any existing melody or arrangement.
 
 Track zero starts with the run. Each completed day/night cycle advances to the
-next track modulo three. All three sources remain phase-stable loop entities;
-their gains crossfade over roughly 1.8 seconds at the cycle boundary, avoiding
-an abrupt stop or an asset-load gap. Nitro gently ducks the active track so its
-ignition, burn, engine, and wind layers stay legible.
+next track modulo six. Each arrangement matches the 100-second environment
+cycle and has five contrasting sections; the incoming source seeks to its start
+and gains crossfade over roughly 1.8 seconds at the boundary, avoiding an abrupt
+stop or asset-load gap. Cold-air gently ducks the active track so its ignition,
+burn, engine, and wind layers stay legible.
 
 ## Implementation sequence
 
@@ -115,6 +118,5 @@ ignition, burn, engine, and wind layers stay legible.
 
 ## Scope boundary
 
-This phase includes sound effects, ambience, and the initial three-track
-soundtrack. Additional songs, a title theme, and a dedicated music-selection
-screen remain future work.
+This phase includes sound effects, ambience, and the six-track soundtrack. A
+dedicated music-selection screen remains future work.

@@ -282,6 +282,12 @@ pub struct RoadsterHeadlights(pub Handle<StandardMaterial>);
 #[derive(Component)]
 pub struct SportsCarOrnament;
 
+#[derive(Component)]
+pub struct RoomShootingStar {
+    event: u8,
+    segment: u8,
+}
+
 pub fn setup_diorama(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -348,6 +354,12 @@ pub fn setup_diorama(
         base_color: Color::srgb(1.0, 0.58, 0.22),
         emissive: LinearRgba::new(0.48, 0.19, 0.035, 1.0),
         perceptual_roughness: 0.48,
+        ..default()
+    });
+    let shooting_star = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.72, 0.88, 1.0),
+        emissive: LinearRgba::new(2.8, 3.6, 5.4, 1.0),
+        perceptual_roughness: 0.18,
         ..default()
     });
     let shelf_wood = materials.add(StandardMaterial {
@@ -564,6 +576,21 @@ pub fn setup_diorama(
                     ));
                 }
             }
+            // Sparse offset schedules animate across the glass. Segmented
+            // streaks are cheaper than particles and remain clipped by the
+            // physical window trim and curtains.
+            for event in 0..2 {
+                for segment in 0..5 {
+                    parent.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.022, 0.0022, 0.002))),
+                        MeshMaterial3d(shooting_star.clone()),
+                        Transform::from_xyz(-0.44, 0.41, -0.508)
+                            .with_rotation(Quat::from_rotation_z(-0.43)),
+                        Visibility::Hidden,
+                        RoomShootingStar { event, segment },
+                    ));
+                }
+            }
             for x in [-0.492, -0.118] {
                 parent.spawn((
                     Mesh3d(meshes.add(Cuboid::new(0.052, 0.25, 0.018))),
@@ -628,6 +655,33 @@ pub fn setup_diorama(
                 ));
             }
         });
+}
+
+fn shooting_star_progress(elapsed: f32, event: u8, segment: u8) -> Option<f32> {
+    let (period, offset) = if event == 0 {
+        (47.0, 17.0)
+    } else {
+        (71.0, 39.0)
+    };
+    let local = (elapsed - offset).rem_euclid(period) - segment as f32 * 0.035;
+    (0.0..0.82).contains(&local).then_some(local / 0.82)
+}
+
+pub fn animate_room_shooting_stars(
+    time: Res<Time>,
+    mut stars: Query<(&RoomShootingStar, &mut Transform, &mut Visibility)>,
+) {
+    for (star, mut transform, mut visibility) in &mut stars {
+        let Some(progress) = shooting_star_progress(time.elapsed_secs(), star.event, star.segment)
+        else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let lane = star.event as f32 * 0.025;
+        transform.translation.x = -0.438 + progress * 0.258;
+        transform.translation.y = 0.407 - progress * 0.112 - lane;
+        *visibility = Visibility::Visible;
+    }
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -993,6 +1047,7 @@ fn nitro_pose_targets(active: bool) -> (f32, f32) {
 pub fn turbo_lamp(
     sim: Res<Sim>,
     time: Res<Time>,
+    menu_idle: Res<crate::MenuIdle>,
     lamp: Res<TurboLamp>,
     headlights: Res<RoadsterHeadlights>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1012,7 +1067,8 @@ pub fn turbo_lamp(
         mat.emissive = LinearRgba::new(glow * 1.45, glow * 0.07, glow * 0.025, 1.0);
     }
     if let Some(mut mat) = materials.get_mut(&headlights.0) {
-        let glow = 0.10 + night * 1.65;
+        let idle_blink = menu_idle.headlight_blink();
+        let glow = 0.10 + night * 1.65 + idle_blink * 4.25;
         mat.emissive = LinearRgba::new(glow, glow * 0.91, glow * 0.68, 1.0);
     }
 }
@@ -1079,5 +1135,21 @@ mod tests {
         assert_eq!(lever_target_for(Gear::Low), 0.30);
         assert_eq!(lever_target_for(Gear::High), -0.30);
         assert!(lever_target_for(Gear::Low) > lever_target_for(Gear::High));
+    }
+
+    #[test]
+    fn shooting_stars_are_sparse_staggered_and_window_bounded() {
+        assert!(shooting_star_progress(16.99, 0, 0).is_none());
+        assert_eq!(shooting_star_progress(17.0, 0, 0), Some(0.0));
+        assert!(shooting_star_progress(17.0, 0, 4).is_none());
+        assert!(shooting_star_progress(18.0, 0, 0).is_none());
+
+        for step in 0..83 {
+            let progress = step as f32 / 100.0;
+            let x = -0.438 + progress * 0.258;
+            let y = 0.407 - progress * 0.112 - 0.025;
+            assert!((-0.46..=-0.15).contains(&x));
+            assert!((0.27..=0.43).contains(&y));
+        }
     }
 }

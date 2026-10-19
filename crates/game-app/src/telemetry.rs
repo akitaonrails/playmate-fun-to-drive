@@ -280,9 +280,11 @@ fn publish_state(
         audio_nitro: audio.nitro,
         audio_pitch: audio.engine_pitch,
         audio_music_track: audio.music_track,
-        audio_music_sunset: audio.music_sunset,
-        audio_music_neon: audio.music_neon,
-        audio_music_dawn: audio.music_dawn,
+        // Preserve the original telemetry field names for external harnesses;
+        // they now expose the first three slots of the expanded six-track set.
+        audio_music_sunset: audio.music_levels[0],
+        audio_music_neon: audio.music_levels[1],
+        audio_music_dawn: audio.music_levels[2],
         audio_last_cue: audio.last_cue,
         audio_cue_count: audio.cue_count,
     };

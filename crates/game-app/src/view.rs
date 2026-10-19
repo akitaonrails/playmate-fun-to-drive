@@ -12,7 +12,7 @@ mod shoulder;
 use bevy::prelude::*;
 use game_core::{Gear, Phase, WeatherKind, WeatherTransition};
 
-use crate::{Sim, TuningRes};
+use crate::{SceneryRun, Sim, TuningRes};
 
 pub const M_PER_PX: f32 = 0.08;
 pub const HALF_ROAD_PX: f32 = 210.0;
@@ -46,7 +46,8 @@ fn elevated_row_y(scale: f32, relative_elevation: f32) -> f32 {
     scale_to_y(scale) + relative_elevation * ELEVATION_PX_PER_M * scale
 }
 const VIEW_TOP: f32 = 322.0;
-const PALM_POOL: usize = 10;
+const ROADSIDE_DECOR_POOL: usize = 18;
+const DECOR_BILLBOARD_POOL: usize = 6;
 const HAZARD_POOL: usize = 40;
 const HAZARD_PARTS: usize = 6;
 const NITRO_X_LEFT: f32 = 302.0;
@@ -84,6 +85,9 @@ struct Apron;
 
 #[derive(Component)]
 struct HazardPart(u8);
+
+#[derive(Component)]
+struct DecorBillboard(usize);
 
 #[derive(Component)]
 struct NightShade;
@@ -906,7 +910,7 @@ pub fn setup(mut commands: Commands) {
     }
 
     // ---- palms (pooled, ride the loop) ----
-    for _ in 0..PALM_POOL {
+    for _ in 0..ROADSIDE_DECOR_POOL {
         // trunk + fronds
         commands.spawn((
             Sprite::from_color(Color::srgb(0.42, 0.28, 0.14), Vec2::new(9.0, 46.0)),
@@ -926,6 +930,55 @@ pub fn setup(mut commands: Commands) {
             Visibility::Hidden,
             PalmPart,
         ));
+    }
+
+    // Non-collidable brand cameos live farther out in the grass. City scenes
+    // draw from the full pool; nature scenes retain only an occasional sign.
+    for index in 0..DECOR_BILLBOARD_POOL {
+        let (label, face, ink) = match index % 3 {
+            0 => (
+                "TESLA",
+                Color::srgb(0.92, 0.93, 0.95),
+                Color::srgb(0.82, 0.06, 0.10),
+            ),
+            1 => (
+                "SEGA",
+                Color::srgb(0.06, 0.30, 0.72),
+                Color::srgb(0.94, 0.98, 1.0),
+            ),
+            _ => (
+                "namco",
+                Color::srgb(0.98, 0.72, 0.08),
+                Color::srgb(0.82, 0.08, 0.06),
+            ),
+        };
+        commands
+            .spawn((
+                Transform::from_xyz(0.0, CAR_Y, -2.72),
+                Visibility::Hidden,
+                DecorBillboard(index),
+            ))
+            .with_children(|sign| {
+                for x in [-22.0, 22.0] {
+                    sign.spawn((
+                        Sprite::from_color(Color::srgb(0.24, 0.20, 0.18), Vec2::new(5.0, 38.0)),
+                        Transform::from_xyz(x, 18.0, 0.0),
+                    ));
+                }
+                sign.spawn((
+                    Sprite::from_color(face, Vec2::new(82.0, 36.0)),
+                    Transform::from_xyz(0.0, 48.0, 0.05),
+                ));
+                sign.spawn((
+                    Text2d::new(label),
+                    TextFont {
+                        font_size: FontSize::Px(15.0),
+                        ..default()
+                    },
+                    TextColor(ink),
+                    Transform::from_xyz(0.0, 48.0, 0.10),
+                ));
+            });
     }
 
     // ---- hazards (pooled composite sprites) ----
@@ -1511,15 +1564,18 @@ fn sync_roads(
 fn sync_hazards(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
+    scenery: Res<SceneryRun>,
     proj: Res<Proj>,
     road_visibility: Res<RoadVisibilityVisuals>,
     mut pool: Query<(&HazardPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
     let lp = sim.0.loop_pos();
     let helped = sim.0.rare_traffic_help(&tuning.0);
+    let roadside_theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
     let prop_colors = roadside_prop_palette(
         game_core::environment::season_weights(sim.0.environment_time),
         game_core::environment::daylight(sim.0.environment_time),
+        roadside_theme,
     );
     let mut parts = pool.iter_mut();
     let mut place = |kind: game_core::HazardKind, color_variant: usize, x: f32, y: f32, s: f32| {
@@ -1564,18 +1620,47 @@ fn sync_hazards(
                     -TRAFFIC_CAR_WIDTH_PX * 0.08,
                     0.26,
                 ),
-                (game_core::HazardKind::Tree, 0) => (
-                    Color::srgb(0.34, 0.18, 0.07),
-                    Vec2::new(8.0, 34.0),
-                    17.0,
-                    -2.55,
-                ),
-                (game_core::HazardKind::Tree, 1) => {
-                    (prop_colors.tree_dark, Vec2::new(35.0, 25.0), 37.0, -2.45)
-                }
-                (game_core::HazardKind::Tree, 2) => {
-                    (prop_colors.tree_light, Vec2::new(25.0, 20.0), 51.0, -2.42)
-                }
+                (game_core::HazardKind::Tree, 0) => match roadside_theme {
+                    backdrop::RoadsideTheme::City => (
+                        Color::srgb(0.12, 0.15, 0.22),
+                        Vec2::new(7.0, 58.0),
+                        29.0,
+                        -2.55,
+                    ),
+                    backdrop::RoadsideTheme::Winter => (
+                        Color::srgb(0.28, 0.22, 0.20),
+                        Vec2::new(9.0, 50.0),
+                        25.0,
+                        -2.55,
+                    ),
+                    _ => (
+                        Color::srgb(0.34, 0.18, 0.07),
+                        Vec2::new(10.0, 44.0),
+                        22.0,
+                        -2.55,
+                    ),
+                },
+                (game_core::HazardKind::Tree, 1) => match roadside_theme {
+                    backdrop::RoadsideTheme::City => (
+                        Color::srgb(0.16, 0.19, 0.27),
+                        Vec2::new(30.0, 5.0),
+                        55.0,
+                        -2.45,
+                    ),
+                    backdrop::RoadsideTheme::Winter => {
+                        (prop_colors.tree_dark, Vec2::new(42.0, 5.0), 38.0, -2.45)
+                    }
+                    _ => (prop_colors.tree_dark, Vec2::new(49.0, 34.0), 48.0, -2.45),
+                },
+                (game_core::HazardKind::Tree, 2) => match roadside_theme {
+                    backdrop::RoadsideTheme::City => {
+                        (prop_colors.tree_light, Vec2::new(17.0, 11.0), 51.0, -2.38)
+                    }
+                    backdrop::RoadsideTheme::Winter => {
+                        (prop_colors.tree_light, Vec2::new(29.0, 4.0), 48.0, -2.42)
+                    }
+                    _ => (prop_colors.tree_light, Vec2::new(37.0, 28.0), 65.0, -2.42),
+                },
                 (game_core::HazardKind::Tree, _) => (
                     Color::srgba(0.02, 0.08, 0.03, 0.55),
                     Vec2::new(30.0, 6.0),
@@ -2136,10 +2221,146 @@ fn sync_nitro_speed_lines(
     }
 }
 
-/// Palms ride the loop on both grass shoulders.
+#[derive(Debug, Clone, Copy)]
+struct RoadsideDecorPart {
+    color: Color,
+    size: Vec2,
+    dx: f32,
+    dy: f32,
+    rotation: f32,
+}
+
+fn roadside_decor_count(theme: backdrop::RoadsideTheme) -> usize {
+    match theme {
+        backdrop::RoadsideTheme::Forest => 18,
+        backdrop::RoadsideTheme::Sakura => 14,
+        backdrop::RoadsideTheme::City => 12,
+        backdrop::RoadsideTheme::Winter => 8,
+        backdrop::RoadsideTheme::OpenRoad => 10,
+    }
+}
+
+fn roadside_decor_part(
+    theme: backdrop::RoadsideTheme,
+    part: usize,
+    night: f32,
+    side: f32,
+) -> RoadsideDecorPart {
+    let branch_tilt = side * 0.42;
+    match (theme, part) {
+        (backdrop::RoadsideTheme::City, 0) => RoadsideDecorPart {
+            color: Color::srgb(0.10, 0.13, 0.20),
+            size: Vec2::new(7.0, 68.0),
+            dx: 0.0,
+            dy: 34.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::City, 1) => RoadsideDecorPart {
+            color: Color::srgb(0.14, 0.18, 0.26),
+            size: Vec2::new(34.0, 5.0),
+            dx: -side * 13.0,
+            dy: 65.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::City, _) => RoadsideDecorPart {
+            color: Color::srgba(1.0, 0.82, 0.42, 0.20 + night * 0.80),
+            size: Vec2::new(18.0, 12.0),
+            dx: -side * 26.0,
+            dy: 61.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Winter, 0) => RoadsideDecorPart {
+            color: Color::srgb(0.30, 0.25, 0.24),
+            size: Vec2::new(9.0, 62.0),
+            dx: 0.0,
+            dy: 31.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Winter, 1) => RoadsideDecorPart {
+            color: Color::srgb(0.38, 0.31, 0.29),
+            size: Vec2::new(44.0, 5.0),
+            dx: 0.0,
+            dy: 44.0,
+            rotation: branch_tilt,
+        },
+        (backdrop::RoadsideTheme::Winter, _) => RoadsideDecorPart {
+            color: Color::srgb(0.42, 0.35, 0.33),
+            size: Vec2::new(34.0, 4.0),
+            dx: 0.0,
+            dy: 55.0,
+            rotation: -branch_tilt,
+        },
+        (backdrop::RoadsideTheme::Sakura, 0) => RoadsideDecorPart {
+            color: Color::srgb(0.34, 0.16, 0.14),
+            size: Vec2::new(11.0, 58.0),
+            dx: 0.0,
+            dy: 29.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Sakura, 1) => RoadsideDecorPart {
+            color: Color::srgb(0.78, 0.30, 0.52),
+            size: Vec2::new(68.0, 39.0),
+            dx: -9.0,
+            dy: 62.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Sakura, _) => RoadsideDecorPart {
+            color: Color::srgb(1.0, 0.62, 0.80),
+            size: Vec2::new(49.0, 31.0),
+            dx: 13.0,
+            dy: 75.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Forest, 0) => RoadsideDecorPart {
+            color: Color::srgb(0.26, 0.14, 0.07),
+            size: Vec2::new(12.0, 66.0),
+            dx: 0.0,
+            dy: 33.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Forest, 1) => RoadsideDecorPart {
+            color: Color::srgb(0.035, 0.23, 0.10),
+            size: Vec2::new(70.0, 43.0),
+            dx: 0.0,
+            dy: 66.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::Forest, _) => RoadsideDecorPart {
+            color: Color::srgb(0.09, 0.43, 0.17),
+            size: Vec2::new(50.0, 31.0),
+            dx: 8.0,
+            dy: 82.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::OpenRoad, 0) => RoadsideDecorPart {
+            color: Color::srgb(0.42, 0.28, 0.14),
+            size: Vec2::new(11.0, 58.0),
+            dx: 0.0,
+            dy: 29.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::OpenRoad, 1) => RoadsideDecorPart {
+            color: Color::srgb(0.10, 0.52, 0.20),
+            size: Vec2::new(65.0, 18.0),
+            dx: 0.0,
+            dy: 57.0,
+            rotation: 0.0,
+        },
+        (backdrop::RoadsideTheme::OpenRoad, _) => RoadsideDecorPart {
+            color: Color::srgb(0.13, 0.60, 0.24),
+            size: Vec2::new(38.0, 13.0),
+            dx: 0.0,
+            dy: 48.0,
+            rotation: 0.0,
+        },
+    }
+}
+
+/// Decorative shoulder props ride the loop and mirror the active backdrop.
 #[allow(clippy::type_complexity)]
 fn sync_palms(
     sim: Res<Sim>,
+    scenery: Res<SceneryRun>,
     proj: Res<Proj>,
     mut pool: Query<
         (&mut Transform, &mut Visibility, &mut Sprite),
@@ -2147,45 +2368,83 @@ fn sync_palms(
     >,
 ) {
     let lp = sim.0.loop_pos();
-    let l = sim.0.road.length;
-    // sparse roadside scenery: 3 per side per loop (not traffic-dense)
-    let mut spots = [None; 6];
+    let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
+    let count = roadside_decor_count(theme);
+    let night = 1.0 - game_core::environment::daylight(sim.0.environment_time);
+    let mut spots = [None; ROADSIDE_DECOR_POOL];
     let mut spot_count = 0;
-    for k in 0..3u32 {
-        for side in [-1.45f32, 1.45] {
-            let s_pos = (k as f32 + if side < 0.0 { 0.5 } else { 0.0 }) / 3.0 * l;
-            let ahead = (s_pos - lp).rem_euclid(l);
+    let pairs = count / 2;
+    let visible_span = 42.0;
+    let spacing = visible_span / pairs as f32;
+    let scroll = lp.rem_euclid(spacing);
+    for k in 0..pairs {
+        for side_sign in [-1.0f32, 1.0] {
+            let spread = 1.30 + (k % 4) as f32 * 0.34;
+            let side = side_sign * spread;
+            let side_stagger = if side < 0.0 { spacing * 0.48 } else { 0.0 };
+            let ahead = 4.5 + (k as f32 * spacing + side_stagger - scroll).rem_euclid(visible_span);
             if let Some((y, s, lat)) = proj.project(ahead, sim.0.road_x) {
                 let x = (lat + side) * HALF_ROAD_PX * s;
-                spots[spot_count] = Some((x, y, s));
+                spots[spot_count] = Some((x, y, s, side));
                 spot_count += 1;
             }
         }
     }
     let mut parts = pool.iter_mut();
-    for (x, y, s) in spots.into_iter().flatten() {
-        let h = (46.0 * s).max(2.0);
-        // trunk
-        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
-            tf.translation = Vec3::new(x, y + h * 0.2, -3.0);
-            sp.custom_size = Some(Vec2::new((9.0 * s).max(1.0), h));
-            *vis = Visibility::Visible;
-        }
-        // wide fronds
-        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
-            tf.translation = Vec3::new(x, y + h * 0.95, -2.9);
-            sp.custom_size = Some(Vec2::new((52.0 * s).max(2.0), (14.0 * s).max(1.0)));
-            *vis = Visibility::Visible;
-        }
-        // cross fronds
-        if let Some((mut tf, mut vis, mut sp)) = parts.next() {
-            tf.translation = Vec3::new(x, y + h * 0.8, -2.9);
-            sp.custom_size = Some(Vec2::new((30.0 * s).max(2.0), (10.0 * s).max(1.0)));
+    for (x, y, s, side) in spots.into_iter().flatten() {
+        for part_index in 0..3 {
+            let Some((mut tf, mut vis, mut sp)) = parts.next() else {
+                break;
+            };
+            let look = roadside_decor_part(theme, part_index, night, side);
+            tf.translation = Vec3::new(
+                x + look.dx * s,
+                y + look.dy * s,
+                -3.0 + part_index as f32 * 0.05,
+            );
+            tf.rotation = Quat::from_rotation_z(look.rotation);
+            sp.color = look.color;
+            sp.custom_size = Some(Vec2::new(
+                (look.size.x * s).max(1.5),
+                (look.size.y * s).max(1.5),
+            ));
             *vis = Visibility::Visible;
         }
     }
     for (_, mut vis, _) in parts.by_ref() {
         *vis = Visibility::Hidden;
+    }
+}
+
+fn sync_decor_billboards(
+    sim: Res<Sim>,
+    scenery: Res<SceneryRun>,
+    proj: Res<Proj>,
+    mut signs: Query<(&DecorBillboard, &mut Transform, &mut Visibility)>,
+) {
+    let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
+    let count = match theme {
+        backdrop::RoadsideTheme::City => 4,
+        backdrop::RoadsideTheme::Forest | backdrop::RoadsideTheme::Sakura => 2,
+        backdrop::RoadsideTheme::OpenRoad | backdrop::RoadsideTheme::Winter => 1,
+    };
+    let loop_position = sim.0.loop_pos();
+    for (sign, mut transform, mut visibility) in &mut signs {
+        if sign.0 >= count {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        let ahead = 7.0 + (sign.0 as f32 * 19.0 - loop_position).rem_euclid(76.0);
+        let Some((y, scale, lateral)) = proj.project(ahead, sim.0.road_x) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let side = if sign.0.is_multiple_of(2) { -1.0 } else { 1.0 };
+        let spread = 1.72 + (sign.0 % 3) as f32 * 0.30;
+        transform.translation =
+            Vec3::new((lateral + side * spread) * HALF_ROAD_PX * scale, y, -2.72);
+        transform.scale = Vec3::splat(scale);
+        *visibility = Visibility::Visible;
     }
 }
 
@@ -2603,25 +2862,52 @@ struct RoadsidePropPalette {
     billboard_face: Color,
 }
 
-fn roadside_prop_palette(seasons: [f32; 4], daylight: f32) -> RoadsidePropPalette {
-    let tree_dark = blend4(
-        [
-            Color::srgb(0.66, 0.28, 0.43),
-            Color::srgb(0.05, 0.30, 0.12),
-            Color::srgb(0.55, 0.20, 0.05),
-            Color::srgb(0.48, 0.56, 0.66),
-        ],
-        seasons,
-    );
-    let tree_light = blend4(
-        [
-            Color::srgb(1.0, 0.58, 0.76),
+fn roadside_prop_palette(
+    seasons: [f32; 4],
+    daylight: f32,
+    theme: backdrop::RoadsideTheme,
+) -> RoadsidePropPalette {
+    let (tree_dark, tree_light) = match theme {
+        backdrop::RoadsideTheme::City => (
+            Color::srgb(0.16, 0.19, 0.27),
+            Color::srgba(
+                1.0,
+                0.78 + (1.0 - daylight.clamp(0.0, 1.0)) * 0.12,
+                0.34,
+                0.20 + (1.0 - daylight.clamp(0.0, 1.0)) * 0.80,
+            ),
+        ),
+        backdrop::RoadsideTheme::Sakura => {
+            (Color::srgb(0.70, 0.27, 0.45), Color::srgb(1.0, 0.62, 0.80))
+        }
+        backdrop::RoadsideTheme::Forest => (
+            Color::srgb(0.045, 0.25, 0.11),
             Color::srgb(0.10, 0.48, 0.19),
-            Color::srgb(0.94, 0.42, 0.08),
-            Color::srgb(0.90, 0.95, 1.0),
-        ],
-        seasons,
-    );
+        ),
+        backdrop::RoadsideTheme::Winter => {
+            (Color::srgb(0.34, 0.28, 0.27), Color::srgb(0.48, 0.40, 0.38))
+        }
+        backdrop::RoadsideTheme::OpenRoad => (
+            blend4(
+                [
+                    Color::srgb(0.66, 0.28, 0.43),
+                    Color::srgb(0.05, 0.30, 0.12),
+                    Color::srgb(0.55, 0.20, 0.05),
+                    Color::srgb(0.34, 0.28, 0.27),
+                ],
+                seasons,
+            ),
+            blend4(
+                [
+                    Color::srgb(1.0, 0.58, 0.76),
+                    Color::srgb(0.10, 0.48, 0.19),
+                    Color::srgb(0.94, 0.42, 0.08),
+                    Color::srgb(0.48, 0.40, 0.38),
+                ],
+                seasons,
+            ),
+        ),
+    };
     let night = 1.0 - daylight.clamp(0.0, 1.0);
     let winter = seasons[3];
     let billboard_frame = Color::srgb(0.95, 0.35, 0.12)
@@ -3236,7 +3522,10 @@ pub fn add_view_systems(app: &mut App) {
         )
             .in_set(ViewSet::Presentation),
     );
-    app.add_systems(Update, sync_wall_climb.in_set(ViewSet::Presentation));
+    app.add_systems(
+        Update,
+        (sync_decor_billboards, sync_wall_climb).in_set(ViewSet::Presentation),
+    );
 }
 
 #[cfg(test)]
@@ -3320,14 +3609,32 @@ mod tests {
 
     #[test]
     fn roadside_props_echo_season_and_night_palettes() {
-        let spring = roadside_prop_palette([1.0, 0.0, 0.0, 0.0], 1.0);
-        let summer = roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 1.0);
-        let winter = roadside_prop_palette([0.0, 0.0, 0.0, 1.0], 1.0);
-        let neon = roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 0.0);
+        let spring =
+            roadside_prop_palette([1.0, 0.0, 0.0, 0.0], 1.0, backdrop::RoadsideTheme::Sakura);
+        let summer =
+            roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 1.0, backdrop::RoadsideTheme::Forest);
+        let winter =
+            roadside_prop_palette([0.0, 0.0, 0.0, 1.0], 1.0, backdrop::RoadsideTheme::Winter);
+        let neon = roadside_prop_palette([0.0, 1.0, 0.0, 0.0], 0.0, backdrop::RoadsideTheme::City);
 
         assert!(spring.tree_light.to_srgba().red > summer.tree_light.to_srgba().red);
-        assert!(winter.tree_light.to_srgba().blue > 0.9);
+        assert!(winter.tree_light.to_srgba().red < summer.tree_light.to_srgba().red + 0.4);
         assert!(neon.billboard_face.to_srgba().blue > summer.billboard_face.to_srgba().blue);
+        assert_eq!(neon.tree_light.to_srgba().alpha, 1.0);
+    }
+
+    #[test]
+    fn contextual_roadside_decor_is_larger_and_density_tracks_scenery() {
+        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Forest), 18);
+        assert_eq!(roadside_decor_count(backdrop::RoadsideTheme::Winter), 8);
+        let forest = roadside_decor_part(backdrop::RoadsideTheme::Forest, 1, 0.0, 1.0);
+        let sakura = roadside_decor_part(backdrop::RoadsideTheme::Sakura, 1, 0.0, 1.0);
+        let winter = roadside_decor_part(backdrop::RoadsideTheme::Winter, 1, 0.0, 1.0);
+        let city_day = roadside_decor_part(backdrop::RoadsideTheme::City, 2, 0.0, 1.0);
+        let city_night = roadside_decor_part(backdrop::RoadsideTheme::City, 2, 1.0, 1.0);
+        assert!(forest.size.x >= 70.0 && sakura.size.x >= 68.0);
+        assert!(winter.size.y <= 5.0, "winter branches must be leafless");
+        assert!(city_night.color.to_srgba().alpha > city_day.color.to_srgba().alpha);
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::{bridge, view, EndSession, FrameInput, Sim, TuningRes};
 pub const STORAGE_KEY: &str = "fun-to-drive.audio.v1";
 const EFFECTS_GAIN: f32 = 0.94;
 const MUSIC_GAIN: f32 = 1.18;
+const MUSIC_TRACKS: usize = 6;
 
 pub struct ArcadeAudioPlugin;
 
@@ -116,9 +117,7 @@ pub(crate) struct AudioState {
     pub(crate) gravel: f32,
     pub(crate) overrev: f32,
     pub(crate) nitro: f32,
-    pub(crate) music_sunset: f32,
-    pub(crate) music_neon: f32,
-    pub(crate) music_dawn: f32,
+    pub(crate) music_levels: [f32; MUSIC_TRACKS],
     pub(crate) music_track: u8,
     pub(crate) engine_pitch: f32,
     pub(crate) last_cue: &'static str,
@@ -143,9 +142,7 @@ impl AudioState {
             gravel: 0.0,
             overrev: 0.0,
             nitro: 0.0,
-            music_sunset: 0.0,
-            music_neon: 0.0,
-            music_dawn: 0.0,
+            music_levels: [0.0; MUSIC_TRACKS],
             music_track: 0,
             engine_pitch: 0.65,
             last_cue: "none",
@@ -245,9 +242,7 @@ enum AudioLayer {
     Gravel,
     Overrev,
     Nitro,
-    MusicSunset,
-    MusicNeon,
-    MusicDawn,
+    Music(u8),
 }
 
 fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
@@ -280,9 +275,12 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         (AudioLayer::Gravel, load("gravel")),
         (AudioLayer::Overrev, load("overrev")),
         (AudioLayer::Nitro, load("nitro_burn")),
-        (AudioLayer::MusicSunset, load("music_sunset_drive")),
-        (AudioLayer::MusicNeon, load("music_neon_midnight")),
-        (AudioLayer::MusicDawn, load("music_dawn_circuit")),
+        (AudioLayer::Music(0), load("music_voltage_hearts")),
+        (AudioLayer::Music(1), load("music_coastal_splash")),
+        (AudioLayer::Music(2), load("music_passing_lights")),
+        (AudioLayer::Music(3), load("music_redline_overture")),
+        (AudioLayer::Music(4), load("music_overpass_anthem")),
+        (AudioLayer::Music(5), load("music_static_signal")),
     ] {
         commands.spawn((
             AudioPlayer::new(source),
@@ -343,7 +341,7 @@ struct MixTargets {
     gravel: f32,
     overrev: f32,
     nitro: f32,
-    music: [f32; 3],
+    music: [f32; MUSIC_TRACKS],
     engine_pitch: f32,
 }
 
@@ -368,9 +366,9 @@ fn mix_targets(input: MixInput) -> MixTargets {
     let gear_pitch = if input.gear == Gear::High { 0.05 } else { 0.0 };
     let pitch = (0.65 + speed * 0.72 + gear_pitch).clamp(0.65, 1.48);
     let music = {
-        let mut levels = [0.0; 3];
+        let mut levels = [0.0; MUSIC_TRACKS];
         if input.music_active {
-            levels[input.music_track.min(2)] =
+            levels[input.music_track.min(MUSIC_TRACKS - 1)] =
                 (if input.nitro { 0.075 } else { 0.095 }) * MUSIC_GAIN;
         }
         levels
@@ -439,7 +437,7 @@ fn update_mix(
         brake: frame.state.brake,
         off_road: sim.0.off_road_intensity(&tuning.0),
         nitro: crate::nitro_effects_active(&sim.0),
-        music_track: (sim.0.day_cycles % 3) as usize,
+        music_track: (sim.0.day_cycles % MUSIC_TRACKS as u64) as usize,
     });
 
     let alpha = 1.0 - (-time.delta_secs() * 9.0).exp();
@@ -455,10 +453,12 @@ fn update_mix(
     state.engine_pitch += (target.engine_pitch - state.engine_pitch) * alpha;
     // Slower gain movement gives soundtrack changes a deliberate crossfade.
     let music_alpha = 1.0 - (-time.delta_secs() * 1.25).exp();
-    state.music_sunset += (target.music[0] - state.music_sunset) * music_alpha;
-    state.music_neon += (target.music[1] - state.music_neon) * music_alpha;
-    state.music_dawn += (target.music[2] - state.music_dawn) * music_alpha;
-    state.music_track = (sim.0.day_cycles % 3) as u8;
+    for (level, target) in state.music_levels.iter_mut().zip(target.music) {
+        *level += (target - *level) * music_alpha;
+    }
+    let next_music_track = (sim.0.day_cycles % MUSIC_TRACKS as u64) as u8;
+    let music_changed = state.music_track != next_music_track;
+    state.music_track = next_music_track;
 
     for (layer, mut sink) in &mut layers {
         let volume = match layer {
@@ -471,17 +471,17 @@ fn update_mix(
             AudioLayer::Gravel => state.gravel,
             AudioLayer::Overrev => state.overrev,
             AudioLayer::Nitro => state.nitro,
-            AudioLayer::MusicSunset => state.music_sunset,
-            AudioLayer::MusicNeon => state.music_neon,
-            AudioLayer::MusicDawn => state.music_dawn,
+            AudioLayer::Music(index) => state.music_levels[usize::from(*index)],
         };
         let user_gain = match layer {
-            AudioLayer::MusicSunset | AudioLayer::MusicNeon | AudioLayer::MusicDawn => {
-                state.music_gain
-            }
+            AudioLayer::Music(_) => state.music_gain,
             _ => state.effects_gain,
         };
         sink.set_volume(Volume::Linear(volume * user_gain));
+        if music_changed && matches!(layer, AudioLayer::Music(index) if *index == next_music_track)
+        {
+            let _ = sink.try_seek(std::time::Duration::ZERO);
+        }
         match layer {
             AudioLayer::EngineLow => sink.set_speed(state.engine_pitch),
             AudioLayer::EngineHigh => sink.set_speed((state.engine_pitch * 1.03).min(1.52)),
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(targets.wind, 0.0);
         assert_eq!(targets.rain, 0.0);
         assert_eq!(targets.brake, 0.0);
-        assert_eq!(targets.music, [0.0; 3]);
+        assert_eq!(targets.music, [0.0; MUSIC_TRACKS]);
     }
 
     #[test]
@@ -734,7 +734,7 @@ mod tests {
 
     #[test]
     fn soundtrack_selects_exactly_one_track_per_cycle() {
-        for track in 0..3 {
+        for track in 0..MUSIC_TRACKS {
             let targets = mix_targets(MixInput {
                 music_track: track,
                 ..driving()

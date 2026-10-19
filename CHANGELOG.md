@@ -7,6 +7,16 @@ milestone (docs/PLAN.md).
 
 ## [0.5.0] — 2026-10-18
 
+- Added a 30-second difficulty-menu idle animation that double-blinks the toy
+  Roadster's front lights, plus rare shooting stars through the dorm window.
+- Enlarged roadside trees and synchronized shoulder scenery with the horizon:
+  sakura routes get blossoms, forests become denser, winter uses sparse bare
+  trees, and city routes use streetlamps that illuminate at night. Vegetation
+  now spreads across the open grass, with occasional Tesla, Sega, and Namco
+  pixel billboards appearing more frequently around city skylines.
+- Lowered hurricane and UFO assists into the road's middle-distance band so
+  their pull/beam animation visibly meets the traffic cars they remove; the
+  hurricane also uproots and tumbles two trees from the outer grass.
 - Added optional multi-touch mobile controls with safe-area-aware steering,
   brake, gear swipe, cold-air, Jump Kick, pause, difficulty/CRT menus, initials,
   and restart controls. Touch mode persists locally and portrait devices get a
@@ -60,6 +70,11 @@ milestone (docs/PLAN.md).
 - Made the first touch START or keyboard Enter confirmation request fullscreen
   automatically, while retaining the fullscreen toggle for entering or exiting
   later; browser gesture rules still apply to gamepad-only starts.
+- Replaced the three short soundtrack loops with six original 100-second PSG
+  arrangements covering bright pop-rock, tropical fusion, breezy city-pop,
+  dramatic racing rock, hard-rock anthem, and tense industrial styles. Tracks
+  now align one-per-day/night cycle, restart at their transition, and retain the
+  existing smooth crossfade and cold-air ducking.
 
 ## [0.4.0] — 2026-10-18
 

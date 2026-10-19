@@ -15,6 +15,7 @@ enum AmbientKind {
     ShootingStar,
     Hurricane,
     HurricaneLeaves,
+    HurricaneTree,
     SakuraPetals,
     Ufo,
     HelpedCar,
@@ -32,6 +33,7 @@ pub(super) fn spawn(commands: &mut Commands) {
         (AmbientKind::ShootingStar, 2),
         (AmbientKind::Hurricane, 6),
         (AmbientKind::HurricaneLeaves, 14),
+        (AmbientKind::HurricaneTree, 6),
         (AmbientKind::SakuraPetals, 18),
         (AmbientKind::Ufo, 4),
         (AmbientKind::HelpedCar, 2),
@@ -39,7 +41,10 @@ pub(super) fn spawn(commands: &mut Commands) {
         for index in 0..count {
             let depth = if matches!(
                 kind,
-                AmbientKind::HurricaneLeaves | AmbientKind::SakuraPetals | AmbientKind::HelpedCar
+                AmbientKind::HurricaneLeaves
+                    | AmbientKind::HurricaneTree
+                    | AmbientKind::SakuraPetals
+                    | AmbientKind::HelpedCar
             ) {
                 0.62
             } else {
@@ -68,6 +73,7 @@ fn ambient_kind(kind: game_core::RareEventKind) -> AmbientKind {
 fn participates(part: AmbientKind, event: AmbientKind) -> bool {
     part == event
         || (part == AmbientKind::HurricaneLeaves && event == AmbientKind::Hurricane)
+        || (part == AmbientKind::HurricaneTree && event == AmbientKind::Hurricane)
         || (part == AmbientKind::HelpedCar
             && matches!(event, AmbientKind::Hurricane | AmbientKind::Ufo))
 }
@@ -107,6 +113,10 @@ pub(super) fn sync(
             );
             continue;
         }
+        if part.kind == AmbientKind::HurricaneTree {
+            animate_hurricane_tree(part.index, progress, fade, &mut tf, &mut sprite);
+            continue;
+        }
         if part.kind == AmbientKind::HelpedCar {
             let Some(traffic) = helped.get(part.index).copied().flatten() else {
                 *visibility = Visibility::Hidden;
@@ -126,6 +136,7 @@ pub(super) fn sync(
                 animate_hurricane(part.index, progress, fade, &time, &mut tf, &mut sprite)
             }
             AmbientKind::HurricaneLeaves => unreachable!("debris accompanies the hurricane event"),
+            AmbientKind::HurricaneTree => unreachable!("uprooted trees accompany the hurricane"),
             AmbientKind::SakuraPetals => {
                 animate_sakura_petals(part.index, progress, fade, &time, &mut tf, &mut sprite)
             }
@@ -135,6 +146,48 @@ pub(super) fn sync(
             AmbientKind::HelpedCar => unreachable!("handled before event dispatch"),
         }
     }
+}
+
+fn animate_hurricane_tree(
+    index: usize,
+    progress: f32,
+    fade: f32,
+    tf: &mut Transform,
+    sprite: &mut Sprite,
+) {
+    let tree = index / 3;
+    let part = index % 3;
+    let side = if tree == 0 { -1.0 } else { 1.0 };
+    let pull = smoothstep(((progress - 0.10) / 0.68).clamp(0.0, 1.0));
+    let storm_x = -570.0 + 1140.0 * progress;
+    let start_x = side * (425.0 + tree as f32 * 18.0);
+    let start_y = -18.0 + tree as f32 * 34.0;
+    tf.translation.x = start_x + (storm_x - start_x) * pull;
+    tf.translation.y = start_y
+        + (115.0 - start_y) * pull
+        + (progress * std::f32::consts::TAU * 3.0 + tree as f32).sin() * 24.0 * pull;
+    tf.rotation = Quat::from_rotation_z(side * pull * std::f32::consts::TAU * 1.4);
+    let (offset, size, color) = match part {
+        0 => (
+            Vec2::new(0.0, 17.0),
+            Vec2::new(9.0, 38.0),
+            Color::srgba(0.32, 0.17, 0.07, fade),
+        ),
+        1 => (
+            Vec2::new(-10.0, 39.0),
+            Vec2::new(42.0, 28.0),
+            Color::srgba(0.06, 0.29, 0.12, fade * 0.92),
+        ),
+        _ => (
+            Vec2::new(12.0, 48.0),
+            Vec2::new(31.0, 23.0),
+            Color::srgba(0.12, 0.46, 0.18, fade * 0.88),
+        ),
+    };
+    tf.translation.x += offset.x;
+    tf.translation.y += offset.y;
+    sprite.custom_size = Some(size);
+    sprite.color = color;
 }
 
 fn animate_birds(
@@ -186,7 +239,7 @@ fn animate_hurricane(
     let i = index as f32;
     let swirl = (time.elapsed_secs() * 3.0 + i * 1.35).sin() * (10.0 - i);
     tf.translation.x = -570.0 + 1140.0 * progress + swirl;
-    tf.translation.y = 265.0 - i * 19.0;
+    tf.translation.y = 165.0 - i * 16.0;
     tf.rotation = Quat::from_rotation_z((i - 2.5) * 0.025);
     sprite.custom_size = Some(Vec2::new((112.0 - i * 17.0).max(18.0), 8.0));
     sprite.color = Color::srgba(0.22, 0.27, 0.34, fade * (0.36 + i * 0.035));
@@ -267,9 +320,9 @@ fn animate_ufo(
         _ => {
             let beam = ((progress - 0.22) / 0.10).clamp(0.0, 1.0)
                 * ((0.75 - progress) / 0.12).clamp(0.0, 1.0);
-            tf.translation.y = 190.0;
+            tf.translation.y = 105.0;
             (
-                Vec2::new(28.0 + pulse * 8.0, 126.0),
+                Vec2::new(28.0 + pulse * 8.0, 178.0),
                 Color::srgba(0.34, 1.0, 0.76, fade * beam * 0.22),
             )
         }
@@ -287,7 +340,7 @@ fn ufo_path(progress: f32) -> Vec2 {
         let depart = smoothstep((progress - 0.75) / 0.25);
         (-550.0 * depart, 130.0 * depart)
     };
-    Vec2::new(x, 258.0 + departure_lift)
+    Vec2::new(x, 205.0 + departure_lift)
 }
 
 fn animate_helped_car(
@@ -314,13 +367,13 @@ fn animate_helped_car(
             let target_x = -570.0 + 1140.0 * progress;
             tf.translation.x = start_x + (target_x - start_x) * pull;
             tf.translation.y = start_y
-                + (230.0 - start_y) * pull
+                + (105.0 - start_y) * pull
                 + (progress * std::f32::consts::TAU * 4.0).sin() * 18.0 * pull;
             tf.rotation = Quat::from_rotation_z(progress * std::f32::consts::TAU * 3.0 * pull);
         }
         AmbientKind::Ufo => {
             tf.translation.x = start_x * (1.0 - pull);
-            tf.translation.y = start_y + (224.0 - start_y) * pull;
+            tf.translation.y = start_y + (125.0 - start_y) * pull;
             tf.rotation = Quat::from_rotation_z(progress * 0.22);
         }
         _ => unreachable!("only gameplay-help events carry cars"),
@@ -360,6 +413,10 @@ mod tests {
             AmbientKind::HurricaneLeaves,
             AmbientKind::Hurricane
         ));
+        assert!(participates(
+            AmbientKind::HurricaneTree,
+            AmbientKind::Hurricane
+        ));
         assert!(!participates(
             AmbientKind::HurricaneLeaves,
             AmbientKind::Birds
@@ -375,5 +432,29 @@ mod tests {
         assert_eq!(ufo_path(0.70).x, 0.0);
         assert!(ufo_path(0.90).x < 0.0);
         assert!(ufo_path(0.90).y > ufo_path(0.50).y);
+        assert_eq!(ufo_path(0.50).y, 205.0);
+    }
+
+    #[test]
+    fn rare_helpers_converge_on_the_middle_distance_road() {
+        let ufo = ufo_path(0.50);
+        assert!(ufo.y < 220.0);
+        let mut tf = Transform::default();
+        let mut sprite = Sprite::default();
+        animate_hurricane(5, 0.5, 1.0, &Time::default(), &mut tf, &mut sprite);
+        assert!(tf.translation.y <= 105.0);
+    }
+
+    #[test]
+    fn hurricane_uproots_trees_from_both_grass_sides() {
+        let mut left = Transform::default();
+        let mut right = Transform::default();
+        let mut sprite = Sprite::default();
+        animate_hurricane_tree(0, 0.0, 1.0, &mut left, &mut sprite);
+        animate_hurricane_tree(3, 0.0, 1.0, &mut right, &mut sprite);
+        assert!(left.translation.x < -400.0);
+        assert!(right.translation.x > 400.0);
+        animate_hurricane_tree(0, 0.60, 1.0, &mut left, &mut sprite);
+        assert!(left.rotation != Quat::IDENTITY);
     }
 }

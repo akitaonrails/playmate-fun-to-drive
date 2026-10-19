@@ -26,6 +26,15 @@ enum BackdropKind {
     Paris,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RoadsideTheme {
+    OpenRoad,
+    City,
+    Forest,
+    Sakura,
+    Winter,
+}
+
 #[derive(Component)]
 pub(super) struct BackdropPixel {
     kind: BackdropKind,
@@ -105,6 +114,33 @@ fn scene_weights(scenery: SceneryRun, environment_time: f32) -> [f32; SCENE_COUN
         weights[current] += light_weight * scene_blend;
     }
     weights
+}
+
+pub(super) fn roadside_theme(scenery: SceneryRun, environment_time: f32) -> RoadsideTheme {
+    let weights = scene_weights(scenery, environment_time);
+    let dominant = weights
+        .iter()
+        .enumerate()
+        .max_by(|left, right| left.1.total_cmp(right.1))
+        .map_or(BackdropKind::Mountains, |(index, _)| match index {
+            0 => BackdropKind::Mountains,
+            1 => BackdropKind::City,
+            2 => BackdropKind::Neon,
+            3 => BackdropKind::Forest,
+            4 => BackdropKind::SnowMountains,
+            5 => BackdropKind::Sakura,
+            6 => BackdropKind::Tokyo,
+            _ => BackdropKind::Paris,
+        });
+    match dominant {
+        BackdropKind::City | BackdropKind::Neon | BackdropKind::Tokyo | BackdropKind::Paris => {
+            RoadsideTheme::City
+        }
+        BackdropKind::Forest => RoadsideTheme::Forest,
+        BackdropKind::SnowMountains => RoadsideTheme::Winter,
+        BackdropKind::Sakura => RoadsideTheme::Sakura,
+        BackdropKind::Mountains => RoadsideTheme::OpenRoad,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -685,5 +721,27 @@ mod tests {
             seen_paris |= featured_scene(scenery, 0, false) == BackdropKind::Paris;
         }
         assert!(seen_tokyo && seen_paris);
+    }
+
+    #[test]
+    fn roadside_theme_follows_the_dominant_backdrop() {
+        for serial in 0..4 {
+            let scenery = SceneryRun {
+                entropy: 42,
+                serial,
+            };
+            assert_eq!(roadside_theme(scenery, 50.0), RoadsideTheme::City);
+        }
+
+        let mut saw_forest = false;
+        let mut saw_sakura = false;
+        let mut saw_winter = false;
+        for entropy in 0..256 {
+            let scenery = SceneryRun { entropy, serial: 0 };
+            saw_sakura |= roadside_theme(scenery, 150.0) == RoadsideTheme::Sakura;
+            saw_forest |= roadside_theme(scenery, 350.0) == RoadsideTheme::Forest;
+            saw_winter |= roadside_theme(scenery, 1_050.0) == RoadsideTheme::Winter;
+        }
+        assert!(saw_sakura && saw_forest && saw_winter);
     }
 }

@@ -20,6 +20,7 @@ const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
 const JUMP_PICKUP_GLOW_SECS: f32 = 0.80;
 const WALL_CLIMB_DURATION_SECS: f32 = 3.2;
 const SKY_DROP_DURATION_SECS: f32 = 1.65;
+const MENU_HEADLIGHT_IDLE_SECS: f32 = 30.0;
 
 #[cfg(target_arch = "wasm32")]
 const ASSET_ROOT: &str = "assets";
@@ -130,6 +131,35 @@ impl LaunchSequence {
     pub(crate) fn progress(self) -> f32 {
         (self.elapsed / SKY_DROP_DURATION_SECS).clamp(0.0, 1.0)
     }
+}
+
+/// Presentation-only inactivity clock for the difficulty screen. It never
+/// enters the deterministic simulation or changes a run's result.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub(crate) struct MenuIdle {
+    pub(crate) seconds: f32,
+}
+
+impl MenuIdle {
+    pub(crate) fn headlight_blink(self) -> f32 {
+        menu_headlight_blink(self.seconds)
+    }
+}
+
+fn menu_headlight_blink(idle_seconds: f32) -> f32 {
+    if idle_seconds < MENU_HEADLIGHT_IDLE_SECS {
+        return 0.0;
+    }
+    let phase = (idle_seconds - MENU_HEADLIGHT_IDLE_SECS) % 6.0;
+    let pulse = |start: f32| {
+        let progress = ((phase - start) / 0.22).clamp(0.0, 1.0);
+        if (start..=start + 0.22).contains(&phase) {
+            (progress * std::f32::consts::PI).sin()
+        } else {
+            0.0
+        }
+    };
+    pulse(0.0).max(pulse(0.36))
 }
 
 #[derive(Resource)]
@@ -438,6 +468,7 @@ fn main() {
     .init_resource::<EndSession>()
     .init_resource::<FinishSequence>()
     .init_resource::<LaunchSequence>()
+    .init_resource::<MenuIdle>()
     .insert_resource(audio::AudioState::new(audio_muted))
     .configure_sets(
         Update,
@@ -463,7 +494,7 @@ fn main() {
     )
     .add_systems(
         Update,
-        (sync_end_flow, tick_launch_sequence).in_set(AppSet::Flow),
+        (sync_end_flow, tick_launch_sequence, tick_menu_idle).in_set(AppSet::Flow),
     )
     .add_systems(Update, handle_end_input.in_set(AppSet::Controls))
     .add_systems(
@@ -474,6 +505,7 @@ fn main() {
             toy_view::toggle_mode,
             (toy_view::apply_body_dynamics, toy_view::animate_parts).chain(),
             toy_view::turbo_lamp,
+            toy_view::animate_room_shooting_stars,
             toy_view::update_screen_mat,
         )
             .in_set(AppSet::Presentation),
@@ -489,6 +521,32 @@ fn main() {
     view::add_view_systems(&mut app);
     telemetry::add_systems(&mut app);
     app.run();
+}
+
+fn tick_menu_idle(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    pads: Query<&Gamepad>,
+    touch: Res<TouchInput>,
+    end: Res<EndSession>,
+    mut idle: ResMut<MenuIdle>,
+) {
+    if end.0.mode != EndMode::DifficultySelect {
+        idle.seconds = 0.0;
+        return;
+    }
+    let interacted = keys.get_just_pressed().next().is_some()
+        || mouse.get_just_pressed().next().is_some()
+        || pads
+            .iter()
+            .any(|pad| pad.get_just_pressed().next().is_some())
+        || touch.active_this_frame;
+    idle.seconds = if interacted {
+        0.0
+    } else {
+        idle.seconds + time.delta_secs()
+    };
 }
 
 /// M5 interim input: keyboard-first, gamepad passthrough (formal layer = M6).
@@ -1102,5 +1160,15 @@ mod tests {
             high.game_width * low.game_height,
             low.game_width * high.game_height
         );
+    }
+
+    #[test]
+    fn menu_headlights_wait_then_double_blink() {
+        assert_eq!(menu_headlight_blink(29.999), 0.0);
+        assert_eq!(menu_headlight_blink(30.0), 0.0);
+        assert!(menu_headlight_blink(30.11) > 0.9);
+        assert!(menu_headlight_blink(30.47) > 0.9);
+        assert_eq!(menu_headlight_blink(31.0), 0.0);
+        assert!(menu_headlight_blink(36.11) > 0.9);
     }
 }

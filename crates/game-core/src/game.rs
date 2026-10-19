@@ -376,7 +376,9 @@ impl Game {
             .filter(|(_, hazard)| hazard.kind == HazardKind::Oncoming)
             .filter_map(|(hazard_index, hazard)| {
                 let ahead = (hazard.s - start_pos).rem_euclid(self.road.length);
-                (8.0..=44.0).contains(&ahead).then(|| {
+                // Keep rare assists in the readable middle-distance band:
+                // close enough to watch the pickup, but clear of the player.
+                (8.0..=28.0).contains(&ahead).then(|| {
                     (
                         crate::rare_event::selection_hash(event.slot, self.seed, hazard_index),
                         RareTrafficHelp {
@@ -2904,6 +2906,7 @@ mod tests {
         let second = game.rare_traffic_help(&tuning);
         assert_eq!(first, second);
         assert!((1..=2).contains(&first.iter().flatten().count()));
+        assert!(first.iter().flatten().all(|car| car.start_ahead <= 28.0));
     }
 
     #[test]
@@ -2924,6 +2927,7 @@ mod tests {
         let helped = game.rare_traffic_help(&tuning);
         assert_eq!(helped.iter().flatten().count(), 1);
         let traffic = helped[0].expect("UFO should choose one approaching car");
+        assert!(traffic.start_ahead <= 28.0);
 
         let event_start = slot as f32 * crate::rare_event::SLOT_SECS * tuning.scroll_speed_low;
         game.distance = event_start + traffic.start_ahead - 0.05;

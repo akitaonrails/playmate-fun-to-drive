@@ -25,6 +25,9 @@ day/night cycles as possible, pass traffic, collect cold-air charges and rare Ju
 avoid bumps.
 Easy runs at 80% of Hard's road speed, Medium at 90%, and Hard at full speed;
 gear thresholds scale with the selected difficulty.
+Six original 100-second PSG tracks rotate with the day/night cycle, spanning
+upbeat pop-rock, tropical fusion, city-pop, dramatic racing rock, hard rock,
+and tense industrial styles.
 At time-up, enter three initials for the local top-10 leaderboard for that
 difficulty (top five shown on the toy screen). Easy, Medium, and Hard keep
 separate local top-10 boards.
@@ -47,7 +50,7 @@ separate local top-10 boards.
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
 | Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, rumble on bumps |
-| Touch | Enable with the upper-left button; left thumb steers, right thumb swipes LOW/HIGH and holds brake, with COLD-AIR/JUMP buttons; tap the game screen to pause |
+| Touch | Enable with the upper-left button; left thumb steers, right thumb swipes LOW/HIGH and holds brake, with COLD-AIR/JUMP KICK buttons above the shift area; tap the game screen to pause |
 
 ## Run it
 
