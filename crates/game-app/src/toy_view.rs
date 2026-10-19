@@ -353,6 +353,12 @@ pub struct TurboLamp(pub Handle<StandardMaterial>);
 pub struct RoadsterHeadlights(pub Handle<StandardMaterial>);
 
 #[derive(Component)]
+pub(crate) struct GearKnobShine;
+
+#[derive(Component)]
+pub(crate) struct SteeringWheelShine;
+
+#[derive(Component)]
 pub struct SportsCarOrnament;
 
 #[derive(Component)]
@@ -932,6 +938,62 @@ pub fn spawn_toy(
         ));
     }
     commands.remove_resource::<ToyGltf>();
+}
+
+/// Small glossy glints keep the black controls legible in the dim room. Each
+/// glint is parented to its animated control, so it follows steering and gear
+/// changes without becoming a separate light source.
+#[allow(clippy::type_complexity)]
+pub fn decorate_control_shines(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    levers: Query<(Entity, &Name), (With<Mesh3d>, Without<GearKnobShine>)>,
+    wheels: Query<(Entity, &Name), (With<Mesh3d>, Without<SteeringWheelShine>)>,
+) {
+    for (entity, name) in &levers {
+        if !name.as_str().starts_with("GearLever") {
+            continue;
+        }
+        let shine = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.72, 0.78, 0.88),
+            emissive: LinearRgba::new(0.055, 0.070, 0.10, 1.0),
+            metallic: 0.62,
+            perceptual_roughness: 0.12,
+            ..default()
+        });
+        commands.entity(entity).insert(GearKnobShine).with_child((
+            Mesh3d(meshes.add(Sphere::new(0.0022).mesh().ico(2).unwrap())),
+            MeshMaterial3d(shine),
+            Transform::from_xyz(-0.0028, 0.0435, 0.0022).with_scale(Vec3::new(0.58, 1.35, 0.42)),
+        ));
+    }
+    for (entity, name) in &wheels {
+        if !name.as_str().starts_with("SteeringWheel") {
+            continue;
+        }
+        let shine = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.62, 0.68, 0.76),
+            emissive: LinearRgba::new(0.014, 0.018, 0.026, 1.0),
+            metallic: 0.58,
+            perceptual_roughness: 0.18,
+            ..default()
+        });
+        commands
+            .entity(entity)
+            .insert(SteeringWheelShine)
+            .with_children(|wheel| {
+                for (x, y, angle) in [(-0.029, 0.034, -0.70), (0.024, 0.038, 0.56)] {
+                    wheel.spawn((
+                        Mesh3d(meshes.add(Sphere::new(0.0008).mesh().ico(2).unwrap())),
+                        MeshMaterial3d(shine.clone()),
+                        Transform::from_xyz(x, y, 0.0054)
+                            .with_rotation(Quat::from_rotation_z(angle))
+                            .with_scale(Vec3::new(1.6, 0.34, 0.24)),
+                    ));
+                }
+            });
+    }
 }
 
 /// M8/M10: put the live game texture on the toy's screen quad via the

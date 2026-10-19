@@ -5,6 +5,18 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.9.0] — 2026-10-19
+
+- Rebuilt the timed-run finale: the scenery clears, the perspective road rises
+  into a constant-width vertical ribbon, and a dedicated overhead Roadster
+  sprite fires twin cold-air streams as it launches toward the sky.
+- Added deterministic finale geometry and timing coverage plus a debug-build-only
+  `?dev_ending=1` preview that never enters optimized production bundles.
+- Raised soundtrack presence relative to effects and added a regression check
+  for the intended music-to-engine balance.
+- Added restrained specular highlights to the steering wheel and shift knob so
+  both controls remain readable in the moody dorm-room lighting.
+
 ## [0.8.0] — 2026-10-19
 
 - Added a one-time page-load cinematic: the camera begins with the complete

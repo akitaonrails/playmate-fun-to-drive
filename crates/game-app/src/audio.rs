@@ -12,7 +12,7 @@ use crate::{bridge, view, EndSession, FrameInput, Sim, TuningRes};
 
 pub const STORAGE_KEY: &str = "fun-to-drive.audio.v1";
 const EFFECTS_GAIN: f32 = 0.94;
-const MUSIC_GAIN: f32 = 1.18;
+const MUSIC_GAIN: f32 = 1.32;
 const MUSIC_TRACKS: usize = 6;
 const MUSIC_FADE_FLOOR: f32 = 0.0005;
 const MAX_ONE_SHOT_VOICES: usize = 16;
@@ -772,6 +772,7 @@ mod tests {
         let raw_engine = 0.055 + 0.115 * 0.5;
         assert!(targets.engine_low < raw_engine);
         assert!(targets.music[0] > 0.095);
+        assert!(targets.music[0] > targets.engine_low * 1.15);
         assert!(AudioCue::Crash.volume() < 0.55);
     }
 

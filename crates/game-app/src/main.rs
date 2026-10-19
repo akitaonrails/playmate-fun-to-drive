@@ -18,9 +18,11 @@ use session::{EndFlow, EndMode};
 
 const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
 const JUMP_PICKUP_GLOW_SECS: f32 = 0.80;
-const WALL_CLIMB_DURATION_SECS: f32 = 3.2;
+const FINISH_SEQUENCE_DURATION_SECS: f32 = 3.2;
 const SKY_DROP_DURATION_SECS: f32 = 1.65;
 const MENU_HEADLIGHT_IDLE_SECS: f32 = 30.0;
+#[cfg(debug_assertions)]
+const DEV_ENDING_RUN_SECS: f32 = 0.01;
 
 #[cfg(target_arch = "wasm32")]
 const ASSET_ROOT: &str = "assets";
@@ -107,6 +109,37 @@ fn runtime_scenery_entropy() -> u64 {
         .map_or(20_261_015, |duration| duration.as_nanos() as u64)
 }
 
+#[cfg(debug_assertions)]
+fn dev_ending_requested(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("on")
+    })
+}
+
+#[cfg(debug_assertions)]
+fn dev_ending_game(tuning: &Tuning) -> Game {
+    let mut rng = game_core::Rng::new(20261015);
+    let road =
+        game_core::RoadLoop::generate_with_traffic_bonus(&mut rng, tuning.traffic_medium_extra);
+    let mut game = Game::with_road_for_duration(
+        20261015,
+        road,
+        Difficulty::Medium,
+        DEV_ENDING_RUN_SECS,
+        tuning,
+    );
+    let _ = game.step(
+        &InputState {
+            reset: true,
+            ..default()
+        },
+        0.0,
+        tuning,
+    );
+    let _ = game.step(&InputState::default(), DEV_ENDING_RUN_SECS, tuning);
+    game
+}
+
 /// Rendering adapter selected at startup. `?quality=low` keeps gameplay
 /// unchanged while reducing the toy view's offscreen GPU cost.
 #[derive(Resource, Debug, Clone, Copy)]
@@ -150,7 +183,7 @@ pub(crate) struct FinishSequence {
 
 impl FinishSequence {
     pub(crate) fn progress(self) -> f32 {
-        (self.elapsed / WALL_CLIMB_DURATION_SECS).clamp(0.0, 1.0)
+        (self.elapsed / FINISH_SEQUENCE_DURATION_SECS).clamp(0.0, 1.0)
     }
 }
 
@@ -430,6 +463,10 @@ fn main() {
         .validate()
         .expect("built-in control tuning must be valid");
     let qa_parameter = bridge::query_param("qa_session_secs");
+    #[cfg(debug_assertions)]
+    let dev_ending = dev_ending_requested(bridge::query_param("dev_ending").as_deref());
+    #[cfg(not(debug_assertions))]
+    let dev_ending = false;
     let coarse_pointer = bridge::coarse_pointer();
     let render_quality =
         RenderQuality::from_query(bridge::query_param("quality").as_deref(), coarse_pointer);
@@ -439,7 +476,8 @@ fn main() {
         .flatten()
         .as_deref()
         .and_then(session::validated_qa_environment_time);
-    let (leaderboard, persistent) = if qa_mode {
+    let transient_run = qa_mode || dev_ending;
+    let (leaderboard, persistent) = if transient_run {
         (Vec::new(), false)
     } else {
         let (stored_v2, mut persistent) = bridge::load_local(session::STORAGE_KEY);
@@ -455,6 +493,24 @@ fn main() {
         }
         (entries, persistent)
     };
+    let initial_game = if let Some(duration) = qa_duration {
+        let mut rng = game_core::Rng::new(20261015);
+        let road =
+            game_core::RoadLoop::generate_with_traffic_bonus(&mut rng, tuning.traffic_medium_extra);
+        Game::with_road_for_duration(20261015, road, Difficulty::Medium, duration, &tuning)
+    } else {
+        Game::new(20261015, Difficulty::Medium, &tuning)
+    };
+    #[cfg(debug_assertions)]
+    let initial_game = if dev_ending {
+        dev_ending_game(&tuning)
+    } else {
+        initial_game
+    };
+    let mut initial_end = EndFlow::default();
+    if dev_ending {
+        initial_end.mode = EndMode::Playing;
+    }
     let mut app = App::new();
     let audio_muted = bridge::load_local(audio::STORAGE_KEY).0.as_deref() == Some("muted");
     let crt_setting = bridge::load_local(toy_view::CRT_STORAGE_KEY).0;
@@ -491,8 +547,8 @@ fn main() {
         qa_duration,
         qa_start_environment_time,
     })
-    .insert_resource(SceneryRun::new(qa_mode))
-    .insert_resource(toy_view::StartupIntro::new(!qa_mode))
+    .insert_resource(SceneryRun::new(transient_run))
+    .insert_resource(toy_view::StartupIntro::new(!transient_run))
     .insert_resource(render_quality)
     .insert_resource(LeaderboardState {
         entries: leaderboard,
@@ -500,24 +556,13 @@ fn main() {
         qa_mode,
     })
     .insert_resource(DisplaySettings { crt_enabled })
-    .insert_resource(Sim({
-        // Seeded technical loop: mixed-radius corners, rolling elevation,
-        // traffic, and collidable roadside scenery.
-        if let Some(duration) = qa_duration {
-            let mut rng = game_core::Rng::new(20261015);
-            let road = game_core::RoadLoop::generate_with_traffic_bonus(
-                &mut rng,
-                tuning.traffic_medium_extra,
-            );
-            Game::with_road_for_duration(20261015, road, Difficulty::Medium, duration, &tuning)
-        } else {
-            Game::new(20261015, Difficulty::Medium, &tuning)
-        }
-    }))
+    // Seeded technical loop: mixed-radius corners, rolling elevation,
+    // traffic, and collidable roadside scenery.
+    .insert_resource(Sim(initial_game))
     .init_resource::<FrameInput>()
     .init_resource::<TouchInput>()
     .init_resource::<VisualEffects>()
-    .init_resource::<EndSession>()
+    .insert_resource(EndSession(initial_end))
     .init_resource::<FinishSequence>()
     .init_resource::<LaunchSequence>()
     .init_resource::<MenuIdle>()
@@ -554,6 +599,7 @@ fn main() {
         (
             tick_visual_effects,
             (toy_view::spawn_toy, toy_view::paint_screen).chain(),
+            toy_view::decorate_control_shines,
             toy_view::animate_startup_intro,
             toy_view::toggle_mode,
             (toy_view::apply_body_dynamics, toy_view::animate_parts).chain(),
@@ -775,8 +821,9 @@ fn sync_end_flow(
                 finish.active = true;
                 finish.elapsed = 0.0;
             }
-            finish.elapsed = (finish.elapsed + time.delta_secs()).min(WALL_CLIMB_DURATION_SECS);
-            if finish.elapsed >= WALL_CLIMB_DURATION_SECS {
+            finish.elapsed =
+                (finish.elapsed + time.delta_secs()).min(FINISH_SEQUENCE_DURATION_SECS);
+            if finish.elapsed >= FINISH_SEQUENCE_DURATION_SECS {
                 finish.active = false;
                 end.0.begin_entry();
             }
@@ -1145,6 +1192,31 @@ fn tick_visual_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_ending_flag_accepts_explicit_truthy_values_only() {
+        assert!(dev_ending_requested(Some("1")));
+        assert!(dev_ending_requested(Some("true")));
+        assert!(dev_ending_requested(Some("ON")));
+        assert!(!dev_ending_requested(None));
+        assert!(!dev_ending_requested(Some("0")));
+        assert!(!dev_ending_requested(Some("false")));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_ending_game_starts_with_a_frozen_result() {
+        let game = dev_ending_game(&Tuning::default());
+        assert!(matches!(
+            game.phase,
+            game_core::Phase::GameOver {
+                reason: game_core::EndReason::Time
+            }
+        ));
+        assert!(game.result().is_some());
+        assert_eq!(game.session_remaining, 0.0);
+    }
 
     #[test]
     fn terminal_phase_disables_frozen_nitro_visuals() {

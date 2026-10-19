@@ -65,6 +65,8 @@ const PICKUP_VISUAL_SCALE: f32 = 1.22;
 const TIME_TRAVEL_SPEED_MPH: f32 = 88.0;
 const TIME_TRAVEL_DURATION_SECS: f32 = 2.25;
 const TIME_TRAIL_SEGMENTS: usize = 14;
+const FINISH_ROAD_HALF_WIDTH: f32 = 172.0;
+const FINISH_ROAD_BANDS: usize = ROWS + APRON_SEGMENTS;
 
 fn pickup_visual_scale(projection_scale: f32) -> f32 {
     projection_scale * PICKUP_VISUAL_SCALE
@@ -157,13 +159,7 @@ struct TimeTrail(usize);
 struct TimeFlash;
 
 #[derive(Component)]
-struct WallClimbSurface;
-
-#[derive(Component)]
-struct WallClimbSeam(u8);
-
-#[derive(Component)]
-struct WallClimbWindow(u8);
+struct FinishCarRoot;
 
 #[derive(Component)]
 struct NitroExhaust {
@@ -1010,31 +1006,6 @@ pub fn setup(mut commands: Commands) {
         }
     }
 
-    // Terminal Roadster set piece: a building facade unfolds from the
-    // horizon after time expires, then scrolls under the suction-equipped car.
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.075, 0.090, 0.125), Vec2::ONE),
-        Transform::from_xyz(0.0, VIEW_TOP, 0.32),
-        Visibility::Hidden,
-        WallClimbSurface,
-    ));
-    for index in 0..5u8 {
-        commands.spawn((
-            Sprite::from_color(Color::srgb(0.18, 0.22, 0.29), Vec2::new(3.0, 644.0)),
-            Transform::from_xyz(0.0, 0.0, 0.34),
-            Visibility::Hidden,
-            WallClimbSeam(index),
-        ));
-    }
-    for index in 0..24u8 {
-        commands.spawn((
-            Sprite::from_color(Color::srgb(0.36, 0.70, 0.92), Vec2::new(54.0, 16.0)),
-            Transform::from_xyz(0.0, 0.0, 0.35),
-            Visibility::Hidden,
-            WallClimbWindow(index),
-        ));
-    }
-
     // ---- palms (pooled, ride the loop) ----
     for _ in 0..ROADSIDE_DECOR_PROPS {
         // trunk + fronds
@@ -1225,6 +1196,51 @@ pub fn setup(mut commands: Commands) {
                     CarPart,
                 ));
             }
+        });
+
+    // Dedicated overhead Roadster used only after time expires. Its low,
+    // wide proportions match the hero decal, but the lamp placement makes the
+    // viewpoint unambiguous: paired white headlights lead at the top and the
+    // continuous red diffuser blade trails at the bottom.
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, CAR_Y, 0.62),
+            Visibility::Hidden,
+            FinishCarRoot,
+        ))
+        .with_children(|car| {
+            for x in [-38.0f32, 38.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.02, 0.025, 0.035), Vec2::new(14.0, 31.0)),
+                    Transform::from_xyz(x, -1.0, -0.03),
+                ));
+            }
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.68, 0.72, 0.74), Vec2::new(78.0, 55.0)),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.88, 0.91, 0.91), Vec2::new(68.0, 43.0)),
+                Transform::from_xyz(0.0, 3.0, 0.02),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.025, 0.05, 0.075), Vec2::new(43.0, 27.0)),
+                Transform::from_xyz(0.0, 1.0, 0.04),
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.48, 0.54, 0.58), Vec2::new(33.0, 12.0)),
+                Transform::from_xyz(0.0, -12.0, 0.05),
+            ));
+            for x in [-22.0f32, 22.0] {
+                car.spawn((
+                    Sprite::from_color(Color::linear_rgb(1.55, 1.45, 1.05), Vec2::new(19.0, 5.0)),
+                    Transform::from_xyz(x, 24.0, 0.07),
+                ));
+            }
+            car.spawn((
+                Sprite::from_color(Color::linear_rgb(1.75, 0.025, 0.015), Vec2::new(67.0, 4.0)),
+                Transform::from_xyz(0.0, -24.0, 0.08),
+            ));
         });
 
     // Stainless-steel time-machine homage. It is pooled at startup and only
@@ -1572,10 +1588,40 @@ fn apron_road_half_width(vertical_t: f32) -> f32 {
     HALF_ROAD_PX + (1.0 - vertical_t.clamp(0.0, 1.0)) * 58.0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FinishRoadBand {
+    center: f32,
+    half_width: f32,
+    y0: f32,
+    y1: f32,
+}
+
+fn finish_road_band(
+    current_center: f32,
+    current_half_width: f32,
+    current_y0: f32,
+    current_y1: f32,
+    band: usize,
+    lift: f32,
+) -> FinishRoadBand {
+    let lift = lift.clamp(0.0, 1.0);
+    let screen_bottom = -VIEW_TOP;
+    let screen_height = VIEW_TOP * 2.0;
+    let target_y0 = screen_bottom + screen_height * band as f32 / FINISH_ROAD_BANDS as f32;
+    let target_y1 = screen_bottom + screen_height * (band + 1) as f32 / FINISH_ROAD_BANDS as f32;
+    FinishRoadBand {
+        center: current_center * (1.0 - lift),
+        half_width: current_half_width + (FINISH_ROAD_HALF_WIDTH - current_half_width) * lift,
+        y0: current_y0 + (target_y0 - current_y0) * lift,
+        y1: current_y1 + (target_y1 - current_y1) * lift,
+    }
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_roads(
     sim: Res<Sim>,
     colors: Res<Palette>,
+    finish: Res<crate::FinishSequence>,
     mut proj: ResMut<Proj>,
     mut rows: Query<
         (&mut Transform, &mut Sprite),
@@ -1609,6 +1655,7 @@ fn sync_roads(
         ),
     >,
 ) {
+    let lift = finish_pose(finish.progress()).road_lift;
     // Walk near -> far, integrating curvature into heading and heading into
     // lateral position. One integration makes a constant-radius corner look
     // like a shifted straight after perspective scaling; the second produces
@@ -1636,18 +1683,26 @@ fn sync_roads(
     }
 
     for (i, (mut tf, mut sp)) in rows.iter_mut().enumerate() {
-        tf.translation.x = proj.rows_x[i];
         let y0 = proj.rows_y[i];
         let y1 = if i + 1 < ROWS {
             proj.rows_y[i + 1]
         } else {
             HORIZON_Y + 2.0
         };
-        let h = (y1 - y0).max(1.5);
-        tf.translation.y = y0 + h * 0.5;
-        if let Some(size) = sp.custom_size.as_mut() {
-            size.y = h + 1.0;
-        }
+        let band = finish_road_band(
+            proj.rows_x[i],
+            HALF_ROAD_PX * proj.scales[i],
+            y0,
+            y1,
+            APRON_SEGMENTS + i,
+            lift,
+        );
+        let h = (band.y1 - band.y0).max(1.5);
+        tf.translation.x = band.center;
+        tf.translation.y = band.y0 + h * 0.5;
+        let size = sp.custom_size.get_or_insert(Vec2::ONE);
+        size.x = band.half_width * 2.0;
+        size.y = h + 1.0;
         let pos = sim.0.distance + proj.distances[i];
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on {
@@ -1684,11 +1739,21 @@ fn sync_roads(
             let vertical_t = (apron.segment as f32 + 0.5) / APRON_SEGMENTS as f32;
             // t=0 is the bottom edge closest to the viewer; taper smoothly to
             // the exact row-0 width so the road never pinches at the seam.
-            let road_half = apron_road_half_width(vertical_t);
-            let rumble_width = 16.0 + (1.0 - vertical_t) * 7.0;
-            tf.translation.y = apron_bottom + segment_h * (apron.segment as f32 + 0.5);
+            let current_y0 = apron_bottom + segment_h * apron.segment as f32;
+            let current_y1 = current_y0 + segment_h;
+            let band = finish_road_band(
+                x0,
+                apron_road_half_width(vertical_t),
+                current_y0,
+                current_y1,
+                apron.segment,
+                lift,
+            );
+            let road_half = band.half_width;
+            let rumble_width = (16.0 + (1.0 - vertical_t) * 7.0) * (1.0 - lift) + 10.0 * lift;
+            tf.translation.y = (band.y0 + band.y1) * 0.5;
             let size = sp.custom_size.get_or_insert(Vec2::ONE);
-            size.y = segment_h + 1.5;
+            size.y = (band.y1 - band.y0).max(1.0) + 1.5;
             match apron.kind {
                 ApronKind::Grass => {
                     tf.translation.x = 0.0;
@@ -1696,7 +1761,7 @@ fn sync_roads(
                     sp.color = if on0 { colors.grass_a } else { colors.grass_b };
                 }
                 ApronKind::Road => {
-                    tf.translation.x = x0;
+                    tf.translation.x = band.center;
                     size.x = road_half * 2.0;
                     sp.color = if on0 {
                         colors.asphalt_a
@@ -1710,7 +1775,7 @@ fn sync_roads(
                     } else {
                         1.0
                     };
-                    tf.translation.x = x0 + side * (road_half - rumble_width * 0.5);
+                    tf.translation.x = band.center + side * (road_half - rumble_width * 0.5);
                     size.x = rumble_width;
                     sp.color = if on0 {
                         colors.rumble_red
@@ -1725,18 +1790,27 @@ fn sync_roads(
         let row = idx / 2;
         let side: f32 = if idx % 2 == 0 { -1.0 } else { 1.0 };
         let s = proj.scales[row];
-        tf.translation.x = proj.rows_x[row] + side * (HALF_ROAD_PX - 8.0) * s;
         let y0 = proj.rows_y[row];
         let y1 = if row + 1 < ROWS {
             proj.rows_y[row + 1]
         } else {
             HORIZON_Y + 2.0
         };
-        let h = (y1 - y0).max(1.5);
-        tf.translation.y = y0 + h * 0.5;
-        if let Some(size) = sp.custom_size.as_mut() {
-            size.y = h + 1.0;
-        }
+        let band = finish_road_band(
+            proj.rows_x[row],
+            HALF_ROAD_PX * s,
+            y0,
+            y1,
+            APRON_SEGMENTS + row,
+            lift,
+        );
+        let h = (band.y1 - band.y0).max(1.5);
+        let rumble_width = (16.0 * s).max(1.5) * (1.0 - lift) + 10.0 * lift;
+        tf.translation.x = band.center + side * (band.half_width - rumble_width * 0.5);
+        tf.translation.y = band.y0 + h * 0.5;
+        let size = sp.custom_size.get_or_insert(Vec2::ONE);
+        size.x = rumble_width;
+        size.y = h + 1.0;
         let pos = sim.0.distance + proj.distances[row];
         let red = ((pos / 7.0).floor() as i64).rem_euclid(2) == 0;
         sp.color = if red {
@@ -1749,18 +1823,26 @@ fn sync_roads(
         let row = i / 2;
         let lane: f32 = if i % 2 == 0 { -0.4 } else { 0.4 };
         let s = proj.scales[row];
-        tf.translation.x = proj.rows_x[row] + lane * HALF_ROAD_PX * s;
         let y0 = proj.rows_y[row];
         let y1 = if row + 1 < ROWS {
             proj.rows_y[row + 1]
         } else {
             HORIZON_Y + 2.0
         };
-        let h = (y1 - y0).max(1.5);
-        tf.translation.y = y0 + h * 0.5;
-        if let Some(size) = sp.custom_size.as_mut() {
-            size.y = h * 0.6;
-        }
+        let band = finish_road_band(
+            proj.rows_x[row],
+            HALF_ROAD_PX * s,
+            y0,
+            y1,
+            APRON_SEGMENTS + row,
+            lift,
+        );
+        let h = (band.y1 - band.y0).max(1.5);
+        tf.translation.x = band.center + lane * band.half_width;
+        tf.translation.y = band.y0 + h * 0.5;
+        let size = sp.custom_size.get_or_insert(Vec2::ONE);
+        size.x = (7.0 * s).max(1.0) * (1.0 - lift) + 5.0 * lift;
+        size.y = h * 0.6;
         let pos = sim.0.distance + proj.distances[row];
         let on = ((pos / 3.5).floor() as i64).rem_euclid(2) == 0;
         sp.color = if on { colors.dash } else { colors.asphalt_a };
@@ -1774,8 +1856,15 @@ fn sync_hazards(
     scenery: Res<SceneryRun>,
     proj: Res<Proj>,
     road_visibility: Res<RoadVisibilityVisuals>,
+    finish: Res<crate::FinishSequence>,
     mut pool: Query<(&HazardPart, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
+    if finish.active {
+        for (_, _, _, mut visibility) in &mut pool {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let lp = sim.0.loop_pos();
     let helped = sim.0.rare_traffic_help(&tuning.0);
     let roadside_theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
@@ -1941,6 +2030,7 @@ fn sync_nitro_pickup(
     sim: Res<Sim>,
     proj: Res<Proj>,
     time: Res<Time>,
+    finish: Res<crate::FinishSequence>,
     mut parts: Query<(
         &NitroPickupPart,
         &mut Transform,
@@ -1949,6 +2039,12 @@ fn sync_nitro_pickup(
     )>,
 ) {
     let mut parts = parts.iter_mut();
+    if finish.active {
+        for (_, _, _, mut visibility) in parts {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let Some((y, s, lat)) = proj.project(sim.0.nitro_pickup_ahead(), sim.0.road_x) else {
         for (_, _, _, mut vis) in parts {
             *vis = Visibility::Hidden;
@@ -2000,6 +2096,7 @@ fn sync_jump_pickup(
     sim: Res<Sim>,
     proj: Res<Proj>,
     time: Res<Time>,
+    finish: Res<crate::FinishSequence>,
     mut parts: Query<(
         &JumpPickupPart,
         &mut Transform,
@@ -2008,6 +2105,12 @@ fn sync_jump_pickup(
     )>,
 ) {
     let mut parts = parts.iter_mut();
+    if finish.active {
+        for (_, _, _, mut visibility) in parts {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let Some(ahead) = sim.0.jump_pickup_ahead() else {
         for (_, _, _, mut visibility) in parts {
             *visibility = Visibility::Hidden;
@@ -2140,13 +2243,43 @@ fn launch_drop_pose(progress: f32) -> (f32, f32) {
     (height, jet)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FinishPose {
+    road_lift: f32,
+    rear_scale_y: f32,
+    top_scale_y: f32,
+    climb: f32,
+    car_y: f32,
+    jet: f32,
+}
+
+fn finish_pose(progress: f32) -> FinishPose {
+    let progress = progress.clamp(0.0, 1.0);
+    let road_lift = smoothstep((progress / 0.50).clamp(0.0, 1.0));
+    let morph = smoothstep(((progress - 0.38) / 0.22).clamp(0.0, 1.0));
+    let climb = smoothstep(((progress - 0.56) / 0.40).clamp(0.0, 1.0));
+    let rear_scale_y = (1.0 - morph * 2.0).clamp(0.0, 1.0);
+    let top_scale_y = ((morph - 0.5) * 2.0).clamp(0.0, 1.0);
+    let car_y = CAR_Y + (VIEW_TOP + 90.0 - CAR_Y) * climb;
+    let jet = smoothstep(((progress - 0.54) / 0.08).clamp(0.0, 1.0))
+        * (1.0 - smoothstep(((progress - 0.94) / 0.06).clamp(0.0, 1.0)));
+    FinishPose {
+        road_lift,
+        rear_scale_y,
+        top_scale_y,
+        climb,
+        car_y,
+        jet,
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn sync_jump_car(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
     finish: Res<crate::FinishSequence>,
     launch: Res<crate::LaunchSequence>,
-    mut car: Query<&mut Transform, With<PlayerCarRoot>>,
+    mut car: Query<(&mut Transform, &mut Visibility), With<PlayerCarRoot>>,
     mut shadow: Query<
         (&mut Transform, &mut Sprite),
         (With<PlayerCarShadow>, Without<PlayerCarRoot>),
@@ -2157,23 +2290,26 @@ fn sync_jump_car(
     } else {
         cold_air_hop_pose(sim.0.cold_air_hop_progress(&tuning.0))
     };
-    let finish_progress = finish.progress();
-    let climb = smoothstep(((finish_progress - 0.40) / 0.60).clamp(0.0, 1.0));
+    let finale = finish_pose(finish.progress());
     let (launch_height, _) = if launch.active {
         launch_drop_pose(launch.progress())
     } else {
         (0.0, 0.0)
     };
-    if let Ok(mut transform) = car.single_mut() {
-        let finish_height = (205.0 - CAR_Y) * climb;
-        transform.translation = Vec3::new(
-            0.0,
-            CAR_Y + pose.height + finish_height + launch_height,
-            0.5,
-        );
+    if let Ok((mut transform, mut visibility)) = car.single_mut() {
+        transform.translation = Vec3::new(0.0, CAR_Y + pose.height + launch_height, 0.5);
         // This is intentionally a simple 2D sprite spin in the screen plane.
         transform.rotation = Quat::from_rotation_z(pose.sprite_spin);
-        transform.scale = pose.scale * (1.0 - 0.18 * climb);
+        transform.scale = Vec3::new(
+            pose.scale.x,
+            pose.scale.y * finale.rear_scale_y,
+            pose.scale.z,
+        );
+        *visibility = if finish.active && finale.rear_scale_y <= 0.01 {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
     }
     if let Ok((mut transform, mut sprite)) = shadow.single_mut() {
         transform.scale = Vec3::new(pose.shadow_scale, pose.shadow_scale, 1.0);
@@ -2182,9 +2318,28 @@ fn sync_jump_car(
             0.0,
             0.0,
             0.0,
-            pose.shadow_alpha * (1.0 - climb) * altitude_fade,
+            pose.shadow_alpha * finale.rear_scale_y * altitude_fade,
         );
     }
+}
+
+fn sync_finish_car(
+    finish: Res<crate::FinishSequence>,
+    mut car: Query<(&mut Transform, &mut Visibility), With<FinishCarRoot>>,
+) {
+    let Ok((mut transform, mut visibility)) = car.single_mut() else {
+        return;
+    };
+    let pose = finish_pose(finish.progress());
+    if !finish.active || pose.top_scale_y <= 0.01 {
+        *visibility = Visibility::Hidden;
+        return;
+    }
+    let flight_scale = 1.0 - pose.climb * 0.12;
+    transform.translation = Vec3::new(0.0, pose.car_y, 0.62);
+    transform.rotation = Quat::IDENTITY;
+    transform.scale = Vec3::new(flight_scale, pose.top_scale_y * flight_scale, 1.0);
+    *visibility = Visibility::Visible;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2296,81 +2451,6 @@ fn smoothstep(value: f32) -> f32 {
     value * value * (3.0 - 2.0 * value)
 }
 
-#[allow(clippy::type_complexity)]
-fn sync_wall_climb(
-    finish: Res<crate::FinishSequence>,
-    mut surface: Query<
-        (&mut Transform, &mut Sprite, &mut Visibility),
-        (
-            With<WallClimbSurface>,
-            Without<WallClimbSeam>,
-            Without<WallClimbWindow>,
-        ),
-    >,
-    mut seams: Query<
-        (&WallClimbSeam, &mut Transform, &mut Visibility),
-        (Without<WallClimbSurface>, Without<WallClimbWindow>),
-    >,
-    mut windows: Query<
-        (
-            &WallClimbWindow,
-            &mut Transform,
-            &mut Sprite,
-            &mut Visibility,
-        ),
-        (Without<WallClimbSurface>, Without<WallClimbSeam>),
-    >,
-) {
-    let progress = finish.progress();
-    if !finish.active {
-        for (_, _, mut visibility) in &mut surface {
-            *visibility = Visibility::Hidden;
-        }
-        for (_, _, mut visibility) in &mut seams {
-            *visibility = Visibility::Hidden;
-        }
-        for (_, _, _, mut visibility) in &mut windows {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    }
-
-    // The lower edge sweeps from the horizon to the player, reading as the
-    // roadway pitching toward a full vertical plane rather than a hard cut.
-    let reveal = smoothstep((progress / 0.43).clamp(0.0, 1.0));
-    let wall_bottom = HORIZON_Y + (-322.0 - HORIZON_Y) * reveal;
-    let wall_top = HORIZON_Y + (VIEW_TOP - HORIZON_Y) * reveal;
-    let wall_height = wall_top - wall_bottom;
-    for (mut transform, mut sprite, mut visibility) in &mut surface {
-        transform.translation.y = wall_bottom + wall_height * 0.5;
-        sprite.custom_size = Some(Vec2::new(960.0, wall_height.max(1.0)));
-        *visibility = Visibility::Visible;
-    }
-
-    let scroll = smoothstep(((progress - 0.38) / 0.62).clamp(0.0, 1.0)) * 180.0;
-    for (seam, mut transform, mut visibility) in &mut seams {
-        transform.translation.x = -384.0 + seam.0 as f32 * 192.0;
-        transform.translation.y = wall_bottom + wall_height * 0.5;
-        transform.scale.y = wall_height / 644.0;
-        *visibility = Visibility::Visible;
-    }
-    for (window, mut transform, mut sprite, mut visibility) in &mut windows {
-        let column = (window.0 % 6) as f32;
-        let row = (window.0 / 6) as f32;
-        transform.translation.x = -390.0 + column * 156.0;
-        transform.translation.y = 260.0 - row * 145.0 - (scroll % 145.0);
-        let shown = transform.translation.y > wall_bottom + 12.0
-            && transform.translation.y < wall_top - 8.0;
-        *visibility = if shown {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        let pulse = 0.72 + 0.18 * ((window.0 as f32 * 1.7 + progress * 5.0).sin());
-        sprite.color = Color::srgb(0.26 * pulse, 0.64 * pulse, 0.92 * pulse);
-    }
-}
-
 fn sync_player_rear_light(sim: Res<Sim>, mut light: Query<&mut Sprite, With<PlayerRearLight>>) {
     let daylight = game_core::environment::daylight(sim.0.environment_time);
     let night = (1.0 - daylight).clamp(0.0, 1.0);
@@ -2447,6 +2527,7 @@ fn sync_nitro_exhaust(
     sim: Res<Sim>,
     visuals: Res<NitroVisuals>,
     launch: Res<crate::LaunchSequence>,
+    finish: Res<crate::FinishSequence>,
     time: Res<Time>,
     mut jets: Query<(&NitroExhaust, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
@@ -2455,7 +2536,8 @@ fn sync_nitro_exhaust(
     } else {
         (0.0, 0.0)
     };
-    let intensity = visuals.intensity.max(launch_jet);
+    let finale = finish_pose(finish.progress());
+    let intensity = visuals.intensity.max(launch_jet).max(finale.jet);
     if intensity <= 0.01 || sim.0.jump_active() {
         for (_, _, _, mut visibility) in &mut jets {
             *visibility = Visibility::Hidden;
@@ -2465,7 +2547,12 @@ fn sync_nitro_exhaust(
     for (jet, mut transform, mut sprite, mut visibility) in &mut jets {
         let shape = exhaust_shape(jet.layer, jet.side, time.elapsed_secs(), intensity);
         transform.translation.x = jet.side * 27.0;
-        transform.translation.y = shape.center_y + launch_height;
+        let finish_height = if finish.active {
+            finale.car_y - CAR_Y
+        } else {
+            0.0
+        };
+        transform.translation.y = shape.center_y + launch_height + finish_height;
         transform.rotation = Quat::from_rotation_z(shape.sway * jet.side);
         sprite.custom_size = Some(shape.size);
         sprite.color = match jet.layer {
@@ -2696,11 +2783,18 @@ fn sync_palms(
     sim: Res<Sim>,
     scenery: Res<SceneryRun>,
     proj: Res<Proj>,
+    finish: Res<crate::FinishSequence>,
     mut pool: Query<
         (&mut Transform, &mut Visibility, &mut Sprite),
         (With<PalmPart>, Without<HazardPart>),
     >,
 ) {
+    if finish.active {
+        for (_, mut visibility, _) in &mut pool {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let lp = sim.0.loop_pos();
     let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
     let season = game_core::environment::season_index(sim.0.environment_time).floor() as usize;
@@ -2755,8 +2849,15 @@ fn sync_decor_billboards(
     sim: Res<Sim>,
     scenery: Res<SceneryRun>,
     proj: Res<Proj>,
+    finish: Res<crate::FinishSequence>,
     mut signs: Query<(&DecorBillboard, &mut Transform, &mut Visibility)>,
 ) {
+    if finish.active {
+        for (_, _, mut visibility) in &mut signs {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
     let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
     let count = match theme {
         backdrop::RoadsideTheme::City => 5,
@@ -3929,7 +4030,7 @@ pub fn add_view_systems(app: &mut App) {
     );
     app.add_systems(
         Update,
-        (sync_decor_billboards, sync_wall_climb, sync_pause_overlay).in_set(ViewSet::Presentation),
+        (sync_decor_billboards, sync_finish_car, sync_pause_overlay).in_set(ViewSet::Presentation),
     );
 }
 
@@ -4342,12 +4443,52 @@ mod tests {
     }
 
     #[test]
-    fn smoothstep_clamps_and_eases_wall_transition() {
+    fn smoothstep_clamps_and_eases_transition() {
         assert_eq!(smoothstep(-1.0), 0.0);
         assert_eq!(smoothstep(0.0), 0.0);
         assert!((smoothstep(0.5) - 0.5).abs() < 1e-6);
         assert_eq!(smoothstep(1.0), 1.0);
         assert_eq!(smoothstep(2.0), 1.0);
+    }
+
+    #[test]
+    fn finish_road_becomes_constant_width_and_covers_the_screen() {
+        let unchanged = finish_road_band(24.0, 80.0, -250.0, -220.0, 0, 0.0);
+        assert_eq!(unchanged.center, 24.0);
+        assert_eq!(unchanged.half_width, 80.0);
+        assert_eq!(unchanged.y0, -250.0);
+        assert_eq!(unchanged.y1, -220.0);
+
+        let first = finish_road_band(24.0, 80.0, -250.0, -220.0, 0, 1.0);
+        let second = finish_road_band(16.0, 62.0, -220.0, -190.0, 1, 1.0);
+        let last = finish_road_band(-31.0, 22.0, 100.0, HORIZON_Y, FINISH_ROAD_BANDS - 1, 1.0);
+        assert_eq!(first.center, 0.0);
+        assert_eq!(first.half_width, FINISH_ROAD_HALF_WIDTH);
+        assert_eq!(second.half_width, FINISH_ROAD_HALF_WIDTH);
+        assert_eq!(first.y0, -VIEW_TOP);
+        assert!((first.y1 - second.y0).abs() < f32::EPSILON);
+        assert_eq!(last.y1, VIEW_TOP);
+    }
+
+    #[test]
+    fn finish_sequence_lifts_morphs_then_thrusts_upward() {
+        let start = finish_pose(0.0);
+        let lifted = finish_pose(0.50);
+        let flight = finish_pose(0.75);
+        let end = finish_pose(1.0);
+
+        assert_eq!(start.road_lift, 0.0);
+        assert_eq!(start.rear_scale_y, 1.0);
+        assert_eq!(start.top_scale_y, 0.0);
+        assert_eq!(start.car_y, CAR_Y);
+        assert_eq!(start.jet, 0.0);
+        assert_eq!(lifted.road_lift, 1.0);
+        assert!(lifted.rear_scale_y < 1.0);
+        assert!(flight.top_scale_y > 0.99);
+        assert!(flight.car_y > CAR_Y);
+        assert!(flight.jet > 0.99);
+        assert!(end.car_y > VIEW_TOP);
+        assert_eq!(end.jet, 0.0);
     }
 
     #[test]
