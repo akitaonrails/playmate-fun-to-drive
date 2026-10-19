@@ -5,6 +5,30 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.5.0] — 2026-10-18
+
+- Added optional multi-touch mobile controls with safe-area-aware steering,
+  brake, gear swipe, nitro, Jump Kick, pause, difficulty/CRT menus, initials,
+  and restart controls. Touch mode persists locally and portrait devices get a
+  clear landscape-orientation prompt.
+- Added the rare once-per-day/night-cycle Jump Kick collectible. B/gamepad B
+  launches a speed-carrying 360-degree Y-axis jump that clears traffic in the
+  air but reuses normal crash recovery when the car lands on traffic or a
+  roadside obstacle.
+- Recalibrated steering deadzone, ramp, keyboard taps, and maximum authority so
+  center-road curvature cannot overpower player input on sharp bends.
+- Replaced the off-road audio artifact with a speed/excursion-driven gravel
+  loop, separated from the rain-only wet skid layer, and added 16-bit pickup,
+  launch, and landing cues for Jump Kick.
+- Added deterministic tests for collectible rarity and capacity, activation,
+  airborne traffic passes, unsafe landings, timer/reset cleanup, steering
+  authority, touch edge latching, and audio-layer separation.
+- Made the Jump Kick's barrel roll explicitly rotate around the car's
+  front-to-back Y axis, with a basis-vector regression test that rejects flat
+  Z-axis spinning.
+- Rebuilt thunder as a compact 16-bit crack with two chip-noise echoes and a
+  gated descending rumble, replacing the strange sustained low drone.
+
 ## [0.4.0] — 2026-10-18
 
 - Rebuilt road curvature around true perspective arcs: curvature now integrates

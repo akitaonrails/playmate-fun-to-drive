@@ -51,6 +51,7 @@ const HAZARD_POOL: usize = 40;
 const HAZARD_PARTS: usize = 6;
 const NITRO_X_LEFT: f32 = 302.0;
 const NITRO_Y: f32 = 216.0;
+const JUMP_METER_X: f32 = 138.0;
 const RAIN_POOL: usize = 84;
 const SPEED_LINE_POOL: usize = 28;
 const VISIBILITY_BANDS: usize = 8;
@@ -100,10 +101,19 @@ struct HeadlightBand {
 struct NitroPickupPart(u8);
 
 #[derive(Component)]
+struct JumpPickupPart(u8);
+
+#[derive(Component)]
 struct PalmPart;
 
 #[derive(Component)]
 struct CarPart;
+
+#[derive(Component)]
+struct PlayerCarRoot;
+
+#[derive(Component)]
+struct PlayerCarShadow;
 
 #[derive(Component)]
 struct NitroExhaust {
@@ -125,6 +135,12 @@ struct NitroSegmentHalo(u8);
 
 #[derive(Component)]
 struct NitroMeterHalo;
+
+#[derive(Component)]
+struct JumpMeterFill;
+
+#[derive(Component)]
+struct JumpMeterHalo;
 
 #[derive(Component)]
 struct RainStreak(usize);
@@ -900,37 +916,60 @@ pub fn setup(mut commands: Commands) {
         ));
     }
 
-    // ---- the fixed player car "decal" (composite) ----
-    commands.spawn((
-        Sprite::from_color(
-            Color::srgb(0.86, 0.10, 0.08),
-            Vec2::new(PLAYER_CAR_WIDTH_PX - 4.0, 30.0),
-        ),
-        Transform::from_xyz(0.0, CAR_Y - 4.0, 0.5),
-        CarPart,
-    ));
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.90, 0.16, 0.10), Vec2::new(78.0, 12.0)),
-        Transform::from_xyz(0.0, CAR_Y + 10.0, 0.5),
-        CarPart,
-    ));
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.12, 0.16, 0.28), Vec2::new(40.0, 14.0)),
-        Transform::from_xyz(0.0, CAR_Y + 2.0, 0.6),
-        CarPart,
-    ));
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.05, 0.05, 0.06), Vec2::new(96.0, 8.0)),
-        Transform::from_xyz(0.0, CAR_Y + 17.0, 0.4),
-        CarPart,
-    ));
-    for wx in [-36.0f32, 36.0] {
+    // ---- rare Jump Kick pickup (one deterministic candidate per cycle max) ----
+    for i in 0..5u8 {
         commands.spawn((
-            Sprite::from_color(Color::srgb(0.07, 0.07, 0.08), Vec2::new(18.0, 14.0)),
-            Transform::from_xyz(wx, CAR_Y - 14.0, 0.45),
-            CarPart,
+            Sprite::from_color(Color::srgb(1.0, 0.22, 0.72), Vec2::new(38.0, 48.0)),
+            Transform::from_xyz(0.0, CAR_Y, -2.25),
+            Visibility::Hidden,
+            JumpPickupPart(i),
         ));
     }
+
+    // ---- the fixed player car "decal" (composite) ----
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.0, 0.0, 0.0, 0.28), Vec2::new(92.0, 12.0)),
+        Transform::from_xyz(0.0, CAR_Y - 18.0, 0.30),
+        PlayerCarShadow,
+    ));
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, CAR_Y, 0.5),
+            Visibility::Visible,
+            PlayerCarRoot,
+        ))
+        .with_children(|car| {
+            car.spawn((
+                Sprite::from_color(
+                    Color::srgb(0.86, 0.10, 0.08),
+                    Vec2::new(PLAYER_CAR_WIDTH_PX - 4.0, 30.0),
+                ),
+                Transform::from_xyz(0.0, -4.0, 0.0),
+                CarPart,
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.90, 0.16, 0.10), Vec2::new(78.0, 12.0)),
+                Transform::from_xyz(0.0, 10.0, 0.0),
+                CarPart,
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.12, 0.16, 0.28), Vec2::new(40.0, 14.0)),
+                Transform::from_xyz(0.0, 2.0, 0.1),
+                CarPart,
+            ));
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.05, 0.05, 0.06), Vec2::new(96.0, 8.0)),
+                Transform::from_xyz(0.0, 17.0, -0.1),
+                CarPart,
+            ));
+            for wx in [-36.0f32, 36.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.07, 0.07, 0.08), Vec2::new(18.0, 14.0)),
+                    Transform::from_xyz(wx, -14.0, -0.05),
+                    CarPart,
+                ));
+            }
+        });
 
     // Twin layered jets sit behind the player car. They remain pooled and
     // hidden until nitro is active so both the flat and toy-screen views see
@@ -979,6 +1018,32 @@ pub fn setup(mut commands: Commands) {
             NitroBarSegment(i),
         ));
     }
+
+    // One-cell Jump Kick inventory beside the nitro meter.
+    commands.spawn((
+        Sprite::from_color(Color::srgba(1.0, 0.22, 0.72, 0.0), Vec2::new(132.0, 42.0)),
+        Transform::from_xyz(JUMP_METER_X, NITRO_Y, 0.98),
+        JumpMeterHalo,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgba(0.02, 0.02, 0.04, 0.82), Vec2::new(124.0, 34.0)),
+        Transform::from_xyz(JUMP_METER_X, NITRO_Y, 1.0),
+        HudPanel,
+    ));
+    commands.spawn((
+        Text2d::new("JUMP B"),
+        TextFont {
+            font_size: FontSize::Px(15.0),
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 0.70, 0.92)),
+        Transform::from_xyz(JUMP_METER_X - 32.0, NITRO_Y, 1.1),
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.11, 0.12, 0.19), Vec2::new(28.0, 14.0)),
+        Transform::from_xyz(JUMP_METER_X + 36.0, NITRO_Y, 1.1),
+        JumpMeterFill,
+    ));
 
     // in-screen HUD (Text2d => rendered INTO the game texture, so it shows
     // on the toy screen itself) with dark backing panels for contrast
@@ -1560,6 +1625,143 @@ fn sync_nitro_pickup(
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn sync_jump_pickup(
+    sim: Res<Sim>,
+    proj: Res<Proj>,
+    time: Res<Time>,
+    mut parts: Query<(
+        &JumpPickupPart,
+        &mut Transform,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    let mut parts = parts.iter_mut();
+    let Some(ahead) = sim.0.jump_pickup_ahead() else {
+        for (_, _, _, mut visibility) in parts {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let Some((y, scale, lateral)) = proj.project(ahead, sim.0.road_x) else {
+        for (_, _, _, mut visibility) in parts {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let x = (lateral + sim.0.next_jump_lane) * HALF_ROAD_PX * scale;
+    let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 8.7).sin();
+    for (part, mut transform, mut sprite, mut visibility) in parts.by_ref() {
+        let (color, size, dx, dy, z) = match part.0 {
+            0 => (
+                Color::srgba(1.0, 0.10, 0.72, 0.14 + pulse * 0.20),
+                Vec2::new((64.0 * scale).max(6.0), (64.0 * scale).max(6.0)),
+                0.0,
+                0.0,
+                -2.30,
+            ),
+            1 => (
+                Color::srgb(0.96, 0.16, 0.64),
+                Vec2::new((30.0 * scale).max(3.0), (34.0 * scale).max(4.0)),
+                0.0,
+                0.0,
+                -2.25,
+            ),
+            2 => (
+                Color::srgb(1.0, 0.82, 0.96),
+                Vec2::new((28.0 * scale).max(3.0), (7.0 * scale).max(1.0)),
+                0.0,
+                0.0,
+                -2.22,
+            ),
+            3 => (
+                Color::srgb(0.28, 1.0, 0.78),
+                Vec2::new((16.0 * scale).max(2.0), (8.0 * scale).max(1.0)),
+                -19.0 * scale,
+                5.0 * scale,
+                -2.21,
+            ),
+            _ => (
+                Color::srgb(0.28, 1.0, 0.78),
+                Vec2::new((16.0 * scale).max(2.0), (8.0 * scale).max(1.0)),
+                19.0 * scale,
+                5.0 * scale,
+                -2.21,
+            ),
+        };
+        transform.translation = Vec3::new(x + dx, y + dy, z);
+        sprite.color = color;
+        sprite.custom_size = Some(size);
+        *visibility = Visibility::Visible;
+    }
+    for (_, _, _, mut visibility) in parts {
+        *visibility = Visibility::Hidden;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct JumpPose {
+    height: f32,
+    longitudinal_spin: f32,
+    scale: Vec3,
+    shadow_scale: f32,
+    shadow_alpha: f32,
+}
+
+fn jump_pose(progress: f32) -> JumpPose {
+    if !(0.0..1.0).contains(&progress) {
+        return JumpPose {
+            height: 0.0,
+            longitudinal_spin: 0.0,
+            scale: Vec3::ONE,
+            shadow_scale: 1.0,
+            shadow_alpha: 0.28,
+        };
+    }
+    let p = progress.clamp(0.0, 1.0);
+    let height_unit = (std::f32::consts::PI * p).sin().max(0.0);
+    let eased_spin = p * p * (3.0 - 2.0 * p);
+    let launch_squash = ((0.09 - p).max(0.0) / 0.09).powi(2);
+    let landing_squash = ((p - 0.90).max(0.0) / 0.10).powi(2);
+    JumpPose {
+        height: 104.0 * height_unit,
+        longitudinal_spin: std::f32::consts::TAU * eased_spin,
+        scale: Vec3::new(
+            1.0 + 0.10 * (launch_squash + landing_squash),
+            1.0 - 0.12 * (launch_squash + landing_squash),
+            1.0,
+        ),
+        shadow_scale: 1.0 - 0.46 * height_unit,
+        shadow_alpha: 0.28 * (1.0 - 0.64 * height_unit),
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_jump_car(
+    sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    mut car: Query<&mut Transform, With<PlayerCarRoot>>,
+    mut shadow: Query<
+        (&mut Transform, &mut Sprite),
+        (With<PlayerCarShadow>, Without<PlayerCarRoot>),
+    >,
+) {
+    let pose = jump_pose(sim.0.jump_progress(&tuning.0));
+    if let Ok(mut transform) = car.single_mut() {
+        transform.translation = Vec3::new(0.0, CAR_Y + pose.height, 0.5);
+        // The sprite faces up-screen, so its local Y vector runs from rear to
+        // nose. Rotate around that longitudinal axis for a barrel-style Jump
+        // Kick; rotating around Z would merely spin the car flat on-screen.
+        transform.rotation = Quat::from_axis_angle(Vec3::Y, pose.longitudinal_spin);
+        transform.scale = pose.scale;
+    }
+    if let Ok((mut transform, mut sprite)) = shadow.single_mut() {
+        transform.scale = Vec3::new(pose.shadow_scale, pose.shadow_scale, 1.0);
+        sprite.color = Color::srgba(0.0, 0.0, 0.0, pose.shadow_alpha);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ExhaustShape {
     size: Vec2,
@@ -1621,11 +1823,12 @@ fn sync_nitro_visual_intensity(
 }
 
 fn sync_nitro_exhaust(
+    sim: Res<Sim>,
     visuals: Res<NitroVisuals>,
     time: Res<Time>,
     mut jets: Query<(&NitroExhaust, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
-    if visuals.intensity <= 0.01 {
+    if visuals.intensity <= 0.01 || sim.0.jump_active() {
         for (_, _, _, mut visibility) in &mut jets {
             *visibility = Visibility::Hidden;
         }
@@ -1772,6 +1975,36 @@ fn sync_flash(sim: Res<Sim>, mut q: Query<&mut Sprite, With<FlashOverlay>>) {
 }
 
 #[allow(clippy::type_complexity)]
+fn sync_jump_hud(
+    sim: Res<Sim>,
+    effects: Res<crate::VisualEffects>,
+    time: Res<Time>,
+    mut parts: Query<
+        (&mut Sprite, Option<&JumpMeterFill>, Option<&JumpMeterHalo>),
+        Or<(With<JumpMeterFill>, With<JumpMeterHalo>)>,
+    >,
+) {
+    let ready_pulse = 0.5 + 0.5 * (time.elapsed_secs() * std::f32::consts::TAU * 1.35).sin();
+    let pickup = (effects.jump_pickup_glow / crate::JUMP_PICKUP_GLOW_SECS).clamp(0.0, 1.0);
+    for (mut sprite, fill, halo) in &mut parts {
+        if fill.is_some() {
+            sprite.color = if sim.0.jump_charge {
+                Color::srgb(1.0, 0.24 + 0.20 * pickup, 0.70 + 0.24 * pickup)
+            } else {
+                Color::srgb(0.11, 0.12, 0.19)
+            };
+        } else if halo.is_some() {
+            let alpha = if sim.0.jump_charge {
+                0.10 + 0.20 * ready_pulse + 0.35 * pickup
+            } else {
+                0.0
+            };
+            sprite.color = Color::srgba(1.0, 0.18, 0.70, alpha.clamp(0.0, 0.72));
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 fn sync_hud(
     sim: Res<Sim>,
@@ -1902,7 +2135,7 @@ fn sync_hud(
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS steer | Q low / E high | Y nitro | R restart | T toy | L toy look"
+                    "ARROWS steer | Q/E gear | Y nitro | B/SPACE jump | R restart | T toy"
                 }
                 Phase::Running | Phase::GameOver { .. } => "",
             }
@@ -2766,11 +2999,14 @@ pub fn add_view_systems(app: &mut App) {
             sync_hazards,
             sync_projected_headlights,
             sync_nitro_pickup,
+            sync_jump_pickup,
+            sync_jump_car,
             sync_nitro_exhaust,
             sync_nitro_speed_lines,
             sync_flash,
             sync_drum_overlays,
             sync_hud,
+            sync_jump_hud,
             sync_countdown_style,
             sync_instruments,
             sync_end_overlay,
@@ -3038,6 +3274,25 @@ mod tests {
         assert!(nitro_pickup_pulse(crate::NITRO_PICKUP_GLOW_SECS) < 1e-6);
         assert!((nitro_pickup_pulse(crate::NITRO_PICKUP_GLOW_SECS * 0.5) - 1.0).abs() < 1e-6);
         assert!(nitro_pickup_pulse(0.0) < 1e-6);
+    }
+
+    #[test]
+    fn jump_pose_lifts_spins_and_returns_to_rest() {
+        let start = jump_pose(0.0);
+        let apex = jump_pose(0.5);
+        let end = jump_pose(1.0);
+        assert_eq!(start.height, 0.0);
+        assert!(apex.height > 100.0);
+        assert!((apex.longitudinal_spin - std::f32::consts::PI).abs() < 1e-5);
+        let quarter = jump_pose(0.326_351_82); // smoothstep(p) = 0.25
+        let rotation = Quat::from_axis_angle(Vec3::Y, quarter.longitudinal_spin);
+        assert!((rotation * Vec3::Y - Vec3::Y).length() < 1e-5);
+        assert!((rotation * Vec3::X + Vec3::Z).length() < 1e-4);
+        assert!(apex.shadow_scale < start.shadow_scale);
+        assert!(apex.shadow_alpha < start.shadow_alpha);
+        assert_eq!(end.height, 0.0);
+        assert_eq!(end.longitudinal_spin, 0.0);
+        assert_eq!(end.scale, Vec3::ONE);
     }
 
     #[test]

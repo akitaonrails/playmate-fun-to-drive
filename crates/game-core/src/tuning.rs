@@ -35,6 +35,9 @@ pub struct Tuning {
     pub slope_speed_max_factor: f32,
     /// Rate at which road_x chases the curve target (per second at LOW speed).
     pub drift_rate: f32,
+    /// Maximum speed multiplier applied to curve drift. Without this cap a
+    /// nitro-speed sharp corner can overpower even full steering input.
+    pub curve_drift_speed_cap: f32,
     /// Drum shift velocity at full steering input (half-widths/s).
     pub steer_rate: f32,
     /// |road_x| beyond this counts as off-road.
@@ -60,6 +63,14 @@ pub struct Tuning {
     pub nitro_pickup_half_width: f32,
     pub nitro_lane_offset: f32,
     pub nitro_capacity: u8,
+    /// Rare single-charge Jump Kick pickup and airborne behavior.
+    pub jump_spawn_chance_percent: u8,
+    pub jump_pickup_half_width: f32,
+    pub jump_lane_offset: f32,
+    pub jump_duration_secs: f32,
+    pub jump_speed_multiplier: f32,
+    pub jump_air_steer_factor: f32,
+    pub jump_landing_window_m: f32,
     /// Difficulty-specific oncoming lane changes. Easy changes least often
     /// and across the longest/farthest horizon band; Hard is more active.
     pub traffic_easy: TrafficMotion,
@@ -124,7 +135,8 @@ impl Default for Tuning {
             slope_speed_min_factor: 0.90,
             slope_speed_max_factor: 1.10,
             drift_rate: 0.75,
-            steer_rate: 2.0,
+            curve_drift_speed_cap: 1.60,
+            steer_rate: 2.25,
             off_road_limit: 1.02,
             max_lateral_offset: 1.35,
             off_road_recovery_rate: 2.0,
@@ -140,6 +152,13 @@ impl Default for Tuning {
             nitro_pickup_half_width: 0.20,
             nitro_lane_offset: 0.62,
             nitro_capacity: 3,
+            jump_spawn_chance_percent: 38,
+            jump_pickup_half_width: 0.20,
+            jump_lane_offset: 0.62,
+            jump_duration_secs: 1.10,
+            jump_speed_multiplier: 1.12,
+            jump_air_steer_factor: 0.60,
+            jump_landing_window_m: 2.40,
             traffic_easy: TrafficMotion {
                 chance_percent: 12,
                 change_start_m: 42.0,
@@ -171,10 +190,10 @@ impl Default for Tuning {
             crash_shake_secs: 1.1,
             crash_shake_gain: 0.020,
             crash_shake_roll: 0.13,
-            pad_deadzone: 0.08,
-            kb_tap_intensity: 0.35,
-            kb_ramp_secs: 0.8,
-            kb_release_decay: 9.0,
+            pad_deadzone: 0.06,
+            kb_tap_intensity: 0.45,
+            kb_ramp_secs: 0.45,
+            kb_release_decay: 12.0,
         }
     }
 }
@@ -237,11 +256,15 @@ impl Tuning {
         if !(0.05..=5.0).contains(&self.drift_rate) {
             return Err("drift_rate out of [0.05, 5]");
         }
+        if !(1.0..=3.0).contains(&self.curve_drift_speed_cap) {
+            return Err("curve_drift_speed_cap out of [1, 3]");
+        }
         if !(0.3..=4.0).contains(&self.steer_rate) {
             return Err("steer_rate out of [0.3, 4]");
         }
-        if self.steer_rate <= self.drift_rate * self.curve_gain {
-            return Err("steering must be able to beat the curve drift");
+        let worst_center_drift = self.drift_rate * self.curve_gain * self.curve_drift_speed_cap;
+        if self.steer_rate < worst_center_drift * 1.20 {
+            return Err("steering needs 20% authority over maximum center curve drift");
         }
         if !(0.8..=1.3).contains(&self.off_road_limit) {
             return Err("off_road_limit out of [0.8, 1.3]");
@@ -287,6 +310,27 @@ impl Tuning {
         }
         if !(1..=8).contains(&self.nitro_capacity) {
             return Err("nitro_capacity out of [1, 8]");
+        }
+        if self.jump_spawn_chance_percent > 100 {
+            return Err("jump spawn chance exceeds 100%");
+        }
+        if !(0.05..=0.5).contains(&self.jump_pickup_half_width) {
+            return Err("jump_pickup_half_width out of [0.05, 0.5]");
+        }
+        if !(0.2..=0.9).contains(&self.jump_lane_offset) {
+            return Err("jump_lane_offset out of [0.2, 0.9]");
+        }
+        if !(0.6..=2.0).contains(&self.jump_duration_secs) {
+            return Err("jump_duration_secs out of [0.6, 2]");
+        }
+        if !(1.0..=1.5).contains(&self.jump_speed_multiplier) {
+            return Err("jump_speed_multiplier out of [1, 1.5]");
+        }
+        if !(0.25..=1.0).contains(&self.jump_air_steer_factor) {
+            return Err("jump_air_steer_factor out of [0.25, 1]");
+        }
+        if !(0.5..=5.0).contains(&self.jump_landing_window_m) {
+            return Err("jump_landing_window_m out of [0.5, 5]");
         }
         for traffic in [self.traffic_easy, self.traffic_medium, self.traffic_hard] {
             traffic.validate()?;
@@ -375,6 +419,18 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         assert!(Tuning::default().validate().is_ok());
+    }
+
+    #[test]
+    fn steering_keeps_margin_over_nitro_curve_drift() {
+        let t = Tuning::default();
+        let worst_center_drift = t.drift_rate * t.curve_gain * t.curve_drift_speed_cap;
+        assert!(t.steer_rate >= worst_center_drift * 1.20);
+        assert!(
+            t.curve_drift_speed_cap
+                < t.scroll_speed_high * t.nitro_speed_multiplier / t.scroll_speed_low,
+            "the cap must actually constrain nitro-speed drift"
+        );
     }
 
     #[test]

@@ -43,6 +43,9 @@ pub(crate) enum AudioCue {
     Crash,
     NitroPickup,
     NitroStart,
+    JumpPickup,
+    JumpStart,
+    JumpLand,
     Thunder,
     MenuMove,
     MenuConfirm,
@@ -60,6 +63,9 @@ impl AudioCue {
             Self::Crash => "crash",
             Self::NitroPickup => "nitro_pickup",
             Self::NitroStart => "nitro_start",
+            Self::JumpPickup => "jump_pickup",
+            Self::JumpStart => "jump_start",
+            Self::JumpLand => "jump_land",
             Self::Thunder => "thunder",
             Self::MenuMove => "menu_move",
             Self::MenuConfirm => "menu_confirm",
@@ -75,7 +81,8 @@ impl AudioCue {
             Self::Crash => 0.55,
             Self::Thunder => 0.46,
             Self::NitroStart => 0.45,
-            Self::NitroPickup | Self::RunStart => 0.38,
+            Self::NitroPickup | Self::JumpPickup | Self::RunStart => 0.38,
+            Self::JumpStart | Self::JumpLand => 0.40,
             Self::Shift | Self::Clank | Self::MenuConfirm | Self::Submit => 0.34,
             Self::MenuMove | Self::Key | Self::Delete => 0.25,
         };
@@ -106,6 +113,7 @@ pub(crate) struct AudioState {
     pub(crate) rain: f32,
     pub(crate) brake: f32,
     pub(crate) skid: f32,
+    pub(crate) gravel: f32,
     pub(crate) overrev: f32,
     pub(crate) nitro: f32,
     pub(crate) music_sunset: f32,
@@ -132,6 +140,7 @@ impl AudioState {
             rain: 0.0,
             brake: 0.0,
             skid: 0.0,
+            gravel: 0.0,
             overrev: 0.0,
             nitro: 0.0,
             music_sunset: 0.0,
@@ -191,6 +200,9 @@ struct AudioAssets {
     crash: Handle<AudioSource>,
     nitro_pickup: Handle<AudioSource>,
     nitro_start: Handle<AudioSource>,
+    jump_pickup: Handle<AudioSource>,
+    jump_start: Handle<AudioSource>,
+    jump_land: Handle<AudioSource>,
     thunder: Handle<AudioSource>,
     menu_move: Handle<AudioSource>,
     menu_confirm: Handle<AudioSource>,
@@ -208,6 +220,9 @@ impl AudioAssets {
             AudioCue::Crash => self.crash.clone(),
             AudioCue::NitroPickup => self.nitro_pickup.clone(),
             AudioCue::NitroStart => self.nitro_start.clone(),
+            AudioCue::JumpPickup => self.jump_pickup.clone(),
+            AudioCue::JumpStart => self.jump_start.clone(),
+            AudioCue::JumpLand => self.jump_land.clone(),
             AudioCue::Thunder => self.thunder.clone(),
             AudioCue::MenuMove => self.menu_move.clone(),
             AudioCue::MenuConfirm => self.menu_confirm.clone(),
@@ -227,6 +242,7 @@ enum AudioLayer {
     Rain,
     Brake,
     Skid,
+    Gravel,
     Overrev,
     Nitro,
     MusicSunset,
@@ -242,6 +258,9 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         crash: load("crash"),
         nitro_pickup: load("nitro_pickup"),
         nitro_start: load("nitro_start"),
+        jump_pickup: load("jump_pickup"),
+        jump_start: load("jump_start"),
+        jump_land: load("jump_land"),
         thunder: load("thunder"),
         menu_move: load("menu_move"),
         menu_confirm: load("menu_confirm"),
@@ -258,6 +277,7 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         (AudioLayer::Rain, load("rain")),
         (AudioLayer::Brake, load("brake")),
         (AudioLayer::Skid, load("wet_skid")),
+        (AudioLayer::Gravel, load("gravel")),
         (AudioLayer::Overrev, load("overrev")),
         (AudioLayer::Nitro, load("nitro_burn")),
         (AudioLayer::MusicSunset, load("music_sunset_drive")),
@@ -279,12 +299,14 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
 fn unlock_on_input(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    touch: Res<crate::TouchInput>,
     mut state: ResMut<AudioState>,
 ) {
     let pressed = keys.get_just_pressed().next().is_some()
         || pads
             .iter()
-            .any(|pad| pad.get_just_pressed().next().is_some());
+            .any(|pad| pad.get_just_pressed().next().is_some())
+        || touch.active_this_frame;
     if pressed {
         // Retrying matters on the web: an earlier AudioContext::resume promise
         // may have been rejected because it raced browser user activation.
@@ -295,7 +317,6 @@ fn unlock_on_input(
 
 fn toggle_mute(
     keys: Res<ButtonInput<KeyCode>>,
-    pads: Query<&Gamepad>,
     end: Res<EndSession>,
     mut state: ResMut<AudioState>,
 ) {
@@ -303,8 +324,7 @@ fn toggle_mute(
     if end.0.mode == crate::session::EndMode::NameEntry {
         return;
     }
-    let requested = keys.just_pressed(KeyCode::KeyM)
-        || pads.iter().any(|pad| pad.just_pressed(GamepadButton::East));
+    let requested = keys.just_pressed(KeyCode::KeyM);
     if requested {
         state.unlocked = true;
         state.muted = !state.muted;
@@ -320,6 +340,7 @@ struct MixTargets {
     rain: f32,
     brake: f32,
     skid: f32,
+    gravel: f32,
     overrev: f32,
     nitro: f32,
     music: [f32; 3],
@@ -368,7 +389,6 @@ fn mix_targets(input: MixInput) -> MixTargets {
         Gear::High => (engine * 0.12, engine * 1.05),
     };
     let slip = ((input.steer.abs() - 0.52) / 0.48)
-        .max(input.off_road)
         .max((input.brake - 0.40) / 0.60)
         .clamp(0.0, 1.0);
 
@@ -379,6 +399,7 @@ fn mix_targets(input: MixInput) -> MixTargets {
         rain: 0.115 * input.rain.clamp(0.0, 1.0) * EFFECTS_GAIN,
         brake: 0.13 * input.brake.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
         skid: 0.14 * input.rain.clamp(0.0, 1.0) * slip * speed.min(1.0) * EFFECTS_GAIN,
+        gravel: 0.13 * input.off_road.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
         overrev: 0.105 * input.overrev.clamp(0.0, 1.0) * EFFECTS_GAIN,
         nitro: if input.nitro {
             0.24 * EFFECTS_GAIN
@@ -416,7 +437,7 @@ fn update_mix(
         rain: weather.rain,
         steer: frame.state.steer,
         brake: frame.state.brake,
-        off_road: sim.0.off_road,
+        off_road: sim.0.off_road_intensity(&tuning.0),
         nitro: crate::nitro_effects_active(&sim.0),
         music_track: (sim.0.day_cycles % 3) as usize,
     });
@@ -428,6 +449,7 @@ fn update_mix(
     state.rain += (target.rain - state.rain) * alpha;
     state.brake += (target.brake - state.brake) * alpha;
     state.skid += (target.skid - state.skid) * alpha;
+    state.gravel += (target.gravel - state.gravel) * alpha;
     state.overrev += (target.overrev - state.overrev) * alpha;
     state.nitro += (target.nitro - state.nitro) * alpha;
     state.engine_pitch += (target.engine_pitch - state.engine_pitch) * alpha;
@@ -446,6 +468,7 @@ fn update_mix(
             AudioLayer::Rain => state.rain,
             AudioLayer::Brake => state.brake,
             AudioLayer::Skid => state.skid,
+            AudioLayer::Gravel => state.gravel,
             AudioLayer::Overrev => state.overrev,
             AudioLayer::Nitro => state.nitro,
             AudioLayer::MusicSunset => state.music_sunset,
@@ -463,6 +486,7 @@ fn update_mix(
             AudioLayer::EngineLow => sink.set_speed(state.engine_pitch),
             AudioLayer::EngineHigh => sink.set_speed((state.engine_pitch * 1.03).min(1.52)),
             AudioLayer::Wind => sink.set_speed((0.82 + sim.0.speed / 80.0).min(1.18)),
+            AudioLayer::Gravel => sink.set_speed((0.88 + sim.0.speed / 120.0).clamp(0.88, 1.10)),
             _ => {}
         }
     }
@@ -646,6 +670,24 @@ mod tests {
             wet.music[0] < dry.music[0],
             "nitro should gently duck music"
         );
+    }
+
+    #[test]
+    fn gravel_is_dry_off_road_texture_not_a_wet_skid() {
+        let gravel = mix_targets(MixInput {
+            off_road: 0.8,
+            ..driving()
+        });
+        assert!(gravel.gravel > 0.0);
+        assert_eq!(gravel.skid, 0.0);
+
+        let wet_straight = mix_targets(MixInput {
+            rain: 1.0,
+            off_road: 0.0,
+            ..driving()
+        });
+        assert_eq!(wet_straight.skid, 0.0);
+        assert_eq!(wet_straight.gravel, 0.0);
     }
 
     #[test]

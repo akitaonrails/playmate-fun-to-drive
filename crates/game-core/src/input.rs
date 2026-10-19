@@ -37,6 +37,8 @@ pub struct InputState {
     pub pause: bool,
     /// Edge-triggered: fire nitro when the three-cell meter is full.
     pub nitro: bool,
+    /// Edge-triggered: consume the stored Jump Kick charge.
+    pub jump: bool,
 }
 
 /// Keyboard steering adapter (REQUEST R0/R8): a short press is a light
@@ -122,7 +124,10 @@ mod tests {
         for _ in 0..6 {
             v = k.update(false, true, 1.0 / 60.0, &t); // 100 ms tap
         }
-        assert!(v > 0.3 && v < 0.55, "tap should be light: {v}");
+        assert!(
+            v > 0.5 && v < 0.65,
+            "tap should be responsive but shaped: {v}"
+        );
     }
 
     #[test]

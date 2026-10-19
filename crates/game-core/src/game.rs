@@ -83,6 +83,9 @@ pub struct StepEvents {
     /// Zero-based meter segment filled by this pickup.
     pub nitro_collected_segment: Option<u8>,
     pub nitro_started: bool,
+    pub jump_collected: bool,
+    pub jump_started: bool,
+    pub jump_landed: bool,
     pub high_rejected: bool,
     pub gear_changed: Option<GearChange>,
 }
@@ -236,6 +239,13 @@ pub struct Game {
     /// Lane of the next pickup, relative to road center.
     pub next_nitro_lane: f32,
     nitro_pickup_index: u32,
+    /// Single stored Jump Kick and its deterministic per-cycle pickup.
+    pub jump_charge: bool,
+    pub jump_t: f32,
+    pub next_jump_distance: Option<f32>,
+    pub next_jump_lane: f32,
+    jump_pickup_cycle: u64,
+    jump_start_distance: f32,
     gear: Gear,
     recovery: Recovery,
     difficulty: Difficulty,
@@ -289,6 +299,12 @@ impl Game {
             next_nitro_distance: t.nitro_pickup_first_m,
             next_nitro_lane: Self::nitro_lane(seed, 0, t),
             nitro_pickup_index: 0,
+            jump_charge: false,
+            jump_t: 0.0,
+            next_jump_distance: None,
+            next_jump_lane: 0.0,
+            jump_pickup_cycle: 0,
+            jump_start_distance: 0.0,
             gear: Gear::Low,
             recovery: Recovery::Normal,
             difficulty,
@@ -296,6 +312,12 @@ impl Game {
             weather: WeatherSchedule::new(seed),
             result: None,
         }
+        .with_initial_jump_pickup(t)
+    }
+
+    fn with_initial_jump_pickup(mut self, t: &Tuning) -> Self {
+        self.schedule_jump_pickup_from(0, t);
+        self
     }
 
     pub fn gear(&self) -> Gear {
@@ -436,6 +458,24 @@ impl Game {
         self.next_nitro_distance - self.distance
     }
 
+    pub fn jump_active(&self) -> bool {
+        self.jump_t > 0.0
+    }
+
+    pub fn jump_progress(&self, t: &Tuning) -> f32 {
+        if self.jump_t <= 0.0 {
+            0.0
+        } else {
+            (1.0 - self.jump_t / t.jump_duration_secs).clamp(0.0, 1.0)
+        }
+    }
+
+    pub fn jump_pickup_ahead(&self) -> Option<f32> {
+        (!self.jump_charge)
+            .then_some(self.next_jump_distance?)
+            .map(|distance| distance - self.distance)
+    }
+
     pub fn weather(&self) -> WeatherTransition {
         self.weather.at(self.environment_time)
     }
@@ -456,6 +496,39 @@ impl Game {
         self.next_nitro_lane = Self::nitro_lane(self.seed, self.nitro_pickup_index, t);
     }
 
+    fn jump_pickup_for_cycle(&self, cycle: u64, t: &Tuning) -> Option<(f32, f32)> {
+        let mut hash =
+            self.seed ^ cycle.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x4A55_4D50_4B49_434B;
+        hash ^= hash >> 30;
+        hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        hash ^= hash >> 27;
+        if hash % 100 >= u64::from(t.jump_spawn_chance_percent) {
+            return None;
+        }
+        let phase = 0.28 + ((hash.rotate_left(17) % 47) as f32 / 100.0);
+        let distance = (cycle as f32 + phase) * DAY_SECS * t.scroll_speed_low;
+        let lanes = [-t.jump_lane_offset, 0.0, t.jump_lane_offset];
+        let lane = lanes[(hash.rotate_left(41) % lanes.len() as u64) as usize];
+        Some((distance, lane))
+    }
+
+    fn schedule_jump_pickup_from(&mut self, first_cycle: u64, t: &Tuning) {
+        self.next_jump_distance = None;
+        for cycle in first_cycle..first_cycle.saturating_add(64) {
+            if let Some((distance, lane)) = self.jump_pickup_for_cycle(cycle, t) {
+                self.jump_pickup_cycle = cycle;
+                self.next_jump_distance = Some(distance);
+                self.next_jump_lane = lane;
+                return;
+            }
+        }
+        self.jump_pickup_cycle = first_cycle.saturating_add(64);
+    }
+
+    fn advance_jump_pickup(&mut self, t: &Tuning) {
+        self.schedule_jump_pickup_from(self.jump_pickup_cycle.saturating_add(1), t);
+    }
+
     /// Lateral offset of the road row `ahead_m` meters ahead of the car.
     pub fn road_offset_at(&self, ahead_m: f32) -> f32 {
         let drum_shift = self.road_x - self.road.curve_at(self.loop_pos());
@@ -469,6 +542,12 @@ impl Game {
     pub fn slope_speed_factor(&self, tuning: &Tuning) -> f32 {
         (1.0 - self.road_grade() * tuning.slope_speed_gain)
             .clamp(tuning.slope_speed_min_factor, tuning.slope_speed_max_factor)
+    }
+
+    pub fn off_road_intensity(&self, tuning: &Tuning) -> f32 {
+        ((self.road_x.abs() - tuning.off_road_limit)
+            / (tuning.max_lateral_offset - tuning.off_road_limit))
+            .clamp(0.0, 1.0)
     }
 
     pub fn step(&mut self, input: &InputState, dt: f32, t: &Tuning) -> StepEvents {
@@ -548,6 +627,10 @@ impl Game {
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
         self.next_nitro_lane = Self::nitro_lane(self.seed, 0, t);
+        self.jump_charge = false;
+        self.jump_t = 0.0;
+        self.jump_start_distance = 0.0;
+        self.schedule_jump_pickup_from(0, t);
         self.result = None;
         self.gear = Gear::Low;
         self.recovery = Recovery::Normal;
@@ -625,6 +708,12 @@ impl Game {
             self.nitro_t = t.nitro_duration_secs;
             ev.nitro_started = true;
         }
+        if input.jump && self.jump_charge && self.jump_t <= 0.0 && self.bump_t <= 0.0 {
+            self.jump_charge = false;
+            self.jump_t = t.jump_duration_secs;
+            self.jump_start_distance = self.distance;
+            ev.jump_started = true;
+        }
 
         // Timer boundaries split one outer fixed step into constant-target
         // intervals. The active boost therefore applies for its complete five
@@ -635,12 +724,16 @@ impl Game {
         while remaining > 0.0 {
             let nitro_active = self.nitro_t > 0.0;
             let bump_active = self.bump_t > 0.0;
+            let jump_active = self.jump_t > 0.0;
             let mut interval = remaining;
             if nitro_active {
                 interval = interval.min(self.nitro_t);
             }
             if bump_active {
                 interval = interval.min(self.bump_t);
+            }
+            if jump_active {
+                interval = interval.min(self.jump_t);
             }
 
             self.integrate_running_interval(
@@ -650,6 +743,7 @@ impl Game {
                 ev,
                 nitro_active,
                 bump_active,
+                jump_active,
                 &mut obstacle_collision,
                 &mut obstacle_bump_dir,
             );
@@ -667,6 +761,14 @@ impl Game {
                 self.bump_t = (self.bump_t - interval).max(0.0);
                 if self.bump_t <= f32::EPSILON {
                     self.bump_t = 0.0;
+                }
+            }
+            if jump_active {
+                self.jump_t = (self.jump_t - interval).max(0.0);
+                if self.jump_t <= 1e-5 {
+                    self.jump_t = 0.0;
+                    ev.jump_landed = true;
+                    self.resolve_jump_landing(t, &mut obstacle_collision, &mut obstacle_bump_dir);
                 }
             }
             remaining = (remaining - interval).max(0.0);
@@ -693,6 +795,7 @@ impl Game {
         ev: &mut StepEvents,
         nitro_active: bool,
         bump_active: bool,
+        jump_active: bool,
         obstacle_collision: &mut bool,
         obstacle_bump_dir: &mut f32,
     ) {
@@ -708,6 +811,9 @@ impl Game {
         }
         if nitro_active && self.recovery == Recovery::Normal {
             target *= t.nitro_speed_multiplier;
+        }
+        if jump_active {
+            target *= t.jump_speed_multiplier;
         }
         target *= self.slope_speed_factor(t);
         target *= off_road_speed_factor(self.road_x, t);
@@ -743,9 +849,15 @@ impl Game {
         // road lateral dynamics: road drifts toward the printed curve target;
         // steering shifts the drum the other way (car "moves" relatively).
         let curve_target = self.road.curve_at(pos) * t.curve_gain;
-        let drift = 1.0 - (-dt * t.drift_rate * (self.speed / t.scroll_speed_low)).exp();
+        let drift_speed = (self.speed / t.scroll_speed_low).min(t.curve_drift_speed_cap);
+        let drift = 1.0 - (-dt * t.drift_rate * drift_speed).exp();
         self.road_x += (curve_target - self.road_x) * drift;
-        self.road_x -= input.steer * t.steer_rate * dt;
+        let steer_factor = if jump_active {
+            t.jump_air_steer_factor
+        } else {
+            1.0
+        };
+        self.road_x -= input.steer * t.steer_rate * steer_factor * dt;
         self.road_x = self
             .road_x
             .clamp(-t.max_lateral_offset, t.max_lateral_offset);
@@ -761,6 +873,19 @@ impl Game {
                 ev.nitro_collected_segment = self.nitro_charges.checked_sub(1);
             }
             self.advance_nitro_pickup(t);
+        }
+
+        while self
+            .next_jump_distance
+            .is_some_and(|distance| self.distance >= distance)
+        {
+            let x_eff = self.next_jump_lane + self.road_x;
+            let pickup_band = t.car_half_width + t.jump_pickup_half_width;
+            if x_eff.abs() < pickup_band && !self.jump_charge {
+                self.jump_charge = true;
+                ev.jump_collected = true;
+            }
+            self.advance_jump_pickup(t);
         }
 
         // Leaving the road progressively lowers target speed. This timer only
@@ -795,6 +920,12 @@ impl Game {
                 continue;
             }
             let x_eff = self.hazard_x_at(h, 0.0, t) + self.road_x;
+            if jump_active {
+                if h.kind == HazardKind::Oncoming {
+                    self.cars_passed = self.cars_passed.saturating_add(crossings);
+                }
+                continue;
+            }
             match h.kind {
                 HazardKind::Oncoming if x_eff.abs() < hit_band => {
                     self.cars_bumped = self.cars_bumped.saturating_add(crossings);
@@ -813,11 +944,51 @@ impl Game {
         }
     }
 
+    fn resolve_jump_landing(
+        &mut self,
+        t: &Tuning,
+        obstacle_collision: &mut bool,
+        obstacle_bump_dir: &mut f32,
+    ) {
+        let hit_band = (t.car_half_width + t.hazard_half_width) * (1.0 - t.collision_forgiveness);
+        let pos = self.loop_pos();
+        let mut landing: Option<(Hazard, f32, f32)> = None;
+        for hazard in &self.road.hazards {
+            let longitudinal = signed_loop_delta(hazard.s, pos, self.road.length);
+            if longitudinal.abs() > t.jump_landing_window_m {
+                continue;
+            }
+            let x_eff = self.hazard_x_at(hazard, longitudinal.max(0.0), t) + self.road_x;
+            if x_eff.abs() >= hit_band {
+                continue;
+            }
+            if landing.is_none_or(|(_, previous, _)| longitudinal.abs() < previous.abs()) {
+                landing = Some((*hazard, longitudinal, x_eff));
+            }
+        }
+        let Some((hazard, longitudinal, x_eff)) = landing else {
+            return;
+        };
+        if hazard.kind == HazardKind::Oncoming {
+            let absolute_hazard = self.distance + longitudinal;
+            if absolute_hazard > self.jump_start_distance && absolute_hazard <= self.distance {
+                self.cars_passed = self.cars_passed.saturating_sub(1);
+            }
+            self.cars_bumped = self.cars_bumped.saturating_add(1);
+        }
+        *obstacle_collision = true;
+        *obstacle_bump_dir = -x_eff.signum();
+    }
+
     fn finish_session(&mut self, ev: &mut StepEvents) {
         if self.result.is_some() {
             return;
         }
         self.session_remaining = 0.0;
+        // The results/name-entry views reuse the gameplay scene. Always put
+        // the player back on the road instead of freezing a mid-air pose when
+        // the countdown expires during a Jump Kick.
+        self.jump_t = 0.0;
         self.phase = Phase::GameOver {
             reason: EndReason::Time,
         };
@@ -858,10 +1029,13 @@ fn crossings_between(start: f32, end: f32, hazard_s: f32, loop_length: f32) -> u
     last.saturating_sub(first).saturating_add(1).max(0) as u64
 }
 
+fn signed_loop_delta(target: f32, origin: f32, loop_length: f32) -> f32 {
+    (target - origin + loop_length * 0.5).rem_euclid(loop_length) - loop_length * 0.5
+}
+
 fn off_road_speed_factor(road_x: f32, t: &Tuning) -> f32 {
-    const MAX_EXCURSION: f32 = 1.35;
-    let excursion =
-        ((road_x.abs() - t.off_road_limit) / (MAX_EXCURSION - t.off_road_limit)).clamp(0.0, 1.0);
+    let excursion = ((road_x.abs() - t.off_road_limit) / (t.max_lateral_offset - t.off_road_limit))
+        .clamp(0.0, 1.0);
     let smooth = excursion * excursion * (3.0 - 2.0 * excursion);
     1.0 + (t.off_road_min_speed_factor - 1.0) * smooth
 }
@@ -876,6 +1050,200 @@ mod tests {
     fn game(seed: u64) -> (Game, Tuning) {
         let t = Tuning::default();
         (Game::new(seed, Difficulty::Hard, &t), t)
+    }
+
+    fn running_jump_game(hazard: Hazard) -> (Game, Tuning) {
+        let t = Tuning::default();
+        let mut game = Game::with_road(
+            17,
+            RoadLoop::straight(100.0, vec![hazard]),
+            Difficulty::Hard,
+            &t,
+        );
+        game.phase = Phase::Running;
+        game.speed = t.scroll_speed_high;
+        game.gear = Gear::High;
+        game.jump_charge = true;
+        (game, t)
+    }
+
+    #[test]
+    fn jump_pickup_schedule_is_rare_and_never_duplicates_a_cycle() {
+        let t = Tuning::default();
+        let game = Game::new(71, Difficulty::Hard, &t);
+        let mut present = 0;
+        for cycle in 0..32 {
+            if let Some((distance, lane)) = game.jump_pickup_for_cycle(cycle, &t) {
+                present += 1;
+                let environment_time = distance / t.scroll_speed_low;
+                assert_eq!((environment_time / DAY_SECS).floor() as u64, cycle);
+                assert!([-t.jump_lane_offset, 0.0, t.jump_lane_offset].contains(&lane));
+            }
+        }
+        assert!(
+            (6..=18).contains(&present),
+            "rare schedule count: {present}"
+        );
+    }
+
+    #[test]
+    fn jump_pickup_capacity_is_one_and_activation_consumes_it() {
+        let t = Tuning {
+            jump_spawn_chance_percent: 100,
+            ..Tuning::default()
+        };
+        let mut game = Game::with_road(5, RoadLoop::straight(100.0, vec![]), Difficulty::Hard, &t);
+        game.phase = Phase::Running;
+        game.next_jump_distance = Some(0.0);
+        game.next_jump_lane = 0.0;
+        let collected = game.step(&InputState::default(), DT, &t);
+        assert!(collected.jump_collected);
+        assert!(game.jump_charge);
+
+        let started = game.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(started.jump_started);
+        assert!(!game.jump_charge);
+        assert!(game.jump_active());
+    }
+
+    #[test]
+    fn jumping_over_traffic_is_a_pass_but_landing_on_it_is_a_bump() {
+        let landing_hazard = Hazard {
+            kind: HazardKind::Oncoming,
+            x: 0.0,
+            s: 28.1,
+        };
+        let (mut landing, t) = running_jump_game(landing_hazard);
+        let ev = landing.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            t.jump_duration_secs,
+            &t,
+        );
+        assert!(ev.jump_started && ev.jump_landed);
+        assert!(ev.bump_direction.is_some());
+        assert_eq!(landing.cars_passed, 0);
+        assert_eq!(landing.cars_bumped, 1);
+
+        let safe_hazard = Hazard {
+            x: t.jump_lane_offset,
+            ..landing_hazard
+        };
+        let (mut safe, t) = running_jump_game(safe_hazard);
+        let ev = safe.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            t.jump_duration_secs,
+            &t,
+        );
+        assert!(ev.jump_landed);
+        assert!(ev.bump_direction.is_none());
+        assert_eq!(safe.cars_passed, 1);
+        assert_eq!(safe.cars_bumped, 0);
+    }
+
+    #[test]
+    fn landing_on_a_roadside_hazard_uses_the_normal_crash_recovery() {
+        let tree = Hazard {
+            kind: HazardKind::Tree,
+            x: 0.0,
+            s: 28.1,
+        };
+        let (mut game, t) = running_jump_game(tree);
+        let ev = game.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            t.jump_duration_secs,
+            &t,
+        );
+        assert!(ev.jump_landed);
+        assert!(ev.bump_direction.is_some());
+        assert!(game.bump_t > 0.0);
+        assert_eq!(game.cars_bumped, 0);
+        assert_eq!(game.recovery, Recovery::NeedLow);
+    }
+
+    #[test]
+    fn jump_without_a_charge_is_a_no_op() {
+        let (mut game, t) = game(73);
+        game.phase = Phase::Running;
+        let before = game.distance;
+        let ev = game.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(!ev.jump_started);
+        assert!(!game.jump_active());
+        assert!(game.distance >= before);
+    }
+
+    #[test]
+    fn time_up_during_a_jump_restores_the_resting_pose() {
+        let (mut game, t) = game(74);
+        game.phase = Phase::Running;
+        game.jump_charge = true;
+        game.session_remaining = DT * 0.5;
+        let ev = game.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            DT,
+            &t,
+        );
+        assert!(ev.jump_started && ev.game_over);
+        assert_eq!(game.jump_t, 0.0);
+        assert!(!game.jump_active());
+    }
+
+    #[test]
+    fn jump_timing_is_timestep_partition_invariant() {
+        let hazard = Hazard {
+            kind: HazardKind::Oncoming,
+            x: 0.72,
+            s: 28.1,
+        };
+        let (mut whole, t) = running_jump_game(hazard);
+        let mut split = whole.clone();
+        whole.step(
+            &InputState {
+                jump: true,
+                ..Default::default()
+            },
+            t.jump_duration_secs,
+            &t,
+        );
+        for index in 0..66 {
+            split.step(
+                &InputState {
+                    jump: index == 0,
+                    ..Default::default()
+                },
+                t.jump_duration_secs / 66.0,
+                &t,
+            );
+        }
+        assert!((whole.distance - split.distance).abs() < 1e-3);
+        assert_eq!(whole.cars_passed, split.cars_passed);
+        assert_eq!(whole.cars_bumped, split.cars_bumped);
+        assert_eq!(whole.jump_t, split.jump_t);
     }
 
     trait Validated {
@@ -1542,6 +1910,9 @@ mod tests {
         g.nitro_charges = 3;
         g.nitro_t = 2.0;
         g.next_nitro_distance = 999.0;
+        g.jump_charge = true;
+        g.jump_t = 0.5;
+        g.next_jump_distance = None;
         g.step(
             &InputState {
                 reset: true,
@@ -1553,6 +1924,9 @@ mod tests {
         assert_eq!(g.nitro_charges, 0);
         assert_eq!(g.nitro_t, 0.0);
         assert_eq!(g.next_nitro_distance, t.nitro_pickup_first_m);
+        assert!(!g.jump_charge);
+        assert_eq!(g.jump_t, 0.0);
+        assert!(g.next_jump_distance.is_some());
     }
 
     #[test]

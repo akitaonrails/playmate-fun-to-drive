@@ -17,6 +17,7 @@ use game_core::{Difficulty, Game, Gear, InputState, KeyboardSteering, Tuning};
 use session::{EndFlow, EndMode};
 
 const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
+const JUMP_PICKUP_GLOW_SECS: f32 = 0.80;
 
 #[cfg(target_arch = "wasm32")]
 const ASSET_ROOT: &str = "assets";
@@ -128,6 +129,7 @@ pub(crate) fn nitro_effects_active(game: &Game) -> bool {
 pub(crate) struct VisualEffects {
     pub(crate) nitro_pickup_glow: f32,
     pub(crate) nitro_segment: Option<u8>,
+    pub(crate) jump_pickup_glow: f32,
     pub(crate) action_cue: ActionCue,
     pub(crate) action_cue_secs: f32,
     pub(crate) downshift_secs: f32,
@@ -159,6 +161,84 @@ struct ControlTuning {
     bumper_press_threshold: f32,
     gear_request_buffer_secs: f32,
     menu_axis_threshold: f32,
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct TouchInput {
+    enabled: bool,
+    steer: f32,
+    brake: f32,
+    low: bool,
+    high: bool,
+    nitro: bool,
+    jump: bool,
+    pause: bool,
+    difficulty: Option<usize>,
+    confirm: bool,
+    toggle_crt: bool,
+    restart: bool,
+    initials: Option<String>,
+    submit: bool,
+    pub(crate) active_this_frame: bool,
+    previous: bridge::TouchSnapshot,
+}
+
+fn sequence_advanced(current: u32, previous: u32) -> bool {
+    current != previous
+}
+
+impl TouchInput {
+    fn update(&mut self, next: bridge::TouchSnapshot) {
+        let enabled = next.enabled;
+        self.enabled = enabled;
+        self.steer = if enabled {
+            next.steer.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        self.brake = if enabled {
+            next.brake.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.low = enabled && sequence_advanced(next.low_seq, self.previous.low_seq);
+        self.high = enabled && sequence_advanced(next.high_seq, self.previous.high_seq);
+        self.nitro = enabled && sequence_advanced(next.nitro_seq, self.previous.nitro_seq);
+        self.jump = enabled && sequence_advanced(next.jump_seq, self.previous.jump_seq);
+        self.pause = enabled && sequence_advanced(next.pause_seq, self.previous.pause_seq);
+        let difficulty_changed =
+            enabled && sequence_advanced(next.difficulty_seq, self.previous.difficulty_seq);
+        self.difficulty = difficulty_changed
+            .then_some(next.difficulty_index)
+            .and_then(|index| usize::try_from(index).ok())
+            .filter(|index| *index < Difficulty::ALL.len());
+        self.confirm = enabled && sequence_advanced(next.confirm_seq, self.previous.confirm_seq);
+        self.toggle_crt = enabled && sequence_advanced(next.crt_seq, self.previous.crt_seq);
+        self.restart = enabled && sequence_advanced(next.restart_seq, self.previous.restart_seq);
+        let initials_changed =
+            enabled && sequence_advanced(next.initials_seq, self.previous.initials_seq);
+        self.initials = initials_changed.then(|| next.initials.clone());
+        self.submit = enabled && sequence_advanced(next.submit_seq, self.previous.submit_seq);
+        self.active_this_frame = enabled
+            && (self.steer != 0.0
+                || self.brake != 0.0
+                || self.low
+                || self.high
+                || self.nitro
+                || self.jump
+                || self.pause
+                || self.difficulty.is_some()
+                || self.confirm
+                || self.toggle_crt
+                || self.restart
+                || self.initials.is_some()
+                || self.submit);
+        self.previous = next;
+    }
+}
+
+fn poll_touch(mut touch: ResMut<TouchInput>) {
+    touch.update(bridge::touch_snapshot());
 }
 
 impl Default for ControlTuning {
@@ -325,6 +405,7 @@ fn main() {
         }
     }))
     .init_resource::<FrameInput>()
+    .init_resource::<TouchInput>()
     .init_resource::<VisualEffects>()
     .init_resource::<EndSession>()
     .insert_resource(audio::AudioState::new(audio_muted))
@@ -344,7 +425,12 @@ fn main() {
         Startup,
         (view::setup, toy_view::setup, toy_view::setup_diorama),
     )
-    .add_systems(PreUpdate, gather_input.after(bevy::input::InputSystems))
+    .add_systems(
+        PreUpdate,
+        (poll_touch, gather_input)
+            .chain()
+            .after(bevy::input::InputSystems),
+    )
     .add_systems(Update, sync_end_flow.in_set(AppSet::Flow))
     .add_systems(Update, handle_end_input.in_set(AppSet::Controls))
     .add_systems(
@@ -373,6 +459,7 @@ fn main() {
 }
 
 /// M5 interim input: keyboard-first, gamepad passthrough (formal layer = M6).
+#[allow(clippy::too_many_arguments)]
 fn gather_input(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -381,6 +468,7 @@ fn gather_input(
     controls: Res<ControlTuning>,
     time: Res<Time>,
     end: Res<EndSession>,
+    touch: Res<TouchInput>,
 ) {
     if end.0.mode != EndMode::Playing {
         frame.state.steer = 0.0;
@@ -388,6 +476,7 @@ fn gather_input(
         frame.state.gear_request = None;
         frame.state.pause = false;
         frame.state.nitro = false;
+        frame.state.jump = false;
         frame.gear_latch.consume();
         return;
     }
@@ -404,12 +493,15 @@ fn gather_input(
         time.delta_secs(),
         &tuning.0,
     );
+    if touch.enabled && touch.steer != 0.0 {
+        steer = touch.steer;
+    }
 
-    let mut low_requested = keys.just_pressed(KeyCode::KeyQ);
-    let mut high_requested = keys.just_pressed(KeyCode::KeyE);
+    let mut low_requested = keys.just_pressed(KeyCode::KeyQ) || touch.low;
+    let mut high_requested = keys.just_pressed(KeyCode::KeyE) || touch.high;
     let mut low_bumper_down = false;
     let mut high_bumper_down = false;
-    let mut brake = 0.0_f32;
+    let mut brake = touch.brake;
     for pad in &pads {
         let axis = pad.get(GamepadAxis::LeftStickX).unwrap_or_default();
         let x = game_core::input::apply_deadzone(axis, tuning.0.pad_deadzone);
@@ -442,6 +534,10 @@ fn gather_input(
         }
         if pad.just_pressed(GamepadButton::North) {
             frame.state.nitro = true;
+            frame.pad_seen = true;
+        }
+        if pad.just_pressed(GamepadButton::East) {
+            frame.state.jump = true;
             frame.pad_seen = true;
         }
         // Xbox face-button aliases: X shifts up, A shifts down. They are
@@ -478,8 +574,20 @@ fn gather_input(
     if keys.just_pressed(KeyCode::KeyP) {
         frame.state.pause = true;
     }
+    if touch.pause {
+        frame.state.pause = true;
+    }
     if keys.just_pressed(KeyCode::KeyY) {
         frame.state.nitro = true;
+    }
+    if touch.nitro {
+        frame.state.nitro = true;
+    }
+    if keys.just_pressed(KeyCode::KeyB) || keys.just_pressed(KeyCode::Space) {
+        frame.state.jump = true;
+    }
+    if touch.jump {
+        frame.state.jump = true;
     }
 }
 
@@ -508,6 +616,7 @@ fn handle_end_input(
     mut display: ResMut<DisplaySettings>,
     mut frame: ResMut<FrameInput>,
     mut audio_events: ResMut<audio::AudioEvents>,
+    touch: Res<TouchInput>,
 ) {
     match end.0.mode {
         EndMode::Playing => {}
@@ -532,10 +641,14 @@ fn handle_end_input(
                     .iter()
                     .any(|pad| pad.just_pressed(GamepadButton::DPadRight));
             end.0.difficulty_index = menu_index_after_input(end.0.difficulty_index, left, right);
+            if let Some(index) = touch.difficulty {
+                end.0.difficulty_index = index;
+            }
             if end.0.difficulty_index != previous_index {
                 audio_events.emit(audio::AudioCue::MenuMove);
             }
-            let toggle_crt = keys.just_pressed(KeyCode::KeyC)
+            let toggle_crt = touch.toggle_crt
+                || keys.just_pressed(KeyCode::KeyC)
                 || pads.iter().any(|pad| pad.just_pressed(GamepadButton::West));
             if toggle_crt {
                 display.crt_enabled = !display.crt_enabled;
@@ -543,7 +656,8 @@ fn handle_end_input(
                 let _ = bridge::save_local(toy_view::CRT_STORAGE_KEY, value);
                 audio_events.emit(audio::AudioCue::MenuMove);
             }
-            let confirm = keys.just_pressed(KeyCode::Enter)
+            let confirm = touch.confirm
+                || keys.just_pressed(KeyCode::Enter)
                 || pads.iter().any(|pad| {
                     pad.just_pressed(GamepadButton::South) || pad.just_pressed(GamepadButton::Start)
                 });
@@ -579,7 +693,13 @@ fn handle_end_input(
             }
         }
         EndMode::NameEntry => {
-            if keys.just_pressed(KeyCode::Backspace) {
+            if let Some(initials) = touch.initials.as_deref() {
+                while end.0.initials.pop() {}
+                for letter in initials.chars().filter(char::is_ascii_alphabetic).take(3) {
+                    let _ = end.0.initials.push(letter.to_ascii_uppercase());
+                }
+                audio_events.emit(audio::AudioCue::Key);
+            } else if keys.just_pressed(KeyCode::Backspace) {
                 if end.0.initials.pop() {
                     audio_events.emit(audio::AudioCue::Delete);
                 }
@@ -588,7 +708,7 @@ fn handle_end_input(
                     audio_events.emit(audio::AudioCue::Key);
                 }
             }
-            if keys.just_pressed(KeyCode::Enter) {
+            if touch.submit || keys.just_pressed(KeyCode::Enter) {
                 let Some(result) = sim.0.result().copied() else {
                     return;
                 };
@@ -604,7 +724,11 @@ fn handle_end_input(
             }
         }
         EndMode::Leaderboard => {
-            if keys.just_pressed(KeyCode::KeyR) || keys.just_pressed(KeyCode::Enter) {
+            if touch.restart
+                || touch.confirm
+                || keys.just_pressed(KeyCode::KeyR)
+                || keys.just_pressed(KeyCode::Enter)
+            {
                 audio_events.emit(audio::AudioCue::MenuConfirm);
                 end.0.mode = EndMode::DifficultySelect;
                 end.0.difficulty_index = difficulty_index(sim.0.difficulty());
@@ -691,6 +815,16 @@ fn step_sim(
     if events.nitro_started {
         audio_events.emit(audio::AudioCue::NitroStart);
     }
+    if events.jump_collected {
+        effects.jump_pickup_glow = JUMP_PICKUP_GLOW_SECS;
+        audio_events.emit(audio::AudioCue::JumpPickup);
+    }
+    if events.jump_started {
+        audio_events.emit(audio::AudioCue::JumpStart);
+    }
+    if events.jump_landed && events.bump_direction.is_none() {
+        audio_events.emit(audio::AudioCue::JumpLand);
+    }
     if let Some(direction) = events.bump_direction {
         audio_events.emit(audio::AudioCue::Crash);
         crash.pending = true;
@@ -716,6 +850,7 @@ fn step_sim(
     frame.state.reset = false;
     frame.state.pause = false;
     frame.state.nitro = false;
+    frame.state.jump = false;
 }
 
 fn tick_visual_effects(
@@ -731,6 +866,7 @@ fn tick_visual_effects(
         effects.downshift_severity = None;
     }
     effects.nitro_pickup_glow = (effects.nitro_pickup_glow - time.delta_secs()).max(0.0);
+    effects.jump_pickup_glow = (effects.jump_pickup_glow - time.delta_secs()).max(0.0);
     effects.action_cue_secs = (effects.action_cue_secs - time.delta_secs()).max(0.0);
     effects.downshift_secs = (effects.downshift_secs - time.delta_secs()).max(0.0);
     if effects.action_cue_secs == 0.0 {
@@ -793,6 +929,51 @@ mod tests {
         assert_eq!(latch.update(0.0, 0.55), (false, false));
         assert_eq!(latch.update(-0.8, 0.55), (true, false));
         assert_eq!(latch.update(0.8, 0.55), (false, true));
+    }
+
+    #[test]
+    fn touch_sequences_emit_each_action_once_and_clamp_analogs() {
+        let mut touch = TouchInput::default();
+        let snapshot = bridge::TouchSnapshot {
+            enabled: true,
+            steer: 4.0,
+            brake: 2.0,
+            jump_seq: 1,
+            high_seq: 3,
+            difficulty_seq: 2,
+            difficulty_index: 2,
+            ..default()
+        };
+        touch.update(snapshot.clone());
+        assert_eq!(touch.steer, 1.0);
+        assert_eq!(touch.brake, 1.0);
+        assert!(touch.jump && touch.high);
+        assert_eq!(touch.difficulty, Some(2));
+        assert!(touch.active_this_frame);
+
+        touch.update(snapshot);
+        assert!(!touch.jump && !touch.high);
+        assert_eq!(touch.difficulty, None);
+    }
+
+    #[test]
+    fn disabled_touch_snapshot_releases_continuous_controls() {
+        let mut touch = TouchInput::default();
+        touch.update(bridge::TouchSnapshot {
+            enabled: true,
+            steer: -1.0,
+            brake: 1.0,
+            ..default()
+        });
+        assert_eq!((touch.steer, touch.brake), (-1.0, 1.0));
+        touch.update(bridge::TouchSnapshot {
+            enabled: false,
+            jump_seq: 1,
+            ..default()
+        });
+        assert_eq!((touch.steer, touch.brake), (0.0, 0.0));
+        assert!(!touch.jump);
+        assert!(!touch.active_this_frame);
     }
 
     #[test]

@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fun to Drive</title>
     <style>
-      html, body { margin: 0; width: 100%; height: 100%; background: #0d0e13; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+        overscroll-behavior: none; background: #0d0e13; }
       /* winit writes inline width/height on the canvas; !important wins and
          stretches the render to fill the browser window */
       canvas { display: block; width: 100vw !important; height: 100vh !important; }
@@ -28,6 +29,62 @@
         font: 25px/1 monospace; cursor: pointer; opacity: .68;
         transition: opacity .15s, background .15s, transform .15s;
       }
+      #touch-toggle {
+        position: fixed; top: max(14px, env(safe-area-inset-top));
+        left: max(14px, env(safe-area-inset-left)); z-index: 31;
+        min-width: 46px; height: 44px; padding: 0 10px;
+        border: 1px solid rgba(255,255,255,.28); border-radius: 8px;
+        background: rgba(8,10,15,.68); color: #f2b6da;
+        font: 700 12px/1 monospace; cursor: pointer; opacity: .74;
+      }
+      #touch-toggle[aria-pressed="true"] { color: #79ffd1; border-color: rgba(121,255,209,.55); }
+      .touch-layer { position: fixed; inset: 0; z-index: 25; pointer-events: none; display: none; }
+      body.touch-enabled .touch-layer.active { display: block; }
+      .touch-button, .touch-pad, .touch-menu-button, #touch-initials {
+        -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none;
+        border: 1px solid rgba(210,235,255,.24); color: rgba(235,246,255,.62);
+        background: rgba(8,14,24,.13); backdrop-filter: blur(1.5px);
+        font: 700 14px/1 monospace; pointer-events: auto;
+      }
+      .touch-button:active, .touch-button.pressed, .touch-pad.active,
+      .touch-menu-button:active, .touch-menu-button.selected {
+        color: #fff; background: rgba(30,95,120,.30); border-color: rgba(126,239,255,.70);
+      }
+      #touch-driving .steer { position: absolute; display: flex; gap: 12px;
+        left: max(18px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); }
+      #touch-driving .steer .touch-button { width: clamp(70px, 13vw, 112px); height: clamp(72px, 22vh, 118px); border-radius: 18px; font-size: 28px; }
+      #touch-driving .actions { position: absolute; right: max(18px, env(safe-area-inset-right));
+        bottom: max(18px, env(safe-area-inset-bottom)); display: grid;
+        grid-template-columns: repeat(3, clamp(62px, 10vw, 92px)); gap: 10px; align-items: end; }
+      #touch-driving .actions .touch-button { height: clamp(54px, 15vh, 82px); border-radius: 50%; }
+      #touch-driving .actions #touch-brake { height: clamp(72px, 21vh, 112px); }
+      #touch-driving .actions #touch-shift { height: clamp(94px, 27vh, 140px); border-radius: 18px;
+        grid-row: span 2; line-height: 1.55; }
+      #touch-jump.ready { color: #ffb5e0; border-color: rgba(255,82,181,.72);
+        box-shadow: 0 0 18px rgba(255,42,155,.22); }
+      #touch-screen-tap { position: absolute; left: 23%; top: 16%; width: 54%; height: 48%;
+        pointer-events: auto; touch-action: none; background: transparent; border: 0; }
+      body.direct-game #touch-screen-tap { left: 12%; top: 8%; width: 76%; height: 65%; }
+      #touch-menu, #touch-name, #touch-leaderboard { display: none; position: absolute; left: 50%;
+        bottom: max(22px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+        pointer-events: auto; padding: 10px; gap: 9px; border-radius: 12px;
+        background: rgba(4,9,18,.28); }
+      #touch-menu.active, #touch-name.active, #touch-leaderboard.active { display: flex; }
+      .touch-menu-button { min-width: 86px; min-height: 48px; border-radius: 8px; }
+      #touch-start, #touch-submit { color: #ffe477; border-color: rgba(255,224,94,.58); }
+      #touch-initials { width: 104px; min-height: 48px; border-radius: 8px; text-align: center;
+        text-transform: uppercase; font-size: 24px; background: rgba(4,9,18,.72); }
+      @media (pointer: fine) { #touch-toggle { opacity: .48; } }
+      @media (orientation: portrait) {
+        #touch-driving .steer .touch-button { width: 72px; height: 88px; }
+        #touch-driving .actions { grid-template-columns: repeat(3, 62px); }
+        #touch-menu { flex-wrap: wrap; width: min(92vw, 360px); justify-content: center; }
+        body.touch-enabled #rotate-device { display: flex; }
+      }
+      #rotate-device { display: none; position: fixed; inset: 0; z-index: 40;
+        align-items: center; justify-content: center; pointer-events: none;
+        color: #d8f8ff; background: rgba(3,7,14,.78); text-align: center;
+        font: 700 16px/1.6 monospace; letter-spacing: .08em; }
       #fullscreen-toggle:hover,
       #fullscreen-toggle:focus-visible {
         opacity: 1; background: rgba(24,28,38,.9); outline: 2px solid #e7d59b;
@@ -38,12 +95,43 @@
     </style>
   </head>
   <body>
+    <div id="rotate-device" role="status">ROTATE DEVICE<br>FOR LANDSCAPE DRIVING</div>
+    <button id="touch-toggle" type="button" aria-label="Toggle touch controls" aria-pressed="false">TOUCH</button>
     <button id="fullscreen-toggle" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
+    <div id="touch-driving" class="touch-layer" aria-label="Touch driving controls">
+      <button id="touch-screen-tap" aria-label="Tap game screen to pause or resume"></button>
+      <div class="steer">
+        <button id="touch-left" class="touch-button" aria-label="Steer left">◀</button>
+        <button id="touch-right" class="touch-button" aria-label="Steer right">▶</button>
+      </div>
+      <div class="actions">
+        <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear">↑ HIGH<br>SHIFT<br>↓ LOW</button>
+        <button id="touch-nitro" class="touch-button">BOOST</button>
+        <button id="touch-jump" class="touch-button">JUMP</button>
+        <button id="touch-brake" class="touch-button">BRAKE</button>
+      </div>
+    </div>
+    <div id="touch-ui" class="touch-layer">
+      <div id="touch-menu">
+        <button class="touch-menu-button" data-difficulty="0">EASY<br>2:00</button>
+        <button class="touch-menu-button" data-difficulty="1">MEDIUM<br>6:00</button>
+        <button class="touch-menu-button" data-difficulty="2">HARD<br>10:00</button>
+        <button id="touch-crt" class="touch-menu-button">CRT</button>
+        <button id="touch-start" class="touch-menu-button">START</button>
+      </div>
+      <div id="touch-name">
+        <input id="touch-initials" maxlength="3" inputmode="text" autocomplete="off" aria-label="Three letter nickname" placeholder="AAA">
+        <button id="touch-submit" class="touch-menu-button">SUBMIT</button>
+      </div>
+      <div id="touch-leaderboard">
+        <button id="touch-again" class="touch-menu-button">NEW RUN</button>
+      </div>
+    </div>
     <div id="loading">
       <div class="wheel"></div>
       <div id="loading-text">spinning up the drum...</div>
       <div class="hint">first load prepares the game — later loads are cached</div>
-      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y nitro &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
+      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y nitro &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
       <div class="hint">slower GPU? append <code>?quality=low</code> to disable bloom and reduce toy-view resolution</div>
     </div>
     <script>
@@ -75,10 +163,112 @@
         }
       })();
 
+      // Pointer controls live in the host page for reliable multi-touch,
+      // safe-area layout, and browser gesture suppression. Rust polls this
+      // versioned snapshot and merges it into the same deterministic input
+      // model used by keyboard and gamepad.
+      (() => {
+        const storageKey = 'fun-to-drive.touch.v1';
+        const state = {
+          enabled: localStorage.getItem(storageKey) === 'on' ||
+            (localStorage.getItem(storageKey) === null && matchMedia('(pointer: coarse)').matches),
+          steer: 0, brake: 0, low_seq: 0, high_seq: 0, nitro_seq: 0, jump_seq: 0,
+          pause_seq: 0, difficulty_seq: 0, difficulty_index: 1, confirm_seq: 0,
+          crt_seq: 0, restart_seq: 0, initials_seq: 0, initials: '', submit_seq: 0
+        };
+        const held = { left: new Set(), right: new Set(), brake: new Set() };
+        const byId = id => document.getElementById(id);
+        const pulse = key => { state[key] = (state[key] + 1) >>> 0; };
+        const recompute = () => {
+          state.steer = held.left.size === held.right.size ? 0 : (held.right.size ? 1 : -1);
+          state.brake = held.brake.size ? 1 : 0;
+        };
+        const hold = (id, bucket) => {
+          const button = byId(id);
+          const release = event => {
+            held[bucket].delete(event.pointerId); recompute(); button.classList.toggle('pressed', held[bucket].size > 0);
+          };
+          button.addEventListener('pointerdown', event => {
+            event.preventDefault(); button.setPointerCapture(event.pointerId);
+            held[bucket].add(event.pointerId); recompute(); button.classList.add('pressed');
+          });
+          for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(name, release);
+        };
+        hold('touch-left', 'left'); hold('touch-right', 'right'); hold('touch-brake', 'brake');
+        for (const [id, key] of [['touch-nitro','nitro_seq'], ['touch-jump','jump_seq']]) {
+          byId(id).addEventListener('pointerdown', event => { event.preventDefault(); pulse(key); });
+        }
+        const shifts = new Map();
+        const shift = byId('touch-shift');
+        shift.addEventListener('pointerdown', event => {
+          event.preventDefault(); shift.setPointerCapture(event.pointerId); shifts.set(event.pointerId, event.clientY); shift.classList.add('active');
+        });
+        const endShift = event => {
+          if (!shifts.has(event.pointerId)) return;
+          const delta = shifts.get(event.pointerId) - event.clientY;
+          if (delta > 28) pulse('high_seq'); else if (delta < -28) pulse('low_seq');
+          shifts.delete(event.pointerId); shift.classList.toggle('active', shifts.size > 0);
+        };
+        shift.addEventListener('pointerup', endShift); shift.addEventListener('pointercancel', endShift);
+        const screenStarts = new Map();
+        const screen = byId('touch-screen-tap');
+        screen.addEventListener('pointerdown', event => {
+          event.preventDefault(); screen.setPointerCapture(event.pointerId);
+          screenStarts.set(event.pointerId, [event.clientX, event.clientY, performance.now()]);
+        });
+        screen.addEventListener('pointerup', event => {
+          const start = screenStarts.get(event.pointerId); screenStarts.delete(event.pointerId); if (!start) return;
+          if (Math.hypot(event.clientX - start[0], event.clientY - start[1]) < 12 && performance.now() - start[2] < 300) pulse('pause_seq');
+        });
+        document.querySelectorAll('[data-difficulty]').forEach(button => button.addEventListener('pointerdown', event => {
+          event.preventDefault(); state.difficulty_index = Number(button.dataset.difficulty); pulse('difficulty_seq');
+        }));
+        byId('touch-start').addEventListener('pointerdown', event => { event.preventDefault(); pulse('confirm_seq'); });
+        byId('touch-crt').addEventListener('pointerdown', event => { event.preventDefault(); pulse('crt_seq'); });
+        byId('touch-submit').addEventListener('pointerdown', event => { event.preventDefault(); pulse('submit_seq'); });
+        byId('touch-again').addEventListener('pointerdown', event => { event.preventDefault(); pulse('restart_seq'); });
+        const initials = byId('touch-initials');
+        initials.addEventListener('input', () => {
+          initials.value = initials.value.replace(/[^a-z]/gi, '').slice(0, 3).toUpperCase();
+          state.initials = initials.value; pulse('initials_seq');
+        });
+        const toggle = byId('touch-toggle');
+        const applyEnabled = () => {
+          document.body.classList.toggle('touch-enabled', state.enabled);
+          toggle.setAttribute('aria-pressed', String(state.enabled));
+          toggle.textContent = state.enabled ? 'TOUCH ON' : 'TOUCH OFF';
+          if (!state.enabled) { for (const set of Object.values(held)) set.clear(); recompute(); }
+        };
+        toggle.addEventListener('click', () => {
+          state.enabled = !state.enabled; localStorage.setItem(storageKey, state.enabled ? 'on' : 'off'); applyEnabled();
+        });
+        window.__ftdReadTouch = () => JSON.stringify(state);
+        window.__ftdSyncTouchUi = game => {
+          if (!game) return;
+          const playing = game.end_mode === 'playing';
+          byId('touch-driving').classList.toggle('active', playing);
+          byId('touch-ui').classList.toggle('active', !playing);
+          byId('touch-menu').classList.toggle('active', game.end_mode === 'difficulty_select');
+          byId('touch-name').classList.toggle('active', game.end_mode === 'name_entry');
+          byId('touch-leaderboard').classList.toggle('active', game.end_mode === 'leaderboard');
+          byId('touch-jump').classList.toggle('ready', Boolean(game.jump_charge));
+          byId('touch-crt').textContent = game.crt_enabled ? 'CRT ON' : 'CRT OFF';
+          document.body.classList.toggle('direct-game', !game.toy);
+          document.querySelectorAll('[data-difficulty]').forEach(button =>
+            button.classList.toggle('selected', Number(button.dataset.difficulty) === game.difficulty_index));
+          if (game.end_mode === 'name_entry' && document.activeElement !== initials && initials.value !== game.initials) {
+            initials.value = game.initials || ''; state.initials = initials.value;
+          }
+        };
+        applyEnabled();
+      })();
+
       // harness markers: readiness + per-frame game state from wasm
       window.__FTD_READY__ = false;
       window.__FTD_STATE__ = null;
-      window.__ftdPublishState = (s) => { try { window.__FTD_STATE__ = JSON.parse(s); } catch (e) {} };
+      window.__ftdPublishState = (s) => {
+        try { window.__FTD_STATE__ = JSON.parse(s); window.__ftdSyncTouchUi?.(window.__FTD_STATE__); } catch (e) {}
+      };
       const look = () => {
         const c = document.querySelector('canvas');
         if (c && c.width > 0) { window.__FTD_READY__ = true; return; }

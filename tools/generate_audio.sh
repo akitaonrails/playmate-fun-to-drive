@@ -72,6 +72,17 @@ noise "$work_dir/skid.wav" 1.5 white -10
 sox -R "$work_dir/skid.wav" "$output_dir/wet_skid.ogg" highpass 420 lowpass 3100 \
   tremolo 7 35 gain -n -7
 
+# Dry shoulder gravel: irregular, low-mid chip noise with a faint repeating
+# pebble pulse. It deliberately avoids the wet skid's bright continuous hiss.
+noise "$work_dir/gravel_body.wav" 2.4 brown -8
+noise "$work_dir/gravel_pebbles.wav" 2.4 white -14
+sox -R "$work_dir/gravel_body.wav" "$work_dir/gravel_body_f.wav" \
+  highpass 120 lowpass 1900 tremolo 13 48
+sox -R "$work_dir/gravel_pebbles.wav" "$work_dir/gravel_pebbles_f.wav" \
+  highpass 900 lowpass 3900 tremolo 19 72
+sox -R -m "$work_dir/gravel_body_f.wav" "$work_dir/gravel_pebbles_f.wav" \
+  "$output_dir/gravel.ogg" gain -n -9
+
 tone "$work_dir/overrev_a.wav" 1.0 square 152 -14
 noise "$work_dir/overrev_b.wav" 1.0 white -18
 sox -R "$work_dir/overrev_b.wav" "$work_dir/overrev_bf.wav" highpass 950 lowpass 2800
@@ -102,18 +113,25 @@ sox -R "$work_dir/crash_b.wav" "$work_dir/crash_bf.wav" highpass 90 lowpass 3600
   fade t 0.003 0.54 0.41
 mix_to_ogg "$output_dir/crash.ogg" "$work_dir/crash_a.wav" "$work_dir/crash_bf.wav"
 
-# Weather punctuation: a restrained chip-noise crack followed by a low PSG
-# rumble. Runtime schedules this sparsely inside rain slots.
-noise "$work_dir/thunder_rumble.wav" 1.8 brown -5
-sox -R "$work_dir/thunder_rumble.wav" "$work_dir/thunder_rumble_f.wav" \
-  highpass 45 lowpass 760 tremolo 7 32 fade t 0.01 1.8 0.65
-tone "$work_dir/thunder_tone.wav" 1.55 square 78-34 -15
-sox -R "$work_dir/thunder_tone.wav" "$work_dir/thunder_tone_p.wav" pad 0.08 0.17
-noise "$work_dir/thunder_crack.wav" 0.16 white -6
+# Weather punctuation: a short band-limited noise crack with two chip-like
+# echoes, followed by a gated low-noise tail. Avoid a sustained bass note: it
+# read as an engine fault rather than distant 16-bit thunder.
+noise "$work_dir/thunder_crack.wav" 0.075 white -5
 sox -R "$work_dir/thunder_crack.wav" "$work_dir/thunder_crack_f.wav" \
-  highpass 360 lowpass 4600 fade t 0 0.16 0.11 pad 0 1.64
-mix_to_ogg "$output_dir/thunder.ogg" "$work_dir/thunder_rumble_f.wav" \
-  "$work_dir/thunder_tone_p.wav" "$work_dir/thunder_crack_f.wav"
+  highpass 720 lowpass 5200 fade t 0.001 0.074 0.045 pad 0 1.325
+sox -R "$work_dir/thunder_crack_f.wav" "$work_dir/thunder_echo_a.wav" \
+  pad 0.085 0 trim 0 1.4 gain -8
+sox -R "$work_dir/thunder_crack_f.wav" "$work_dir/thunder_echo_b.wav" \
+  pad 0.17 0 trim 0 1.4 gain -13
+noise "$work_dir/thunder_rumble.wav" 1.30 pink -9
+sox -R "$work_dir/thunder_rumble.wav" "$work_dir/thunder_rumble_f.wav" \
+  highpass 65 lowpass 820 tremolo 12 48 fade t 0.015 1.30 0.62 pad 0.10 0
+tone "$work_dir/thunder_pulse.wav" 1.18 square 92-47 -23
+sox -R "$work_dir/thunder_pulse.wav" "$work_dir/thunder_pulse_f.wav" \
+  lowpass 390 tremolo 9 42 fade t 0.01 1.17 0.55 pad 0.15 0.07
+mix_to_ogg "$output_dir/thunder.ogg" "$work_dir/thunder_crack_f.wav" \
+  "$work_dir/thunder_echo_a.wav" "$work_dir/thunder_echo_b.wav" \
+  "$work_dir/thunder_rumble_f.wav" "$work_dir/thunder_pulse_f.wav"
 
 # Nitro rewards and ignition.
 tone "$work_dir/pickup_a.wav" 0.11 square 440 -13
@@ -128,6 +146,26 @@ tone "$work_dir/start_tone.wav" 0.46 square 105-520 -10
 sox -R "$work_dir/start_noise.wav" "$work_dir/start_noisef.wav" highpass 500 lowpass 6200 \
   fade t 0.006 0.46 0.15
 mix_to_ogg "$output_dir/nitro_start.ogg" "$work_dir/start_noisef.wav" "$work_dir/start_tone.wav"
+
+# Rare Jump Kick reward, launch, and clean landing.
+tone "$work_dir/jump_pick_a.wav" 0.14 square 330-660 -13
+tone "$work_dir/jump_pick_b.wav" 0.22 square 495-990 -15
+sox -R "$work_dir/jump_pick_b.wav" "$work_dir/jump_pick_bp.wav" pad 0.10 0
+mix_to_ogg "$output_dir/jump_pickup.ogg" "$work_dir/jump_pick_a.wav" "$work_dir/jump_pick_bp.wav"
+
+noise "$work_dir/jump_start_noise.wav" 0.42 pink -8
+tone "$work_dir/jump_start_tone.wav" 0.42 square 145-720 -13
+sox -R "$work_dir/jump_start_noise.wav" "$work_dir/jump_start_noisef.wav" \
+  highpass 480 lowpass 4400 fade t 0.002 0.42 0.16
+mix_to_ogg "$output_dir/jump_start.ogg" "$work_dir/jump_start_tone.wav" \
+  "$work_dir/jump_start_noisef.wav"
+
+tone "$work_dir/jump_land_tone.wav" 0.24 square 92-48 -10
+noise "$work_dir/jump_land_noise.wav" 0.18 brown -8
+sox -R "$work_dir/jump_land_noise.wav" "$work_dir/jump_land_noisef.wav" \
+  highpass 70 lowpass 950 fade t 0 0.18 0.12 pad 0.02 0.04
+mix_to_ogg "$output_dir/jump_land.ogg" "$work_dir/jump_land_tone.wav" \
+  "$work_dir/jump_land_noisef.wav"
 
 # Menu and leaderboard UI vocabulary.
 sox -R -n -r 22050 -c 1 "$output_dir/menu_move.ogg" \

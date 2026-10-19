@@ -1,6 +1,50 @@
 //! wasm-only bridge: publish game state to `window.__FTD_STATE__` each frame
 //! for the Playwright harness and debugging (PLAN.md testing strategy).
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct TouchSnapshot {
+    pub enabled: bool,
+    pub steer: f32,
+    pub brake: f32,
+    pub low_seq: u32,
+    pub high_seq: u32,
+    pub nitro_seq: u32,
+    pub jump_seq: u32,
+    pub pause_seq: u32,
+    pub difficulty_seq: u32,
+    pub difficulty_index: i8,
+    pub confirm_seq: u32,
+    pub crt_seq: u32,
+    pub restart_seq: u32,
+    pub initials_seq: u32,
+    pub initials: String,
+    pub submit_seq: u32,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn touch_snapshot() -> TouchSnapshot {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    let Ok(function) = js_sys::Reflect::get(&global, &"__ftdReadTouch".into()) else {
+        return TouchSnapshot::default();
+    };
+    let Ok(function) = function.dyn_into::<js_sys::Function>() else {
+        return TouchSnapshot::default();
+    };
+    function
+        .call0(&global)
+        .ok()
+        .and_then(|value| value.as_string())
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn touch_snapshot() -> TouchSnapshot {
+    TouchSnapshot::default()
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn publish_state(json: &str) {
     use wasm_bindgen::JsCast;
@@ -92,5 +136,19 @@ mod tests {
         );
         assert!(html.contains("__ftdResumeAudio"));
         assert!(html.contains("'pointerdown', 'touchstart', 'keydown'"));
+    }
+
+    #[test]
+    fn touch_bridge_is_loaded_before_wasm_and_uses_sequence_counters() {
+        let html = include_str!("../index.html");
+        let touch = html.find("__ftdReadTouch").expect("touch bridge");
+        let wasm = html
+            .find("data-trunk rel=\"rust\"")
+            .expect("trunk wasm link");
+        assert!(touch < wasm);
+        assert!(html.contains("jump_seq"));
+        assert!(html.contains("difficulty_seq"));
+        assert!(html.contains("setPointerCapture"));
+        assert!(html.contains("env(safe-area-inset-left)"));
     }
 }
