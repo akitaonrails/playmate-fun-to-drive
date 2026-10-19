@@ -41,17 +41,14 @@ jobs:
           rustup toolchain install stable --component clippy,rustfmt --target wasm32-unknown-unknown
           rustup default stable
 
-      - name: Cache Cargo builds
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      # The generic target/ cache grew past 7 GB and took longer to unpack than
+      # the build it was meant to accelerate. rust-cache keeps reusable
+      # dependency artifacts while pruning workspace and incremental outputs.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-rust-stable-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-rust-stable-
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pinned Trunk
         shell: bash
