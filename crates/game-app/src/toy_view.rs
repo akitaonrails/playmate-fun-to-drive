@@ -184,11 +184,12 @@ pub const SCREEN_H: f32 = 0.11875;
 
 // Keep the eye on the authored screen-centered sightline while pushing toward
 // the toy. A single ratio makes the crop easy to retune without introducing
-// vertical drift: 0.90 retains a narrow room border, the full bezel, the dash
-// Roadster, and the upper wheel arc at the narrowest supported 16:10 viewport.
+// vertical drift: 0.86 retains a narrow room border, the full bezel, and the
+// dash Roadster while letting more of the wheel and lower controls fall below
+// the narrowest supported 16:10 viewport.
 const TOY_CAMERA_BASE_POSITION: Vec3 = Vec3::new(0.0, 0.183, 0.265);
 const TOY_CAMERA_TARGET: Vec3 = Vec3::new(0.0, 0.128, 0.02);
-const TOY_CAMERA_PUSH_IN_RATIO: f32 = 0.90;
+const TOY_CAMERA_PUSH_IN_RATIO: f32 = 0.86;
 
 fn toy_camera_position() -> Vec3 {
     TOY_CAMERA_TARGET + (TOY_CAMERA_BASE_POSITION - TOY_CAMERA_TARGET) * TOY_CAMERA_PUSH_IN_RATIO
@@ -1312,7 +1313,7 @@ mod tests {
         let base_delta = TOY_CAMERA_BASE_POSITION - TOY_CAMERA_TARGET;
         let final_delta = toy_camera_position() - TOY_CAMERA_TARGET;
 
-        assert!((final_delta.length() / base_delta.length() - 0.90).abs() < 1e-6);
+        assert!((final_delta.length() / base_delta.length() - 0.86).abs() < 1e-6);
         assert!(final_delta
             .normalize()
             .abs_diff_eq(base_delta.normalize(), 1e-6));

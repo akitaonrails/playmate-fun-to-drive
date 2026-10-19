@@ -251,6 +251,24 @@ mod tests {
     }
 
     #[test]
+    fn touch_controls_suppress_ios_callouts_without_blocking_text_inputs() {
+        let html = include_str!("../index.html");
+        let callout = html
+            .find("-webkit-touch-callout: none")
+            .expect("iOS callout suppression");
+        let selector_start = html[..callout].rfind('}').map_or(0, |index| index + 1);
+        let selector_end = html[..callout].rfind('{').expect("callout selector");
+        let callout_selector = &html[selector_start..selector_end];
+
+        assert!(callout_selector.contains(".touch-button"));
+        assert!(callout_selector.contains("#touch-screen-tap"));
+        assert!(!callout_selector.contains("#touch-initials"));
+        assert!(html.contains("-webkit-user-select: none"));
+        assert!(html.contains("event.target.closest(touchControlSelector)"));
+        assert!(html.contains("addEventListener('contextmenu'"));
+    }
+
+    #[test]
     fn local_calendar_bridge_precedes_wasm_and_detects_hemisphere() {
         let html = include_str!("../index.html");
         let calendar = html.find("__ftdLocalCalendar").expect("calendar bridge");

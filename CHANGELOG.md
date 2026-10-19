@@ -5,6 +5,16 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.9.2] — 2026-10-19
+
+- Tightened the authored toy camera another four percent along the existing
+  screen-centered sightline, matching the latest reference crop by trimming
+  more of the wheel and lower controls while preserving the screen and bezel.
+- Kept the startup orbit calibrated to the revised final framing and updated
+  its camera regression coverage.
+- Prevented iOS Safari selection callouts and context menus from interrupting
+  touch controls while leaving the nickname text field unaffected (#1).
+
 ## [0.9.1] — 2026-10-19
 
 - Pushed the authored toy camera ten percent closer along its existing

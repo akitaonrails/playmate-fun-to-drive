@@ -53,10 +53,13 @@
       .touch-layer { position: fixed; inset: 0; z-index: 25; pointer-events: none; display: none; }
       body.touch-enabled .touch-layer.active { display: block; }
       .touch-button, .touch-pad, .touch-menu-button, #touch-initials {
-        -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none;
         border: 1px solid rgba(210,235,255,.24); color: rgba(235,246,255,.62);
         background: rgba(8,14,24,.13); backdrop-filter: blur(1.5px);
         font: 700 14px/1 monospace; pointer-events: auto;
+      }
+      .touch-button, .touch-pad, .touch-menu-button, #touch-screen-tap, #touch-toggle {
+        -webkit-tap-highlight-color: transparent; touch-action: none;
+        -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
       }
       .touch-button:active, .touch-button.pressed, .touch-pad.active,
       .touch-menu-button:active, .touch-menu-button.selected {
@@ -230,6 +233,12 @@
         const held = { left: new Set(), right: new Set(), brake: new Set() };
         const byId = id => document.getElementById(id);
         const pulse = key => { state[key] = (state[key] + 1) >>> 0; };
+        const touchControlSelector = '.touch-button, .touch-pad, .touch-menu-button, #touch-screen-tap, #touch-toggle';
+        document.addEventListener('contextmenu', event => {
+          if (event.target instanceof Element && event.target.closest(touchControlSelector)) {
+            event.preventDefault();
+          }
+        }, { capture: true });
         const recompute = () => {
           state.steer = held.left.size === held.right.size ? 0 : (held.right.size ? 1 : -1);
           state.brake = held.brake.size ? 1 : 0;
