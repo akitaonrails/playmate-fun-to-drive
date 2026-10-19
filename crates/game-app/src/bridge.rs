@@ -151,4 +151,12 @@ mod tests {
         assert!(html.contains("setPointerCapture"));
         assert!(html.contains("env(safe-area-inset-left)"));
     }
+
+    #[test]
+    fn touch_bridge_survives_unavailable_local_storage() {
+        let html = include_str!("../index.html");
+        assert!(html.contains("try { return localStorage.getItem(storageKey); } catch (_)"));
+        assert!(html.contains("try { localStorage.setItem(storageKey"));
+        assert!(html.contains("applyEnabled();"));
+    }
 }

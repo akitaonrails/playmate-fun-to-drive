@@ -28,6 +28,8 @@ milestone (docs/PLAN.md).
   Z-axis spinning.
 - Rebuilt thunder as a compact 16-bit crack with two chip-noise echoes and a
   gated descending rumble, replacing the strange sustained low drone.
+- Kept touch controls functional when browser storage is unavailable; the
+  toggle falls back to session-only state instead of aborting the adapter.
 
 ## [0.4.0] — 2026-10-18
 

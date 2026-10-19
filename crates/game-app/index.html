@@ -169,9 +169,12 @@
       // model used by keyboard and gamepad.
       (() => {
         const storageKey = 'fun-to-drive.touch.v1';
+        const storedTouch = (() => {
+          try { return localStorage.getItem(storageKey); } catch (_) { return null; }
+        })();
         const state = {
-          enabled: localStorage.getItem(storageKey) === 'on' ||
-            (localStorage.getItem(storageKey) === null && matchMedia('(pointer: coarse)').matches),
+          enabled: storedTouch === 'on' ||
+            (storedTouch === null && matchMedia('(pointer: coarse)').matches),
           steer: 0, brake: 0, low_seq: 0, high_seq: 0, nitro_seq: 0, jump_seq: 0,
           pause_seq: 0, difficulty_seq: 0, difficulty_index: 1, confirm_seq: 0,
           crt_seq: 0, restart_seq: 0, initials_seq: 0, initials: '', submit_seq: 0
@@ -240,7 +243,9 @@
           if (!state.enabled) { for (const set of Object.values(held)) set.clear(); recompute(); }
         };
         toggle.addEventListener('click', () => {
-          state.enabled = !state.enabled; localStorage.setItem(storageKey, state.enabled ? 'on' : 'off'); applyEnabled();
+          state.enabled = !state.enabled;
+          try { localStorage.setItem(storageKey, state.enabled ? 'on' : 'off'); } catch (_) {}
+          applyEnabled();
         });
         window.__ftdReadTouch = () => JSON.stringify(state);
         window.__ftdSyncTouchUi = game => {
