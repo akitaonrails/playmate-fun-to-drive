@@ -31,7 +31,7 @@ pub(super) fn spawn(commands: &mut Commands) {
     for (kind, count) in [
         (AmbientKind::Birds, 10),
         (AmbientKind::ShootingStar, 2),
-        (AmbientKind::Hurricane, 6),
+        (AmbientKind::Hurricane, 10),
         (AmbientKind::HurricaneLeaves, 14),
         (AmbientKind::HurricaneTree, 6),
         (AmbientKind::SakuraPetals, 18),
@@ -39,17 +39,7 @@ pub(super) fn spawn(commands: &mut Commands) {
         (AmbientKind::HelpedCar, 2),
     ] {
         for index in 0..count {
-            let depth = if matches!(
-                kind,
-                AmbientKind::HurricaneLeaves
-                    | AmbientKind::HurricaneTree
-                    | AmbientKind::SakuraPetals
-                    | AmbientKind::HelpedCar
-            ) {
-                0.62
-            } else {
-                -4.62
-            };
+            let depth = ambient_depth(kind);
             commands.spawn((
                 Sprite::from_color(Color::WHITE, Vec2::ONE),
                 Transform::from_xyz(0.0, 0.0, depth),
@@ -57,6 +47,19 @@ pub(super) fn spawn(commands: &mut Commands) {
                 AmbientPart { kind, index },
             ));
         }
+    }
+}
+
+fn ambient_depth(kind: AmbientKind) -> f32 {
+    match kind {
+        // The funnel crosses the projected road, so it must share the effects
+        // stack to remain visible; debris and abducted cars stay just above it.
+        AmbientKind::Hurricane => 0.56,
+        AmbientKind::HurricaneLeaves
+        | AmbientKind::HurricaneTree
+        | AmbientKind::SakuraPetals
+        | AmbientKind::HelpedCar => 0.62,
+        _ => -4.62,
     }
 }
 
@@ -237,12 +240,21 @@ fn animate_hurricane(
     sprite: &mut Sprite,
 ) {
     let i = index as f32;
-    let swirl = (time.elapsed_secs() * 3.0 + i * 1.35).sin() * (10.0 - i);
+    let swirl = (time.elapsed_secs() * 4.2 + i * 1.35).sin() * (18.0 - i * 1.15);
     tf.translation.x = -570.0 + 1140.0 * progress + swirl;
-    tf.translation.y = 165.0 - i * 16.0;
-    tf.rotation = Quat::from_rotation_z((i - 2.5) * 0.025);
-    sprite.custom_size = Some(Vec2::new((112.0 - i * 17.0).max(18.0), 8.0));
-    sprite.color = Color::srgba(0.22, 0.27, 0.34, fade * (0.36 + i * 0.035));
+    tf.translation.y = 188.0 - i * 15.0;
+    tf.rotation = Quat::from_rotation_z(
+        (time.elapsed_secs() * 3.1 + i * 0.72).sin() * 0.075 + (i - 4.5) * 0.008,
+    );
+    sprite.custom_size = Some(Vec2::new((188.0 - i * 16.0).max(40.0), 13.0 - i * 0.55));
+    let pulse = 0.90 + (time.elapsed_secs() * 5.0 + i).sin() * 0.10;
+    let shade = if index.is_multiple_of(2) { 1.0 } else { 0.72 };
+    sprite.color = Color::srgba(
+        0.32 * shade * pulse,
+        0.37 * shade * pulse,
+        0.45 * shade * pulse,
+        fade * (0.68 + i * 0.018),
+    );
 }
 
 fn animate_sakura_petals(
@@ -441,8 +453,35 @@ mod tests {
         assert!(ufo.y < 220.0);
         let mut tf = Transform::default();
         let mut sprite = Sprite::default();
-        animate_hurricane(5, 0.5, 1.0, &Time::default(), &mut tf, &mut sprite);
-        assert!(tf.translation.y <= 105.0);
+        animate_hurricane(9, 0.5, 1.0, &Time::default(), &mut tf, &mut sprite);
+        assert!(tf.translation.y <= 55.0);
+    }
+
+    #[test]
+    fn hurricane_is_a_large_tapered_foreground_funnel_below_its_debris() {
+        assert!(ambient_depth(AmbientKind::Hurricane) > 0.0);
+        assert!(
+            ambient_depth(AmbientKind::Hurricane) < ambient_depth(AmbientKind::HurricaneLeaves)
+        );
+
+        let mut top = Transform::default();
+        let mut bottom = Transform::default();
+        let mut top_sprite = Sprite::default();
+        let mut bottom_sprite = Sprite::default();
+        animate_hurricane(0, 0.5, 1.0, &Time::default(), &mut top, &mut top_sprite);
+        animate_hurricane(
+            9,
+            0.5,
+            1.0,
+            &Time::default(),
+            &mut bottom,
+            &mut bottom_sprite,
+        );
+        let top_size = top_sprite.custom_size.expect("top funnel band");
+        let bottom_size = bottom_sprite.custom_size.expect("bottom funnel band");
+        assert!(top.translation.y - bottom.translation.y > 120.0);
+        assert!(top_size.x > bottom_size.x * 4.0);
+        assert!(top_size.y > bottom_size.y);
     }
 
     #[test]

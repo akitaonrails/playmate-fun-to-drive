@@ -5,6 +5,25 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.7.0] — 2026-10-19
+
+- Increased rare Jump Kick availability across every difficulty while keeping
+  Easy most generous, Medium intermediate, and Hard the most demanding. The
+  COLD-AIR pickup schedule remains unchanged.
+- Reworked COLD-AIR velocity streaks into shorter anime-style lines clustered
+  around the Roadster instead of extending toward the horizon.
+- Added subtle precipitation handling: rain retains 94 percent steering
+  response and snow retains 90 percent, preserving control while increasing
+  the value of early braking and safer lines.
+- Strengthened night, rain, and snow distance visibility with a foreground-safe
+  gradient that hides the upper road and distant car bodies while preserving
+  their rear lights.
+- Enlarged and clarified the hurricane into a high-contrast rotating funnel
+  rendered between the road haze and its flying cars, trees, and leaves.
+- Added a README feature overview covering driving systems, COLD-AIR, Jump
+  Kick, seasons, weather, scenery, rare events, audio, CRT, touch, and mobile
+  support.
+
 ## [0.6.0] — 2026-10-19
 
 - Added a full in-screen pause presentation with clear keyboard/gamepad help,

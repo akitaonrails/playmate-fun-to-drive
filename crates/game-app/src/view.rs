@@ -56,6 +56,9 @@ const NITRO_Y: f32 = 216.0;
 const JUMP_METER_X: f32 = 138.0;
 const RAIN_POOL: usize = 84;
 const SPEED_LINE_POOL: usize = 28;
+const SPEED_LINE_FAR_SCALE: f32 = 0.62;
+const SPEED_LINE_NEAR_SCALE: f32 = 1.08;
+const SPEED_LINE_FAR_ROW: usize = 5;
 const VISIBILITY_BANDS: usize = 8;
 const HEADLIGHT_LAYERS: usize = 2;
 const PICKUP_VISUAL_SCALE: f32 = 1.22;
@@ -2257,13 +2260,17 @@ fn speed_line_geometry(
     let side = if index.is_multiple_of(2) { -1.0 } else { 1.0 };
     let speed = 1.35 + (index % 5) as f32 * 0.11;
     let phase = (elapsed * speed + index as f32 * 0.618_034).fract();
-    let scale = S_FAR + phase * (1.0 - S_FAR);
-    let x = road_center + side * HALF_ROAD_PX * scale * 1.04;
-    let lane = (index % 7) as f32 - 3.0;
-    let y = scale_to_y(scale) + lane * (2.0 + scale * 3.0);
+    // Anime-like boost streaks live around the player instead of stretching
+    // from the car all the way to the horizon. Their widening and lengthening
+    // toward the foreground still preserve the road's perspective.
+    let scale = SPEED_LINE_FAR_SCALE + phase * (SPEED_LINE_NEAR_SCALE - SPEED_LINE_FAR_SCALE);
+    let spread = 1.02 + (index % 4) as f32 * 0.09;
+    let x = road_center + side * HALF_ROAD_PX * scale * spread;
+    let jitter = (index % 7) as f32 - 3.0;
+    let y = scale_to_y(scale) + jitter * 3.5;
     let size = Vec2::new(
-        1.5 + intensity * 1.5,
-        (18.0 + scale * 52.0) * (0.58 + intensity * 0.42),
+        1.5 + intensity * 2.0,
+        (16.0 + phase * 42.0) * (0.58 + intensity * 0.42),
     );
     // A vertical sprite rotated with this sign is parallel to the projected
     // left/right road border: both sides converge toward the horizon.
@@ -2292,7 +2299,8 @@ fn sync_nitro_speed_lines(
         let phase = (time.elapsed_secs() * (1.35 + (line.0 % 5) as f32 * 0.11)
             + line.0 as f32 * 0.618_034)
             .fract();
-        let row = (((1.0 - phase) * (ROWS - 1) as f32).round() as usize).min(ROWS - 1);
+        let row =
+            (((1.0 - phase) * SPEED_LINE_FAR_ROW as f32).round() as usize).min(SPEED_LINE_FAR_ROW);
         let (position, size, angle) = speed_line_geometry(
             line.0,
             time.elapsed_secs(),
@@ -2303,12 +2311,12 @@ fn sync_nitro_speed_lines(
         transform.translation.y = position.y;
         transform.rotation = Quat::from_rotation_z(angle);
         sprite.custom_size = Some(size);
-        let edge_strength = ((position.y - HORIZON_Y).abs() / (HORIZON_Y - CAR_Y)).clamp(0.0, 1.0);
+        let near_strength = 0.45 + phase * 0.55;
         sprite.color = Color::srgba(
             0.72,
             0.94,
             1.0,
-            visuals.intensity * (0.10 + edge_strength * 0.20),
+            visuals.intensity * (0.12 + near_strength * 0.24),
         );
         *visibility = Visibility::Visible;
     }
@@ -2919,16 +2927,18 @@ fn rain_visibility(rain: f32, winter: f32) -> f32 {
     rain.clamp(0.0, 1.0) * (1.0 - winter.clamp(0.0, 1.0))
 }
 
-fn road_visibility(daylight: f32, rain: f32) -> RoadVisibilityVisuals {
+fn road_visibility(daylight: f32, precipitation: f32) -> RoadVisibilityVisuals {
     let daylight = daylight.clamp(0.0, 1.0);
     let night = 1.0 - daylight;
-    let rain = rain.clamp(0.0, 1.0);
+    let rain = precipitation.clamp(0.0, 1.0);
     let night_headlights = ((0.55 - daylight) / 0.40).clamp(0.0, 1.0);
     RoadVisibilityVisuals {
         night,
         rain,
-        shade_alpha: (night * 0.18 + rain * 0.08).min(0.26),
-        fog_alpha: (night * 0.30 + rain * 0.38).min(0.58),
+        // Keep the foreground readable and put the difficulty in the distant
+        // gradient, rather than dimming the entire game screen uniformly.
+        shade_alpha: (night * 0.08 + rain * 0.03).min(0.10),
+        fog_alpha: (night * 0.68 + rain * 0.68).min(0.84),
         headlights: night_headlights.max(rain * 0.88),
     }
 }
@@ -2937,7 +2947,11 @@ fn fog_band_geometry(index: usize) -> (f32, Vec2, f32) {
     let band_h = 435.0 / VISIBILITY_BANDS as f32;
     let t = index as f32 / (VISIBILITY_BANDS - 1) as f32;
     let y = -300.0 + band_h * (index as f32 + 0.5);
-    (y, Vec2::new(960.0, band_h + 1.0), 0.28 + t * 0.72)
+    (
+        y,
+        Vec2::new(960.0, band_h + 1.0),
+        0.06 + smoothstep(t) * 0.94,
+    )
 }
 
 fn projected_headlight_geometry(layer: usize, y0: f32, y1: f32) -> (Vec2, Vec2, f32) {
@@ -2970,8 +2984,8 @@ fn projected_headlight_geometry(layer: usize, y0: f32, y1: f32) -> (Vec2, Vec2, 
 fn traffic_visibility(scale: f32, visibility: RoadVisibilityVisuals) -> (f32, f32) {
     let near = ((scale - S_FAR) / (0.42 - S_FAR)).clamp(0.0, 1.0);
     let distance = 1.0 - near;
-    let visibility_loss = (visibility.night * 0.78 + visibility.rain * 0.70).min(0.88);
-    let body_alpha = (1.0 - visibility_loss * distance).clamp(0.12, 1.0);
+    let visibility_loss = (visibility.night * 0.92 + visibility.rain * 0.86).min(0.96);
+    let body_alpha = (1.0 - visibility_loss * distance).clamp(0.06, 1.0);
     let light_alpha = visibility.headlights * (0.58 + distance * 0.42);
     (body_alpha, light_alpha.clamp(0.0, 1.0))
 }
@@ -3281,9 +3295,10 @@ fn sync_road_visibility(
     mut fog: Query<(&RoadFogBand, &mut Sprite), (Without<NightShade>, Without<HeadlightBand>)>,
 ) {
     let daylight = game_core::environment::daylight(sim.0.environment_time);
-    let seasons = game_core::environment::season_weights(sim.0.environment_time);
     let rain = weather_weights(sim.0.weather())[2];
-    *visuals = road_visibility(daylight, rain_visibility(rain, seasons[3]));
+    // Winter precipitation renders as snow instead of rain streaks, but its
+    // distance haze remains just as important to gameplay visibility.
+    *visuals = road_visibility(daylight, rain);
 
     if let Ok(mut sprite) = shade.single_mut() {
         sprite.color = Color::srgba(0.005, 0.008, 0.018, visuals.shade_alpha);
@@ -3929,12 +3944,16 @@ mod tests {
         assert_eq!(day.shade_alpha, 0.0);
         assert!(night.shade_alpha > day.shade_alpha);
         assert!(night.fog_alpha > day.fog_alpha);
-        assert!(storm.fog_alpha > night.fog_alpha);
+        assert!(storm.fog_alpha > day.fog_alpha);
+        assert!(road_visibility(0.0, 1.0).fog_alpha > night.fog_alpha);
         assert_eq!(day.headlights, 0.0);
         assert_eq!(road_visibility(0.70, 0.0).headlights, 0.0);
         assert!(night.headlights > 0.9);
         assert!(storm.headlights > 0.8);
-        assert!(night.shade_alpha < 0.3 && storm.fog_alpha < 0.6);
+        assert!(night.shade_alpha <= 0.1 && storm.fog_alpha >= 0.65);
+        let (_, _, foreground) = fog_band_geometry(0);
+        let (_, _, distance) = fog_band_geometry(VISIBILITY_BANDS - 1);
+        assert!(distance > foreground * 10.0);
     }
 
     #[test]
@@ -4060,18 +4079,21 @@ mod tests {
     }
 
     #[test]
-    fn speed_lines_converge_with_road_borders_and_scale_with_intensity() {
+    fn speed_lines_stay_near_the_car_and_scale_with_intensity() {
         let (far_left, _, left_angle) = speed_line_geometry(0, 0.0, 1.0, 0.0);
         let (far_right, _, right_angle) = speed_line_geometry(1, -0.618_034 / 1.46, 1.0, 0.0);
         assert!(far_left.x < 0.0 && far_right.x > 0.0);
         assert!(left_angle < 0.0 && right_angle > 0.0);
         assert!((left_angle + right_angle).abs() < 1e-6);
 
-        let (near, _, _) = speed_line_geometry(0, 0.7, 1.0, 0.0);
-        assert!(
-            near.x.abs() > far_left.x.abs(),
-            "border widens toward player"
-        );
+        for index in 0..SPEED_LINE_POOL {
+            for frame in 0..30 {
+                let (position, size, _) = speed_line_geometry(index, frame as f32 / 30.0, 1.0, 0.0);
+                assert!(position.y < CAR_Y + 155.0, "line reached too far forward");
+                assert!(position.y > -300.0, "line escaped below the screen");
+                assert!(size.y <= 58.0, "streak is too long: {}", size.y);
+            }
+        }
         let (_, faint, _) = speed_line_geometry(3, 1.25, 0.1, 0.0);
         let (_, strong, _) = speed_line_geometry(3, 1.25, 1.0, 0.0);
         assert!(strong.y > faint.y);

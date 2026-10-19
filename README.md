@@ -48,6 +48,19 @@ separate local top-10 boards.
 Each run begins in the real-world season and day/night phase reported by the
 player's local system date, clock, and timezone.
 
+## Features
+
+- Three timed difficulties with separate local leaderboards for day/night cycles, cars passed, cars bumped, and total score.
+- Manual LOW/HIGH shifting, analog braking, crash recovery, an analog speedometer, and gamepad rumble.
+- A three-charge **COLD-AIR** thruster with twin jets, near-car speed streaks, cooldown, and crest-launch behavior.
+- Rare **JUMP KICK** pickups that let the Roadster leap and spin over traffic—with a risky landing.
+- Continuously changing day/night cycles, real-world starting season and time of day, rolling terrain, and sharp procedural curves.
+- Clear, cloudy, rainy, and snowy conditions with wet-road sheen, precipitation audio, headlights, distance fog, and subtle weather grip changes.
+- Seasonal roadside scenery including sakura, summer forest, autumn foliage, bare winter trees, lamps, and billboards.
+- Randomized city and landscape backdrops including Tokyo neon, Paris silhouettes, Vegas-style lights, mountains, forests, and open road.
+- Rare background events: shooting stars, bird flocks, a hurricane that can lift traffic and trees, and a nighttime UFO abduction.
+- Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and responsive ultrawide/mobile presentation.
+
 ## Controls
 
 | Input | Action |

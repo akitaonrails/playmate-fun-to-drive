@@ -40,6 +40,9 @@ pub struct Tuning {
     pub curve_drift_speed_cap: f32,
     /// Drum shift velocity at full steering input (half-widths/s).
     pub steer_rate: f32,
+    /// Subtle loss of steering authority during precipitation.
+    pub rain_steer_factor: f32,
+    pub snow_steer_factor: f32,
     /// |road_x| beyond this counts as off-road.
     pub off_road_limit: f32,
     /// Lateral simulation clamp and rate at which off-road intensity recovers.
@@ -64,7 +67,9 @@ pub struct Tuning {
     pub nitro_lane_offset: f32,
     pub nitro_capacity: u8,
     /// Rare single-charge Jump Kick pickup and airborne behavior.
-    pub jump_spawn_chance_percent: u8,
+    pub jump_spawn_chance_easy_percent: u8,
+    pub jump_spawn_chance_medium_percent: u8,
+    pub jump_spawn_chance_hard_percent: u8,
     pub jump_pickup_half_width: f32,
     pub jump_lane_offset: f32,
     pub jump_duration_secs: f32,
@@ -142,6 +147,8 @@ impl Default for Tuning {
             drift_rate: 0.75,
             curve_drift_speed_cap: 1.60,
             steer_rate: 2.25,
+            rain_steer_factor: 0.94,
+            snow_steer_factor: 0.90,
             off_road_limit: 1.02,
             max_lateral_offset: 1.35,
             off_road_recovery_rate: 2.0,
@@ -157,7 +164,9 @@ impl Default for Tuning {
             nitro_pickup_half_width: 0.24,
             nitro_lane_offset: 0.62,
             nitro_capacity: 3,
-            jump_spawn_chance_percent: 38,
+            jump_spawn_chance_easy_percent: 58,
+            jump_spawn_chance_medium_percent: 48,
+            jump_spawn_chance_hard_percent: 42,
             jump_pickup_half_width: 0.24,
             jump_lane_offset: 0.62,
             jump_duration_secs: 1.10,
@@ -271,6 +280,11 @@ impl Tuning {
         if !(0.3..=4.0).contains(&self.steer_rate) {
             return Err("steer_rate out of [0.3, 4]");
         }
+        if !(0.80..=1.0).contains(&self.rain_steer_factor)
+            || !(0.80..=self.rain_steer_factor).contains(&self.snow_steer_factor)
+        {
+            return Err("weather steering factors must be subtle and snow no grippier than rain");
+        }
         let worst_center_drift = self.drift_rate * self.curve_gain * self.curve_drift_speed_cap;
         if self.steer_rate < worst_center_drift * 1.20 {
             return Err("steering needs 20% authority over maximum center curve drift");
@@ -320,8 +334,16 @@ impl Tuning {
         if !(1..=8).contains(&self.nitro_capacity) {
             return Err("nitro_capacity out of [1, 8]");
         }
-        if self.jump_spawn_chance_percent > 100 {
+        if self.jump_spawn_chance_easy_percent > 100
+            || self.jump_spawn_chance_medium_percent > 100
+            || self.jump_spawn_chance_hard_percent > 100
+        {
             return Err("jump spawn chance exceeds 100%");
+        }
+        if !(self.jump_spawn_chance_easy_percent >= self.jump_spawn_chance_medium_percent
+            && self.jump_spawn_chance_medium_percent >= self.jump_spawn_chance_hard_percent)
+        {
+            return Err("jump spawn chance must decrease from Easy to Hard");
         }
         if !(0.05..=0.5).contains(&self.jump_pickup_half_width) {
             return Err("jump_pickup_half_width out of [0.05, 0.5]");
@@ -440,6 +462,33 @@ mod tests {
     #[test]
     fn defaults_are_valid() {
         assert!(Tuning::default().validate().is_ok());
+    }
+
+    #[test]
+    fn jump_pickup_frequency_decreases_with_difficulty() {
+        let t = Tuning::default();
+        assert!(t.jump_spawn_chance_easy_percent > t.jump_spawn_chance_medium_percent);
+        assert!(t.jump_spawn_chance_medium_percent > t.jump_spawn_chance_hard_percent);
+
+        let invalid = Tuning {
+            jump_spawn_chance_easy_percent: 40,
+            jump_spawn_chance_medium_percent: 50,
+            ..t
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn weather_grip_penalties_stay_subtle_and_ordered() {
+        let t = Tuning::default();
+        assert!(t.snow_steer_factor < t.rain_steer_factor);
+        assert!(t.rain_steer_factor < 1.0);
+
+        let invalid = Tuning {
+            snow_steer_factor: 0.98,
+            ..t
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

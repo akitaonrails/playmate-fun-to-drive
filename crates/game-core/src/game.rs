@@ -6,7 +6,9 @@
 //! bump = an oncoming car or roadside hazard under the player marker. Bumps
 //! slow the toy but do not end the timed session; leaving the road adds drag.
 
-use crate::environment::{WeatherSchedule, WeatherTransition, DAY_SECS};
+use crate::environment::{
+    season_weights, WeatherKind, WeatherSchedule, WeatherTransition, DAY_SECS,
+};
 use crate::input::{Gear, InputState};
 use crate::rng::Rng;
 use crate::road::{Hazard, HazardKind, RoadLoop, TrafficMotion};
@@ -562,7 +564,12 @@ impl Game {
         hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
         hash ^= hash >> 27;
         let easy_intro = self.difficulty == Difficulty::Easy && cycle == 0;
-        if !easy_intro && hash % 100 >= u64::from(t.jump_spawn_chance_percent) {
+        let spawn_chance = match self.difficulty {
+            Difficulty::Easy => t.jump_spawn_chance_easy_percent,
+            Difficulty::Medium => t.jump_spawn_chance_medium_percent,
+            Difficulty::Hard => t.jump_spawn_chance_hard_percent,
+        };
+        if !easy_intro && hash % 100 >= u64::from(spawn_chance) {
             return None;
         }
         let phase = if easy_intro {
@@ -977,7 +984,11 @@ impl Game {
         } else {
             1.0
         };
-        self.road_x -= input.steer * t.steer_rate * steer_factor * dt;
+        let weather = self.weather();
+        let rain = weather_kind_weight(weather, WeatherKind::Rain);
+        let winter = season_weights(self.environment_time)[3];
+        let weather_grip = precipitation_steer_factor(rain, winter, t);
+        self.road_x -= input.steer * t.steer_rate * steer_factor * weather_grip * dt;
         self.road_x = self
             .road_x
             .clamp(-t.max_lateral_offset, t.max_lateral_offset);
@@ -1171,6 +1182,30 @@ fn off_road_speed_factor(road_x: f32, t: &Tuning) -> f32 {
     1.0 + (t.off_road_min_speed_factor - 1.0) * smooth
 }
 
+fn weather_kind_weight(weather: WeatherTransition, kind: WeatherKind) -> f32 {
+    if weather.from == weather.to {
+        return if weather.to == kind { 1.0 } else { 0.0 };
+    }
+    let from = if weather.from == kind {
+        1.0 - weather.blend
+    } else {
+        0.0
+    };
+    let to = if weather.to == kind {
+        weather.blend
+    } else {
+        0.0
+    };
+    from + to
+}
+
+fn precipitation_steer_factor(rain: f32, winter: f32, t: &Tuning) -> f32 {
+    let rain = rain.clamp(0.0, 1.0);
+    let winter = winter.clamp(0.0, 1.0);
+    let wet_or_snow = t.rain_steer_factor * (1.0 - winter) + t.snow_steer_factor * winter;
+    1.0 + (wet_or_snow - 1.0) * rain
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1181,6 +1216,16 @@ mod tests {
     fn game(seed: u64) -> (Game, Tuning) {
         let t = Tuning::default();
         (Game::new(seed, Difficulty::Hard, &t), t)
+    }
+
+    #[test]
+    fn precipitation_subtly_reduces_grip_with_snow_slipperiest() {
+        let t = Tuning::default();
+        assert_eq!(precipitation_steer_factor(0.0, 0.0, &t), 1.0);
+        assert_eq!(precipitation_steer_factor(1.0, 0.0, &t), 0.94);
+        assert_eq!(precipitation_steer_factor(1.0, 1.0, &t), 0.90);
+        let transition = precipitation_steer_factor(0.5, 0.0, &t);
+        assert!((transition - 0.97).abs() < 1e-6);
     }
 
     fn running_jump_game(hazard: Hazard) -> (Game, Tuning) {
@@ -1212,9 +1257,24 @@ mod tests {
             }
         }
         assert!(
-            (6..=18).contains(&present),
+            (8..=24).contains(&present),
             "rare schedule count: {present}"
         );
+    }
+
+    #[test]
+    fn jump_pickups_become_progressively_rarer_by_difficulty() {
+        let t = Tuning::default();
+        let scheduled = |difficulty| {
+            let game = Game::new(71, difficulty, &t);
+            (1..=2_000)
+                .filter(|&cycle| game.jump_pickup_for_cycle(cycle, &t).is_some())
+                .count()
+        };
+        let easy = scheduled(Difficulty::Easy);
+        let medium = scheduled(Difficulty::Medium);
+        let hard = scheduled(Difficulty::Hard);
+        assert!(easy > medium && medium > hard, "{easy} > {medium} > {hard}");
     }
 
     #[test]
@@ -1237,7 +1297,7 @@ mod tests {
     #[test]
     fn jump_pickup_capacity_is_one_and_activation_consumes_it() {
         let t = Tuning {
-            jump_spawn_chance_percent: 100,
+            jump_spawn_chance_hard_percent: 100,
             ..Tuning::default()
         };
         let mut game = Game::with_road(5, RoadLoop::straight(100.0, vec![]), Difficulty::Hard, &t);
