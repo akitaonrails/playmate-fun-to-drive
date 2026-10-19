@@ -285,6 +285,11 @@ pub fn qa_mode_and_duration(raw: Option<&str>) -> (bool, Option<f32>) {
     (raw.is_some(), raw.and_then(validated_session_secs))
 }
 
+pub fn validated_qa_environment_time(raw: &str) -> Option<f32> {
+    let value = raw.parse::<f32>().ok()?;
+    (value.is_finite() && (0.0..game_core::environment::DAY_SECS).contains(&value)).then_some(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,5 +390,9 @@ mod tests {
         assert_eq!(qa_mode_and_duration(None), (false, None));
         assert_eq!(qa_mode_and_duration(Some("2")), (true, Some(2.0)));
         assert_eq!(qa_mode_and_duration(Some("invalid")), (true, None));
+        assert_eq!(validated_qa_environment_time("99"), Some(99.0));
+        for raw in ["-1", "100", "NaN", "inf", "invalid"] {
+            assert_eq!(validated_qa_environment_time(raw), None);
+        }
     }
 }

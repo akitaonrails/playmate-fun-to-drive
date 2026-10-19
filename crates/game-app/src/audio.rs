@@ -14,12 +14,16 @@ pub const STORAGE_KEY: &str = "fun-to-drive.audio.v1";
 const EFFECTS_GAIN: f32 = 0.94;
 const MUSIC_GAIN: f32 = 1.18;
 const MUSIC_TRACKS: usize = 6;
+const MUSIC_FADE_FLOOR: f32 = 0.0005;
+const MAX_ONE_SHOT_VOICES: usize = 16;
+const PENDING_CUE_GRACE_SECS: f32 = 0.75;
 
 pub struct ArcadeAudioPlugin;
 
 impl Plugin for ArcadeAudioPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AudioEvents>()
+            .init_resource::<PendingAudioCues>()
             .add_systems(Startup, setup_audio)
             .add_systems(
                 Update,
@@ -27,7 +31,9 @@ impl Plugin for ArcadeAudioPlugin {
                     unlock_on_input,
                     toggle_mute,
                     adjust_volume,
+                    sync_music_players,
                     update_mix,
+                    reap_faded_music,
                     schedule_weather_cues,
                     play_cues,
                 )
@@ -100,6 +106,25 @@ impl AudioEvents {
     }
 }
 
+#[derive(Resource, Default)]
+struct PendingAudioCues(Vec<(AudioCue, f32)>);
+
+impl PendingAudioCues {
+    fn age(&mut self, dt: f32) {
+        for (_, remaining) in &mut self.0 {
+            *remaining -= dt;
+        }
+        self.0.retain(|(_, remaining)| *remaining > 0.0);
+    }
+
+    fn push(&mut self, cue: AudioCue) {
+        if self.0.len() == MAX_ONE_SHOT_VOICES {
+            self.0.remove(0);
+        }
+        self.0.push((cue, PENDING_CUE_GRACE_SECS));
+    }
+}
+
 #[derive(Resource)]
 pub(crate) struct AudioState {
     pub(crate) unlocked: bool,
@@ -119,6 +144,8 @@ pub(crate) struct AudioState {
     pub(crate) nitro: f32,
     pub(crate) music_levels: [f32; MUSIC_TRACKS],
     pub(crate) music_track: u8,
+    music_outgoing: Option<u8>,
+    pub(crate) music_players: u8,
     pub(crate) engine_pitch: f32,
     pub(crate) last_cue: &'static str,
     pub(crate) cue_count: u64,
@@ -144,14 +171,12 @@ impl AudioState {
             nitro: 0.0,
             music_levels: [0.0; MUSIC_TRACKS],
             music_track: 0,
+            music_outgoing: None,
+            music_players: 1,
             engine_pitch: 0.65,
             last_cue: "none",
             cue_count: 0,
         }
-    }
-
-    pub(crate) fn unlock(&mut self) {
-        self.unlocked = true;
     }
 }
 
@@ -207,6 +232,7 @@ struct AudioAssets {
     key: Handle<AudioSource>,
     delete: Handle<AudioSource>,
     submit: Handle<AudioSource>,
+    music: [Handle<AudioSource>; MUSIC_TRACKS],
 }
 
 impl AudioAssets {
@@ -263,6 +289,14 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         key: load("key"),
         delete: load("delete"),
         submit: load("submit"),
+        music: [
+            load("music_voltage_hearts"),
+            load("music_coastal_splash"),
+            load("music_passing_lights"),
+            load("music_redline_overture"),
+            load("music_overpass_anthem"),
+            load("music_static_signal"),
+        ],
     };
 
     for (layer, source) in [
@@ -275,12 +309,6 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         (AudioLayer::Gravel, load("gravel")),
         (AudioLayer::Overrev, load("overrev")),
         (AudioLayer::Nitro, load("nitro_burn")),
-        (AudioLayer::Music(0), load("music_voltage_hearts")),
-        (AudioLayer::Music(1), load("music_coastal_splash")),
-        (AudioLayer::Music(2), load("music_passing_lights")),
-        (AudioLayer::Music(3), load("music_redline_overture")),
-        (AudioLayer::Music(4), load("music_overpass_anthem")),
-        (AudioLayer::Music(5), load("music_static_signal")),
     ] {
         commands.spawn((
             AudioPlayer::new(source),
@@ -288,12 +316,19 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
             layer,
         ));
     }
+    commands.spawn((
+        AudioPlayer::new(one_shots.music[0].clone()),
+        PlaybackSettings::LOOP.with_volume(Volume::SILENT),
+        AudioLayer::Music(0),
+    ));
     commands.insert_resource(one_shots);
 }
 
 /// Browsers require audio to be resumed from a user gesture. Unlock on the
-/// first keyboard or gamepad press so menu cues and gameplay audio cannot be
-/// lost merely because a specific confirmation path was not used.
+/// first input and only mark it available after the browser confirms that its
+/// AudioContext is running. Gamepad polling is not a browser activation
+/// gesture, so treating the resume request itself as success can strand audio
+/// entities forever in a suspended stream.
 fn unlock_on_input(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -309,8 +344,8 @@ fn unlock_on_input(
         // Retrying matters on the web: an earlier AudioContext::resume promise
         // may have been rejected because it raced browser user activation.
         bridge::resume_audio();
-        state.unlock();
     }
+    state.unlocked = bridge::audio_running();
 }
 
 fn toggle_mute(
@@ -324,10 +359,60 @@ fn toggle_mute(
     }
     let requested = keys.just_pressed(KeyCode::KeyM);
     if requested {
-        state.unlocked = true;
         state.muted = !state.muted;
         let _ = bridge::save_local(STORAGE_KEY, if state.muted { "muted" } else { "sound" });
     }
+}
+
+/// Own at most the current soundtrack and one outgoing crossfade. Starting a
+/// fresh player avoids the synchronous seek used by rodio, which can deadlock
+/// single-threaded WebAudio while it waits for its own callback.
+fn sync_music_players(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    assets: Res<AudioAssets>,
+    mut state: ResMut<AudioState>,
+    players: Query<(Entity, &AudioLayer)>,
+) {
+    let desired = (sim.0.day_cycles % MUSIC_TRACKS as u64) as u8;
+    let mut present = [false; MUSIC_TRACKS];
+    for (_, layer) in &players {
+        if let AudioLayer::Music(index) = layer {
+            present[usize::from(*index)] = true;
+        }
+    }
+
+    if desired != state.music_track {
+        if let Some(obsolete) = begin_music_transition(&mut state, desired) {
+            for (entity, layer) in &players {
+                if matches!(layer, AudioLayer::Music(index) if *index == obsolete) {
+                    commands.entity(entity).despawn();
+                    present[usize::from(obsolete)] = false;
+                }
+            }
+            state.music_levels[usize::from(obsolete)] = 0.0;
+        }
+    }
+
+    if !present[usize::from(desired)] {
+        commands.spawn((
+            AudioPlayer::new(assets.music[usize::from(desired)].clone()),
+            PlaybackSettings::LOOP.with_volume(Volume::SILENT),
+            AudioLayer::Music(desired),
+        ));
+        present[usize::from(desired)] = true;
+    }
+    state.music_players = present.into_iter().filter(|active| *active).count() as u8;
+}
+
+fn begin_music_transition(state: &mut AudioState, desired: u8) -> Option<u8> {
+    if desired == state.music_track {
+        return None;
+    }
+    let obsolete = state.music_outgoing.take();
+    state.music_outgoing = Some(state.music_track);
+    state.music_track = desired;
+    obsolete
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -456,10 +541,6 @@ fn update_mix(
     for (level, target) in state.music_levels.iter_mut().zip(target.music) {
         *level += (target - *level) * music_alpha;
     }
-    let next_music_track = (sim.0.day_cycles % MUSIC_TRACKS as u64) as u8;
-    let music_changed = state.music_track != next_music_track;
-    state.music_track = next_music_track;
-
     for (layer, mut sink) in &mut layers {
         let volume = match layer {
             AudioLayer::EngineLow => state.engine_low,
@@ -478,10 +559,6 @@ fn update_mix(
             _ => state.effects_gain,
         };
         sink.set_volume(Volume::Linear(volume * user_gain));
-        if music_changed && matches!(layer, AudioLayer::Music(index) if *index == next_music_track)
-        {
-            let _ = sink.try_seek(std::time::Duration::ZERO);
-        }
         match layer {
             AudioLayer::EngineLow => sink.set_speed(state.engine_pitch),
             AudioLayer::EngineHigh => sink.set_speed((state.engine_pitch * 1.03).min(1.52)),
@@ -490,6 +567,41 @@ fn update_mix(
             _ => {}
         }
     }
+}
+
+fn reap_faded_music(
+    mut commands: Commands,
+    mut state: ResMut<AudioState>,
+    players: Query<(Entity, &AudioLayer)>,
+) {
+    let Some(outgoing) = state.music_outgoing else {
+        state.music_players = players
+            .iter()
+            .filter(|(_, layer)| matches!(layer, AudioLayer::Music(_)))
+            .count() as u8;
+        return;
+    };
+    if state.music_levels[usize::from(outgoing)] > MUSIC_FADE_FLOOR {
+        state.music_players = players
+            .iter()
+            .filter(|(_, layer)| matches!(layer, AudioLayer::Music(_)))
+            .count() as u8;
+        return;
+    }
+    let mut removed = 0u8;
+    for (entity, layer) in &players {
+        if matches!(layer, AudioLayer::Music(index) if *index == outgoing) {
+            commands.entity(entity).despawn();
+            removed = removed.saturating_add(1);
+        }
+    }
+    state.music_levels[usize::from(outgoing)] = 0.0;
+    state.music_outgoing = None;
+    state.music_players = players
+        .iter()
+        .filter(|(_, layer)| matches!(layer, AudioLayer::Music(_)))
+        .count()
+        .saturating_sub(usize::from(removed)) as u8;
 }
 
 #[derive(Default)]
@@ -544,26 +656,46 @@ fn schedule_weather_cues(
 
 fn play_cues(
     mut commands: Commands,
+    time: Res<Time>,
     assets: Option<Res<AudioAssets>>,
     mut events: ResMut<AudioEvents>,
+    mut pending: ResMut<PendingAudioCues>,
     mut state: ResMut<AudioState>,
+    voices: Query<(), With<OneShotAudio>>,
 ) {
     let Some(assets) = assets else {
         events.0.clear();
+        pending.0.clear();
         return;
     };
+    pending.age(time.delta_secs());
     for cue in events.0.drain(..) {
         state.last_cue = cue.name();
         state.cue_count = state.cue_count.saturating_add(1);
-        if state.unlocked && !state.muted {
-            commands.spawn((
-                AudioPlayer::new(assets.source(cue)),
-                PlaybackSettings::DESPAWN
-                    .with_volume(Volume::Linear(cue.volume() * state.effects_gain)),
-            ));
+        if !state.muted {
+            pending.push(cue);
         }
     }
+    if state.muted {
+        pending.0.clear();
+        return;
+    }
+    if !state.unlocked {
+        return;
+    }
+    let available_voices = MAX_ONE_SHOT_VOICES.saturating_sub(voices.iter().count());
+    for (cue, _) in pending.0.drain(..).take(available_voices) {
+        commands.spawn((
+            AudioPlayer::new(assets.source(cue)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(cue.volume() * state.effects_gain)),
+            OneShotAudio,
+        ));
+    }
 }
+
+#[derive(Component)]
+struct OneShotAudio;
 
 #[cfg(test)]
 mod tests {
@@ -745,5 +877,41 @@ mod tests {
             );
             assert!(targets.music[track] > 0.09);
         }
+    }
+
+    #[test]
+    fn soundtrack_lifecycle_keeps_only_current_and_outgoing_tracks() {
+        let mut state = AudioState::new(false);
+        assert_eq!(begin_music_transition(&mut state, 1), None);
+        assert_eq!(state.music_track, 1);
+        assert_eq!(state.music_outgoing, Some(0));
+
+        assert_eq!(begin_music_transition(&mut state, 2), Some(0));
+        assert_eq!(state.music_track, 2);
+        assert_eq!(state.music_outgoing, Some(1));
+        assert_eq!(begin_music_transition(&mut state, 2), None);
+    }
+
+    #[test]
+    fn soundtrack_mixer_never_uses_a_blocking_seek() {
+        let source = include_str!("audio.rs");
+        let blocking_method = ["try", "_seek"].concat();
+        assert!(!source.contains(&blocking_method));
+    }
+
+    #[test]
+    fn one_shot_voice_budget_is_bounded() {
+        assert_eq!(MAX_ONE_SHOT_VOICES, 16);
+    }
+
+    #[test]
+    fn pending_cues_are_bounded_and_expire_if_audio_stays_suspended() {
+        let mut pending = PendingAudioCues::default();
+        for _ in 0..(MAX_ONE_SHOT_VOICES + 4) {
+            pending.push(AudioCue::MenuMove);
+        }
+        assert_eq!(pending.0.len(), MAX_ONE_SHOT_VOICES);
+        pending.age(PENDING_CUE_GRACE_SECS + 0.01);
+        assert!(pending.0.is_empty());
     }
 }

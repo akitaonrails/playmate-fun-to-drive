@@ -78,6 +78,28 @@ pub fn resume_audio() {
 pub fn resume_audio() {}
 
 #[cfg(target_arch = "wasm32")]
+pub fn audio_running() -> bool {
+    use wasm_bindgen::JsCast;
+    let global = js_sys::global();
+    let Ok(function) = js_sys::Reflect::get(&global, &"__ftdAudioRunning".into()) else {
+        return false;
+    };
+    let Ok(function) = function.dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    function
+        .call0(&global)
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn audio_running() -> bool {
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
@@ -135,6 +157,7 @@ mod tests {
             "the shim must wrap AudioContext before Bevy starts"
         );
         assert!(html.contains("__ftdResumeAudio"));
+        assert!(html.contains("__ftdAudioRunning"));
         assert!(html.contains("'pointerdown', 'touchstart', 'keydown'"));
     }
 
@@ -149,6 +172,7 @@ mod tests {
         assert!(html.contains("jump_seq"));
         assert!(html.contains("difficulty_seq"));
         assert!(html.contains("setPointerCapture"));
+        assert!(html.contains("'pointercancel', 'lostpointercapture'"));
         assert!(html.contains("env(safe-area-inset-left)"));
         assert!(html.contains(">COLD-AIR</button>"));
     }

@@ -6,4 +6,6 @@ cd "$(dirname "$0")/.."
 make check
 make build-wasm
 make verify-web
+make browser-test
+make package-from-dist
 echo "ci: OK"

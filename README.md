@@ -68,7 +68,8 @@ make package      # release wasm bundle -> release/fun-to-drive-web.zip
 make build-wasm-webgpu  # WebGPU-capable build (falls back to WebGL2)
 ```
 
-`make ci` runs the same native and production-WASM checks as GitHub Actions.
+`make ci` runs the same native, production-WASM, packaging, and audible browser
+transition checks as GitHub Actions.
 Pushes to `main` publish the validated web bundle through GitHub Pages. After
 creating the repository, select **GitHub Actions** once under
 **Settings → Pages → Build and deployment → Source**.
@@ -91,6 +92,10 @@ local to the browser under the versioned `fun-to-drive.leaderboard.v2` key;
 valid v1 rows migrate to the Hard board;
 stored totals above conservative 600-second plausibility ceilings (100 cycles
 or 100,000 passed/bumped cars) invalidate the stored board.
+
+Transition tests may additionally use `qa_start_environment_time=99` while QA
+mode is active. The value is constrained to the first 100-second cycle and is
+ignored during normal leaderboard runs.
 
 For weaker GPUs, append `?quality=low`. This reduces the offscreen game view
 from 960×600 to 720×450 and disables bloom without changing simulation logic.

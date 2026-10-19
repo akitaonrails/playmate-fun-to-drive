@@ -42,9 +42,9 @@ tone "$work_dir/high_c.wav" 2.0 sine 368 -23
 sox -R -m "$work_dir/high_a.wav" "$work_dir/high_b.wav" "$work_dir/high_c.wav" \
   "$output_dir/engine_high.ogg" tremolo 17 24 highpass 70 lowpass 2300 gain -n -5
 
-noise "$work_dir/wind.wav" 2.0 pink -11
+noise "$work_dir/wind.wav" 6.0 pink -11
 sox -R "$work_dir/wind.wav" "$output_dir/wind.ogg" highpass 320 lowpass 3800 \
-  tremolo 0.65 18 gain -n -8
+  tremolo 0.5 18 gain -n -8 fade t 0.006 6.0 0.006
 
 # Rain should read as a soft sheet on glass/road, not bright radio static.
 # Layering filtered pink and brown noise gives it body; two slow, shallow
@@ -53,11 +53,12 @@ sox -R "$work_dir/wind.wav" "$output_dir/wind.ogg" highpass 320 lowpass 3800 \
 noise "$work_dir/rain_spray.wav" 4.0 pink -10
 noise "$work_dir/rain_body.wav" 4.0 brown -13
 sox -R "$work_dir/rain_spray.wav" "$work_dir/rain_spray_f.wav" \
-  highpass 420 lowpass 4600 tremolo 0.37 11
+  highpass 420 lowpass 4600 tremolo 0.5 11
 sox -R "$work_dir/rain_body.wav" "$work_dir/rain_body_f.wav" \
-  highpass 110 lowpass 1500 tremolo 0.23 16
+  highpass 110 lowpass 1500 tremolo 0.25 16
 sox -R -m "$work_dir/rain_spray_f.wav" "$work_dir/rain_body_f.wav" \
-  "$output_dir/rain.ogg" gain -n -8
+  "$work_dir/rain_mix.wav" gain -n -8
+sox -R "$work_dir/rain_mix.wav" "$output_dir/rain.ogg" fade t 0.006 4.0 0.006
 
 # Brake pad/tire drag: a restrained, pressure-controlled chip-noise bed. It
 # stays distinct from the wetter, brighter skid layer below.
@@ -66,11 +67,12 @@ tone "$work_dir/brake_pulse.wav" 1.5 square 72 -25
 sox -R "$work_dir/brake_noise.wav" "$work_dir/brake_noisef.wav" highpass 210 lowpass 1900 \
   tremolo 10 42
 sox -R -m "$work_dir/brake_noisef.wav" "$work_dir/brake_pulse.wav" \
-  "$output_dir/brake.ogg" lowpass 2200 gain -n -8
+  "$work_dir/brake_mix.wav" lowpass 2200 gain -n -8
+sox -R "$work_dir/brake_mix.wav" "$output_dir/brake.ogg" fade t 0.006 1.5 0.006
 
 noise "$work_dir/skid.wav" 1.5 white -10
 sox -R "$work_dir/skid.wav" "$output_dir/wet_skid.ogg" highpass 420 lowpass 3100 \
-  tremolo 7 35 gain -n -7
+  tremolo 8 35 gain -n -7 fade t 0.006 1.5 0.006
 
 # Dry shoulder gravel: irregular, low-mid chip noise with a faint repeating
 # pebble pulse. It deliberately avoids the wet skid's bright continuous hiss.
@@ -81,7 +83,8 @@ sox -R "$work_dir/gravel_body.wav" "$work_dir/gravel_body_f.wav" \
 sox -R "$work_dir/gravel_pebbles.wav" "$work_dir/gravel_pebbles_f.wav" \
   highpass 900 lowpass 3900 tremolo 19 72
 sox -R -m "$work_dir/gravel_body_f.wav" "$work_dir/gravel_pebbles_f.wav" \
-  "$output_dir/gravel.ogg" gain -n -9
+  "$work_dir/gravel_mix.wav" gain -n -9
+sox -R "$work_dir/gravel_mix.wav" "$output_dir/gravel.ogg" fade t 0.006 2.4 0.006
 
 tone "$work_dir/overrev_a.wav" 1.0 square 152 -14
 noise "$work_dir/overrev_b.wav" 1.0 white -18
@@ -93,7 +96,8 @@ noise "$work_dir/nitro_noise.wav" 1.5 pink -8
 tone "$work_dir/nitro_tone.wav" 1.5 sawtooth 620 -18
 sox -R "$work_dir/nitro_noise.wav" "$work_dir/nitro_noisef.wav" highpass 650 lowpass 7200
 sox -R -m "$work_dir/nitro_noisef.wav" "$work_dir/nitro_tone.wav" \
-  "$output_dir/nitro_burn.ogg" tremolo 16 20 gain -n -5
+  "$work_dir/nitro_mix.wav" tremolo 16 20 gain -n -5
+sox -R "$work_dir/nitro_mix.wav" "$output_dir/nitro_burn.ogg" fade t 0.006 1.5 0.006
 
 # Mechanical and collision one-shots.
 tone "$work_dir/shift_a.wav" 0.16 square 240-105 -8

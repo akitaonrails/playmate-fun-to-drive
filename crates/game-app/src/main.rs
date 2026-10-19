@@ -36,6 +36,7 @@ struct TuningRes(pub Tuning);
 #[derive(Resource, Default)]
 struct RunConfig {
     qa_duration: Option<f32>,
+    qa_start_environment_time: Option<f32>,
 }
 
 /// Presentation-only entropy for selecting a different horizon on each new
@@ -399,6 +400,11 @@ fn main() {
     let qa_parameter = bridge::query_param("qa_session_secs");
     let render_quality = RenderQuality::from_query(bridge::query_param("quality").as_deref());
     let (qa_mode, qa_duration) = session::qa_mode_and_duration(qa_parameter.as_deref());
+    let qa_start_environment_time = qa_mode
+        .then(|| bridge::query_param("qa_start_environment_time"))
+        .flatten()
+        .as_deref()
+        .and_then(session::validated_qa_environment_time);
     let (leaderboard, persistent) = if qa_mode {
         (Vec::new(), false)
     } else {
@@ -442,7 +448,10 @@ fn main() {
     .insert_resource(ClearColor(Color::srgb(0.025, 0.031, 0.055)))
     .insert_resource(TuningRes(tuning))
     .insert_resource(control_tuning)
-    .insert_resource(RunConfig { qa_duration })
+    .insert_resource(RunConfig {
+        qa_duration,
+        qa_start_environment_time,
+    })
     .insert_resource(SceneryRun::new(qa_mode))
     .insert_resource(render_quality)
     .insert_resource(LeaderboardState {
@@ -803,6 +812,11 @@ fn handle_end_input(
                     );
                 } else {
                     sim.0.restart_with_difficulty(difficulty, &tuning.0);
+                }
+                if let Some(environment_time) = config.qa_start_environment_time {
+                    sim.0.environment_time = environment_time;
+                    sim.0.distance = environment_time * tuning.0.scroll_speed_low;
+                    sim.0.day_cycles = (environment_time / game_core::environment::DAY_SECS) as u64;
                 }
                 end.0.mode = EndMode::Playing;
                 launch.active = true;

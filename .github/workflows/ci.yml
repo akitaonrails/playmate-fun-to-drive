@@ -67,6 +67,11 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/trunk" "$HOME/.cargo/bin/trunk"
           trunk --version | grep --fixed-strings "trunk ${TRUNK_VERSION}"
 
+      - name: Install browser test dependencies
+        run: |
+          npm ci --prefix tools/screenshots
+          npx --prefix tools/screenshots playwright install --with-deps chromium
+
       - name: Run full CI
         run: env -u NO_COLOR make ci
 

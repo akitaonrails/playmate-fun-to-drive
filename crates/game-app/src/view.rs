@@ -46,7 +46,8 @@ fn elevated_row_y(scale: f32, relative_elevation: f32) -> f32 {
     scale_to_y(scale) + relative_elevation * ELEVATION_PX_PER_M * scale
 }
 const VIEW_TOP: f32 = 322.0;
-const ROADSIDE_DECOR_POOL: usize = 18;
+const ROADSIDE_DECOR_PROPS: usize = 18;
+const ROADSIDE_DECOR_PARTS_PER_PROP: usize = 3;
 const DECOR_BILLBOARD_POOL: usize = 6;
 const HAZARD_POOL: usize = 40;
 const HAZARD_PARTS: usize = 6;
@@ -57,6 +58,11 @@ const RAIN_POOL: usize = 84;
 const SPEED_LINE_POOL: usize = 28;
 const VISIBILITY_BANDS: usize = 8;
 const HEADLIGHT_LAYERS: usize = 2;
+const PICKUP_VISUAL_SCALE: f32 = 1.22;
+
+fn pickup_visual_scale(projection_scale: f32) -> f32 {
+    projection_scale * PICKUP_VISUAL_SCALE
+}
 
 #[derive(Component)]
 struct SkyBand;
@@ -910,7 +916,7 @@ pub fn setup(mut commands: Commands) {
     }
 
     // ---- palms (pooled, ride the loop) ----
-    for _ in 0..ROADSIDE_DECOR_POOL {
+    for _ in 0..ROADSIDE_DECOR_PROPS {
         // trunk + fronds
         commands.spawn((
             Sprite::from_color(Color::srgb(0.42, 0.28, 0.14), Vec2::new(9.0, 46.0)),
@@ -1749,30 +1755,31 @@ fn sync_nitro_pickup(
         return;
     };
     let x = (lat + sim.0.next_nitro_lane) * HALF_ROAD_PX * s;
+    let item_scale = pickup_visual_scale(s);
     let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 11.3).sin();
     for (part, mut tf, mut sprite, mut vis) in parts.by_ref() {
         let (color, size, dy, z) = match part.0 {
             0 => (
                 Color::srgba(0.10, 0.90, 1.0, 0.12 + pulse * 0.18),
-                Vec2::new((58.0 * s).max(5.0), (66.0 * s).max(6.0)),
+                Vec2::new((58.0 * item_scale).max(5.0), (66.0 * item_scale).max(6.0)),
                 0.0,
                 -2.35,
             ),
             1 => (
                 Color::srgb(0.08, 0.78, 0.98),
-                Vec2::new((30.0 * s).max(3.0), (42.0 * s).max(4.0)),
+                Vec2::new((30.0 * item_scale).max(3.0), (42.0 * item_scale).max(4.0)),
                 0.0,
                 -2.3,
             ),
             2 => (
                 Color::srgb(0.82, 1.0, 1.0),
-                Vec2::new((14.0 * s).max(2.0), (7.0 * s).max(1.0)),
-                23.0 * s,
+                Vec2::new((14.0 * item_scale).max(2.0), (7.0 * item_scale).max(1.0)),
+                23.0 * item_scale,
                 -2.28,
             ),
             _ => (
                 Color::srgb(1.0, 0.91, 0.42),
-                Vec2::new((10.0 * s).max(2.0), (24.0 * s).max(3.0)),
+                Vec2::new((10.0 * item_scale).max(2.0), (24.0 * item_scale).max(3.0)),
                 0.0,
                 -2.27,
             ),
@@ -1813,42 +1820,43 @@ fn sync_jump_pickup(
         return;
     };
     let x = (lateral + sim.0.next_jump_lane) * HALF_ROAD_PX * scale;
+    let item_scale = pickup_visual_scale(scale);
     let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 8.7).sin();
     for (part, mut transform, mut sprite, mut visibility) in parts.by_ref() {
         let (color, size, dx, dy, z) = match part.0 {
             0 => (
                 Color::srgba(1.0, 0.10, 0.72, 0.14 + pulse * 0.20),
-                Vec2::new((64.0 * scale).max(6.0), (64.0 * scale).max(6.0)),
+                Vec2::new((64.0 * item_scale).max(6.0), (64.0 * item_scale).max(6.0)),
                 0.0,
                 0.0,
                 -2.30,
             ),
             1 => (
                 Color::srgb(0.96, 0.16, 0.64),
-                Vec2::new((30.0 * scale).max(3.0), (34.0 * scale).max(4.0)),
+                Vec2::new((30.0 * item_scale).max(3.0), (34.0 * item_scale).max(4.0)),
                 0.0,
                 0.0,
                 -2.25,
             ),
             2 => (
                 Color::srgb(1.0, 0.82, 0.96),
-                Vec2::new((28.0 * scale).max(3.0), (7.0 * scale).max(1.0)),
+                Vec2::new((28.0 * item_scale).max(3.0), (7.0 * item_scale).max(1.0)),
                 0.0,
                 0.0,
                 -2.22,
             ),
             3 => (
                 Color::srgb(0.28, 1.0, 0.78),
-                Vec2::new((16.0 * scale).max(2.0), (8.0 * scale).max(1.0)),
-                -19.0 * scale,
-                5.0 * scale,
+                Vec2::new((16.0 * item_scale).max(2.0), (8.0 * item_scale).max(1.0)),
+                -19.0 * item_scale,
+                5.0 * item_scale,
                 -2.21,
             ),
             _ => (
                 Color::srgb(0.28, 1.0, 0.78),
-                Vec2::new((16.0 * scale).max(2.0), (8.0 * scale).max(1.0)),
-                19.0 * scale,
-                5.0 * scale,
+                Vec2::new((16.0 * item_scale).max(2.0), (8.0 * item_scale).max(1.0)),
+                19.0 * item_scale,
+                5.0 * item_scale,
                 -2.21,
             ),
         };
@@ -2371,7 +2379,7 @@ fn sync_palms(
     let theme = backdrop::roadside_theme(*scenery, sim.0.environment_time);
     let count = roadside_decor_count(theme);
     let night = 1.0 - game_core::environment::daylight(sim.0.environment_time);
-    let mut spots = [None; ROADSIDE_DECOR_POOL];
+    let mut spots = [None; ROADSIDE_DECOR_PROPS];
     let mut spot_count = 0;
     let pairs = count / 2;
     let visible_span = 42.0;
@@ -2392,7 +2400,7 @@ fn sync_palms(
     }
     let mut parts = pool.iter_mut();
     for (x, y, s, side) in spots.into_iter().flatten() {
-        for part_index in 0..3 {
+        for part_index in 0..ROADSIDE_DECOR_PARTS_PER_PROP {
             let Some((mut tf, mut vis, mut sp)) = parts.next() else {
                 break;
             };
@@ -3635,6 +3643,29 @@ mod tests {
         assert!(forest.size.x >= 70.0 && sakura.size.x >= 68.0);
         assert!(winter.size.y <= 5.0, "winter branches must be leafless");
         assert!(city_night.color.to_srgba().alpha > city_day.color.to_srgba().alpha);
+        let densest_theme = [
+            backdrop::RoadsideTheme::Forest,
+            backdrop::RoadsideTheme::Sakura,
+            backdrop::RoadsideTheme::City,
+            backdrop::RoadsideTheme::Winter,
+            backdrop::RoadsideTheme::OpenRoad,
+        ]
+        .into_iter()
+        .map(roadside_decor_count)
+        .max()
+        .unwrap();
+        assert!(densest_theme <= ROADSIDE_DECOR_PROPS);
+        assert_eq!(
+            ROADSIDE_DECOR_PROPS * ROADSIDE_DECOR_PARTS_PER_PROP,
+            54,
+            "the startup pool must reserve every part of every prop"
+        );
+    }
+
+    #[test]
+    fn road_pickups_are_visually_larger_than_their_original_silhouettes() {
+        let projection_scale = 0.37;
+        assert!(pickup_visual_scale(projection_scale) >= projection_scale * 1.20);
     }
 
     #[test]

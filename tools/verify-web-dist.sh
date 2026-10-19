@@ -27,4 +27,19 @@ if grep -Eq "(href|src)=[\"']/|from [\"']/|module_or_path: [\"']/" "$INDEX"; the
   exit 1
 fi
 
+for track in \
+  music_voltage_hearts music_coastal_splash music_passing_lights \
+  music_redline_overture music_overpass_anthem music_static_signal
+do
+  if [[ ! -s "$DIST/assets/audio/$track.ogg" ]]; then
+    echo "missing soundtrack asset: $track.ogg" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -s "$DIST/assets/shaders/crt_screen.wesl" ]]; then
+  echo "missing CRT shader from production bundle" >&2
+  exit 1
+fi
+
 echo "web bundle: OK ($DIST)"

@@ -5,6 +5,33 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.5.1] — 2026-10-19
+
+- Fixed the browser freeze at the first day/night soundtrack transition by
+  replacing synchronous audio seeking with a bounded current/outgoing-player
+  crossfade. Only one track remains after each transition instead of decoding
+  all six soundtrack files continuously.
+- Made browser audio readiness follow the real WebAudio context state and
+  capped simultaneous one-shot voices, preventing suspended audio from
+  accumulating entities.
+- Smoothed and lengthened the environmental noise loops to remove periodic
+  wind, rain, braking, skid, gravel, and cold-air boundary artifacts.
+- Restored the intended roadside density by allocating all three sprite parts
+  for each of the eighteen pooled props, and removed repeated allocations from
+  hurricane/UFO traffic selection.
+- Cleaned up cancelled touch pointers for both screen taps and gear swipes.
+- Enlarged the COLD-AIR and Jump Kick road pickups by 22 percent so they remain
+  distinct from traffic without changing their collision areas.
+- Moved the toy camera subtly closer so the game screen is easier to read while
+  retaining the existing 16:10 framing on standard and ultrawide displays.
+- Added an audible browser endurance regression that crosses the first music
+  transition, checks the countdown remains live, and verifies the outgoing
+  player is released. Production bundles now fail verification if soundtrack
+  or display assets are missing.
+- Stopped tracking stale generated release bundles; release ZIPs are rebuilt
+  from the verified production output and attached to the matching GitHub
+  release.
+
 ## [0.5.0] — 2026-10-18
 
 - Added a 30-second difficulty-menu idle animation that double-blinks the toy

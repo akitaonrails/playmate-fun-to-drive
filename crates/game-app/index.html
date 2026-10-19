@@ -175,6 +175,7 @@
             if (context.state !== 'running') context.resume().catch(() => {});
           }
         };
+        window.__ftdAudioRunning = () => [...contexts].some(context => context.state === 'running');
         for (const event of ['pointerdown', 'touchstart', 'keydown']) {
           window.addEventListener(event, window.__ftdResumeAudio, { capture: true });
         }
@@ -229,7 +230,11 @@
           if (delta > 28) pulse('high_seq'); else if (delta < -28) pulse('low_seq');
           shifts.delete(event.pointerId); shift.classList.toggle('active', shifts.size > 0);
         };
-        shift.addEventListener('pointerup', endShift); shift.addEventListener('pointercancel', endShift);
+        shift.addEventListener('pointerup', endShift);
+        const cancelShift = event => {
+          shifts.delete(event.pointerId); shift.classList.toggle('active', shifts.size > 0);
+        };
+        for (const name of ['pointercancel', 'lostpointercapture']) shift.addEventListener(name, cancelShift);
         const screenStarts = new Map();
         const screen = byId('touch-screen-tap');
         screen.addEventListener('pointerdown', event => {
@@ -240,6 +245,8 @@
           const start = screenStarts.get(event.pointerId); screenStarts.delete(event.pointerId); if (!start) return;
           if (Math.hypot(event.clientX - start[0], event.clientY - start[1]) < 12 && performance.now() - start[2] < 300) pulse('pause_seq');
         });
+        const cancelScreen = event => { screenStarts.delete(event.pointerId); };
+        for (const name of ['pointercancel', 'lostpointercapture']) screen.addEventListener(name, cancelScreen);
         document.querySelectorAll('[data-difficulty]').forEach(button => button.addEventListener('pointerdown', event => {
           event.preventDefault(); state.difficulty_index = Number(button.dataset.difficulty); pulse('difficulty_seq');
         }));

@@ -129,6 +129,7 @@ struct Snapshot<'a> {
     audio_nitro: f32,
     audio_pitch: f32,
     audio_music_track: u8,
+    audio_music_players: u8,
     audio_music_sunset: f32,
     audio_music_neon: f32,
     audio_music_dawn: f32,
@@ -280,6 +281,7 @@ fn publish_state(
         audio_nitro: audio.nitro,
         audio_pitch: audio.engine_pitch,
         audio_music_track: audio.music_track,
+        audio_music_players: audio.music_players,
         // Preserve the original telemetry field names for external harnesses;
         // they now expose the first three slots of the expanded six-track set.
         audio_music_sunset: audio.music_levels[0],

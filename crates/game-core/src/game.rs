@@ -368,34 +368,40 @@ impl Game {
         let start_distance =
             event.slot as f32 * crate::rare_event::SLOT_SECS * tuning.scroll_speed_low;
         let start_pos = start_distance.rem_euclid(self.road.length);
-        let mut candidates: Vec<_> = self
-            .road
-            .hazards
-            .iter()
-            .enumerate()
-            .filter(|(_, hazard)| hazard.kind == HazardKind::Oncoming)
-            .filter_map(|(hazard_index, hazard)| {
-                let ahead = (hazard.s - start_pos).rem_euclid(self.road.length);
-                // Keep rare assists in the readable middle-distance band:
-                // close enough to watch the pickup, but clear of the player.
-                (8.0..=28.0).contains(&ahead).then(|| {
-                    (
-                        crate::rare_event::selection_hash(event.slot, self.seed, hazard_index),
-                        RareTrafficHelp {
-                            hazard_index,
-                            start_ahead: ahead,
-                            start_x: self.hazard_x_at(hazard, ahead, tuning),
-                        },
-                    )
-                })
-            })
-            .collect();
-        candidates.sort_by_key(|candidate| candidate.0);
-        let mut selected = [None; 2];
-        for (slot, (_, traffic)) in selected.iter_mut().zip(candidates.into_iter().take(wanted)) {
-            *slot = Some(traffic);
+        let mut best: [Option<(u64, RareTrafficHelp)>; 2] = [None; 2];
+        for (hazard_index, hazard) in self.road.hazards.iter().enumerate() {
+            if hazard.kind != HazardKind::Oncoming {
+                continue;
+            }
+            let ahead = (hazard.s - start_pos).rem_euclid(self.road.length);
+            // Keep rare assists in the readable middle-distance band:
+            // close enough to watch the pickup, but clear of the player.
+            if !(8.0..=28.0).contains(&ahead) {
+                continue;
+            }
+            let mut candidate = Some((
+                crate::rare_event::selection_hash(event.slot, self.seed, hazard_index),
+                RareTrafficHelp {
+                    hazard_index,
+                    start_ahead: ahead,
+                    start_x: self.hazard_x_at(hazard, ahead, tuning),
+                },
+            ));
+            for slot in best.iter_mut().take(wanted) {
+                let should_insert = match (*slot, candidate) {
+                    (None, Some(_)) => true,
+                    (Some(current), Some(next)) => next.0 < current.0,
+                    _ => false,
+                };
+                if should_insert {
+                    std::mem::swap(slot, &mut candidate);
+                }
+                if candidate.is_none() {
+                    break;
+                }
+            }
         }
-        selected
+        best.map(|candidate| candidate.map(|(_, traffic)| traffic))
     }
 
     pub fn speed_multiplier(&self, tuning: &Tuning) -> f32 {

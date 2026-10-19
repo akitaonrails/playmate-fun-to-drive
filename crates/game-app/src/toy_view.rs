@@ -135,6 +135,12 @@ pub const SCREEN_W: f32 = 0.190;
 #[cfg_attr(not(test), expect(dead_code))]
 pub const SCREEN_H: f32 = 0.11875;
 
+// A gentle push-in keeps the game screen prominent without cropping the toy
+// at the narrowest supported 16:10 viewport. Keep the eye on the same
+// screen-centered sightline when tuning this position.
+const TOY_CAMERA_POSITION: Vec3 = Vec3::new(0.0, 0.183, 0.265);
+const TOY_CAMERA_TARGET: Vec3 = Vec3::new(0.0, 0.128, 0.02);
+
 #[derive(Resource)]
 pub struct GameImage(pub Handle<Image>);
 
@@ -188,7 +194,7 @@ pub fn setup(
             is_active: false,
             ..default()
         },
-        Transform::from_xyz(0.0, 0.185, 0.275).looking_at(Vec3::new(0.0, 0.128, 0.02), Vec3::Y),
+        Transform::from_translation(TOY_CAMERA_POSITION).looking_at(TOY_CAMERA_TARGET, Vec3::Y),
         // ACES is shader-only, preserving HDR-to-display contrast without the
         // compressed LUT assets (and zstd decoder) required by TonyMcMapface.
         bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
