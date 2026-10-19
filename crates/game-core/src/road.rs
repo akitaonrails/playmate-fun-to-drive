@@ -72,7 +72,7 @@ impl TrafficMotion {
 impl Default for TrafficMotion {
     fn default() -> Self {
         Self {
-            chance_percent: 22,
+            chance_percent: 25,
             ..Self::DISABLED
         }
     }
@@ -102,8 +102,8 @@ impl RoadLoop {
         for n in 0..CURVE_SAMPLES {
             let t = n as f32 / CURVE_SAMPLES as f32;
             elevation.push(
-                0.72 * (std::f32::consts::TAU * t + elevation_phase).sin()
-                    + 0.24 * (std::f32::consts::TAU * 2.0 * t + elevation_phase * 0.47).sin(),
+                0.94 * (std::f32::consts::TAU * t + elevation_phase).sin()
+                    + 0.31 * (std::f32::consts::TAU * 2.0 * t + elevation_phase * 0.47).sin(),
             );
         }
 
@@ -490,6 +490,13 @@ mod tests {
         assert!((r.elevation_at(0.0) - r.elevation_at(r.length)).abs() < 1e-5);
         assert!(r.max_abs_grade() > 0.01);
         assert!(r.max_abs_grade() < 0.08, "small hills, not mountains");
+        let (low, high) = (0..256)
+            .map(|i| r.elevation_at(r.length * i as f32 / 256.0))
+            .fold(
+                (f32::INFINITY, f32::NEG_INFINITY),
+                |(low, high), elevation| (low.min(elevation), high.max(elevation)),
+            );
+        assert!(high - low > 1.8, "rolling relief should be clearly visible");
         assert!(r.elevation_at(r.length * 0.2) != r.elevation_at(r.length * 0.4));
     }
 

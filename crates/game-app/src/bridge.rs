@@ -150,6 +150,7 @@ mod tests {
         assert!(html.contains("difficulty_seq"));
         assert!(html.contains("setPointerCapture"));
         assert!(html.contains("env(safe-area-inset-left)"));
+        assert!(html.contains(">COLD-AIR</button>"));
     }
 
     #[test]

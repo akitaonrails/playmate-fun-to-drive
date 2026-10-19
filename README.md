@@ -21,7 +21,7 @@ reacts — steering wheel, gear lever, ignition key, G-force body lean, and a
 full-body jolt (with gamepad rumble) when you crash.
 
 Choose a two-, six-, or ten-minute run. Drive cleanly and quickly to complete as many
-day/night cycles as possible, pass traffic, collect nitro and rare Jump Kicks, and
+day/night cycles as possible, pass traffic, collect cold-air charges and rare Jump Kicks, and
 avoid bumps.
 Easy runs at 80% of Hard's road speed, Medium at 90%, and Hard at full speed;
 gear thresholds scale with the selected difficulty.
@@ -35,7 +35,7 @@ separate local top-10 boards.
 |---|---|
 | Arrow Left/Right | Steer (tap = light nudge, hold = full lock ramp) |
 | Q / E | Select LOW / HIGH gear (HIGH unlocks at 10 m/s / 36 km/h) |
-| Y | Use one collected nitro charge (five-second boost) |
+| Y | Fire the cold-air thruster after collecting all three charges |
 | B / Space | Use a collected Jump Kick: leap, spin, and clear traffic—unless you land on it |
 | A-Z / Backspace / Enter | Enter and submit three initials after time-up |
 | Left/Right + Enter | Select and start Easy / Medium / Hard |
@@ -46,8 +46,8 @@ separate local top-10 boards.
 | [ / ] | Music volume down / up |
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
-| Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y uses nitro, B uses Jump Kick, rumble on bumps |
-| Touch | Enable with the upper-left button; left thumb steers, right thumb swipes LOW/HIGH and holds brake, with BOOST/JUMP buttons; tap the game screen to pause |
+| Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, rumble on bumps |
+| Touch | Enable with the upper-left button; left thumb steers, right thumb swipes LOW/HIGH and holds brake, with COLD-AIR/JUMP buttons; tap the game screen to pause |
 
 ## Run it
 

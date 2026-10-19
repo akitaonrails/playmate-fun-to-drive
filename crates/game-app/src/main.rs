@@ -18,6 +18,8 @@ use session::{EndFlow, EndMode};
 
 const NITRO_PICKUP_GLOW_SECS: f32 = 0.65;
 const JUMP_PICKUP_GLOW_SECS: f32 = 0.80;
+const WALL_CLIMB_DURATION_SECS: f32 = 3.2;
+const SKY_DROP_DURATION_SECS: f32 = 1.65;
 
 #[cfg(target_arch = "wasm32")]
 const ASSET_ROOT: &str = "assets";
@@ -103,6 +105,32 @@ impl RenderQuality {
 
 #[derive(Resource, Default)]
 pub(crate) struct EndSession(pub(crate) EndFlow);
+
+/// Presentation-only finale between the fair terminal simulation tick and
+/// name entry. The recorded result is already frozen while this runs.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub(crate) struct FinishSequence {
+    pub(crate) active: bool,
+    pub(crate) elapsed: f32,
+}
+
+impl FinishSequence {
+    pub(crate) fn progress(self) -> f32 {
+        (self.elapsed / WALL_CLIMB_DURATION_SECS).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub(crate) struct LaunchSequence {
+    pub(crate) active: bool,
+    pub(crate) elapsed: f32,
+}
+
+impl LaunchSequence {
+    pub(crate) fn progress(self) -> f32 {
+        (self.elapsed / SKY_DROP_DURATION_SECS).clamp(0.0, 1.0)
+    }
+}
 
 #[derive(Resource)]
 pub(crate) struct LeaderboardState {
@@ -408,6 +436,8 @@ fn main() {
     .init_resource::<TouchInput>()
     .init_resource::<VisualEffects>()
     .init_resource::<EndSession>()
+    .init_resource::<FinishSequence>()
+    .init_resource::<LaunchSequence>()
     .insert_resource(audio::AudioState::new(audio_muted))
     .configure_sets(
         Update,
@@ -431,7 +461,10 @@ fn main() {
             .chain()
             .after(bevy::input::InputSystems),
     )
-    .add_systems(Update, sync_end_flow.in_set(AppSet::Flow))
+    .add_systems(
+        Update,
+        (sync_end_flow, tick_launch_sequence).in_set(AppSet::Flow),
+    )
     .add_systems(Update, handle_end_input.in_set(AppSet::Controls))
     .add_systems(
         Update,
@@ -469,8 +502,9 @@ fn gather_input(
     time: Res<Time>,
     end: Res<EndSession>,
     touch: Res<TouchInput>,
+    launch: Res<LaunchSequence>,
 ) {
-    if end.0.mode != EndMode::Playing {
+    if end.0.mode != EndMode::Playing || launch.active {
         frame.state.steer = 0.0;
         frame.state.brake = 0.0;
         frame.state.gear_request = None;
@@ -591,14 +625,40 @@ fn gather_input(
     }
 }
 
-fn sync_end_flow(sim: Res<Sim>, mut end: ResMut<EndSession>) {
+fn tick_launch_sequence(time: Res<Time>, mut launch: ResMut<LaunchSequence>) {
+    if !launch.active {
+        return;
+    }
+    launch.elapsed = (launch.elapsed + time.delta_secs()).min(SKY_DROP_DURATION_SECS);
+    if launch.elapsed >= SKY_DROP_DURATION_SECS {
+        launch.active = false;
+    }
+}
+
+fn sync_end_flow(
+    time: Res<Time>,
+    sim: Res<Sim>,
+    mut end: ResMut<EndSession>,
+    mut finish: ResMut<FinishSequence>,
+) {
     match sim.0.phase {
         game_core::Phase::GameOver { .. }
             if end.0.mode == EndMode::Playing && sim.0.result().is_some() =>
         {
-            end.0.begin_entry();
+            if !finish.active {
+                finish.active = true;
+                finish.elapsed = 0.0;
+            }
+            finish.elapsed = (finish.elapsed + time.delta_secs()).min(WALL_CLIMB_DURATION_SECS);
+            if finish.elapsed >= WALL_CLIMB_DURATION_SECS {
+                finish.active = false;
+                end.0.begin_entry();
+            }
         }
-        _ => {}
+        _ => {
+            finish.active = false;
+            finish.elapsed = 0.0;
+        }
     }
 }
 
@@ -617,6 +677,7 @@ fn handle_end_input(
     mut frame: ResMut<FrameInput>,
     mut audio_events: ResMut<audio::AudioEvents>,
     touch: Res<TouchInput>,
+    mut launch: ResMut<LaunchSequence>,
 ) {
     match end.0.mode {
         EndMode::Playing => {}
@@ -686,6 +747,8 @@ fn handle_end_input(
                     sim.0.restart_with_difficulty(difficulty, &tuning.0);
                 }
                 end.0.mode = EndMode::Playing;
+                launch.active = true;
+                launch.elapsed = 0.0;
                 frame.state = InputState::default();
                 frame.kb = KeyboardSteering::default();
                 frame.menu_axis = MenuAxisLatch::default();
@@ -788,6 +851,7 @@ fn just_pressed_letter(keys: &ButtonInput<KeyCode>) -> Option<char> {
         .find_map(|(key, letter)| keys.just_pressed(*key).then_some(*letter))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn step_sim(
     mut sim: ResMut<Sim>,
     mut frame: ResMut<FrameInput>,
@@ -796,7 +860,13 @@ fn step_sim(
     tuning: Res<TuningRes>,
     time: Res<Time>,
     mut audio_events: ResMut<audio::AudioEvents>,
+    launch: Res<LaunchSequence>,
 ) {
+    if launch.active {
+        frame.state = InputState::default();
+        frame.gear_latch.consume();
+        return;
+    }
     let dt = time.delta_secs();
     let events = sim.0.step(&frame.state, dt, &tuning.0);
     if events.started {

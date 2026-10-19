@@ -276,6 +276,9 @@ pub fn setup(
 #[derive(Resource)]
 pub struct TurboLamp(pub Handle<StandardMaterial>);
 
+#[derive(Resource)]
+pub struct RoadsterHeadlights(pub Handle<StandardMaterial>);
+
 #[derive(Component)]
 pub struct SportsCarOrnament;
 
@@ -291,13 +294,15 @@ pub fn setup_diorama(
     });
     commands.insert_resource(TurboLamp(lamp.clone()));
     let body = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.90, 0.23, 0.20),
-        perceptual_roughness: 0.48,
+        base_color: Color::srgb(0.82, 0.85, 0.86),
+        metallic: 0.32,
+        perceptual_roughness: 0.34,
         ..default()
     });
     let body_shadow = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.55, 0.09, 0.13),
-        perceptual_roughness: 0.55,
+        base_color: Color::srgb(0.40, 0.44, 0.47),
+        metallic: 0.26,
+        perceptual_roughness: 0.44,
         ..default()
     });
     let canopy = materials.add(StandardMaterial {
@@ -317,6 +322,7 @@ pub fn setup_diorama(
         perceptual_roughness: 0.3,
         ..default()
     });
+    commands.insert_resource(RoadsterHeadlights(headlight.clone()));
     let window_glass = materials.add(StandardMaterial {
         base_color: Color::srgb(0.018, 0.032, 0.070),
         emissive: LinearRgba::new(0.004, 0.009, 0.026, 1.0),
@@ -398,52 +404,100 @@ pub fn setup_diorama(
             parent
                 .spawn((
                     Transform::from_xyz(0.048, 0.0815, 0.050)
-                        .with_rotation(Quat::from_rotation_y(100.0_f32.to_radians())),
+                        // The camera sits on +Z while the model nose is -Z.
+                        // Keep it 25 degrees off a head-on view for a front
+                        // three-quarter hero angle that reveals the wheel and
+                        // side wedge without losing the light signature.
+                        .with_rotation(Quat::from_rotation_y(155.0_f32.to_radians())),
                     Visibility::Visible,
                     SportsCarOrnament,
                 ))
                 .with_children(|car| {
+                    // Black undertray below a long, extremely low silver wedge.
                     car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.028, 0.006, 0.042))),
+                        Mesh3d(meshes.add(Cuboid::new(0.031, 0.003, 0.044))),
+                        MeshMaterial3d(tire.clone()),
+                        Transform::from_xyz(0.0, 0.003, 0.0),
+                    ));
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.029, 0.005, 0.040))),
                         MeshMaterial3d(body.clone()),
-                        Transform::from_xyz(0.0, 0.004, 0.0),
+                        Transform::from_xyz(0.0, 0.006, -0.001),
                     ));
                     car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.023, 0.004, 0.030))),
+                        Mesh3d(meshes.add(Cuboid::new(0.025, 0.004, 0.019))),
                         MeshMaterial3d(body_shadow.clone()),
-                        Transform::from_xyz(0.0, 0.008, 0.001),
+                        Transform::from_xyz(0.0, 0.009, -0.010)
+                            .with_rotation(Quat::from_rotation_x(-0.10)),
                     ));
                     car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.019, 0.005, 0.017))),
+                        Mesh3d(meshes.add(Cuboid::new(0.019, 0.005, 0.019))),
                         MeshMaterial3d(canopy.clone()),
-                        Transform::from_xyz(0.0, 0.009, -0.004),
+                        Transform::from_xyz(0.0, 0.011, -0.002)
+                            .with_rotation(Quat::from_rotation_x(-0.06)),
                     ));
-                    car.spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.025, 0.0015, 0.004))),
-                        MeshMaterial3d(body_shadow.clone()),
-                        Transform::from_xyz(0.0, 0.0105, 0.017),
-                    ));
+                    // Huge wheels with visible silver hubs.
                     for x in [-0.014, 0.014] {
                         for z in [-0.012, 0.012] {
                             car.spawn((
-                                Mesh3d(meshes.add(Cuboid::new(0.003, 0.006, 0.007))),
+                                Mesh3d(meshes.add(Cylinder::new(0.0062, 0.004))),
                                 MeshMaterial3d(tire.clone()),
-                                Transform::from_xyz(x, 0.0035, z),
+                                Transform::from_xyz(x, 0.006, z).with_rotation(
+                                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                                ),
+                            ));
+                            car.spawn((
+                                Mesh3d(meshes.add(Cylinder::new(0.0032, 0.0043))),
+                                MeshMaterial3d(body_shadow.clone()),
+                                Transform::from_xyz(x, 0.006, z).with_rotation(
+                                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                                ),
                             ));
                         }
                     }
-                    for x in [-0.007, 0.007] {
+                    // Raised rear wing, its two supports, and the uninterrupted
+                    // red blade make the model identifiable even at 4 cm long.
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.035, 0.0018, 0.004))),
+                        MeshMaterial3d(tire.clone()),
+                        Transform::from_xyz(0.0, 0.016, 0.020),
+                    ));
+                    for x in [-0.011, 0.011] {
                         car.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.006, 0.0025, 0.0015))),
-                            MeshMaterial3d(lamp.clone()),
-                            Transform::from_xyz(x, 0.0065, 0.0215),
-                        ));
-                        car.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.006, 0.0025, 0.0015))),
-                            MeshMaterial3d(headlight.clone()),
-                            Transform::from_xyz(x, 0.0065, -0.0215),
+                            Mesh3d(meshes.add(Cuboid::new(0.0018, 0.007, 0.0018))),
+                            MeshMaterial3d(tire.clone()),
+                            Transform::from_xyz(x, 0.0125, 0.019),
                         ));
                     }
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.027, 0.0016, 0.0014))),
+                        MeshMaterial3d(lamp.clone()),
+                        Transform::from_xyz(0.0, 0.009, 0.0206),
+                    ));
+                    // Four rear outlets under the light blade.
+                    for x in [-0.009, -0.003, 0.003, 0.009] {
+                        car.spawn((
+                            Mesh3d(meshes.add(Cylinder::new(0.0017, 0.0012))),
+                            MeshMaterial3d(tire.clone()),
+                            Transform::from_xyz(x, 0.006, 0.0215)
+                                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                        ));
+                    }
+                    // Thin triangular-looking front lamps are approximated by
+                    // angled light slivers on the low nose.
+                    for x in [-0.008, 0.008] {
+                        car.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(0.007, 0.0013, 0.0012))),
+                            MeshMaterial3d(headlight.clone()),
+                            Transform::from_xyz(x, 0.008, -0.0212)
+                                .with_rotation(Quat::from_rotation_y(-x.signum() * 0.18)),
+                        ));
+                    }
+                    car.spawn((
+                        Mesh3d(meshes.add(Cuboid::new(0.020, 0.0012, 0.0012))),
+                        MeshMaterial3d(headlight.clone()),
+                        Transform::from_xyz(0.0, 0.0068, -0.0214),
+                    ));
                 });
             parent.spawn((
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::ONE))),
@@ -940,27 +994,26 @@ pub fn turbo_lamp(
     sim: Res<Sim>,
     time: Res<Time>,
     lamp: Res<TurboLamp>,
+    headlights: Res<RoadsterHeadlights>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut previous: Local<Option<(Gear, bool)>>,
 ) {
     let nitro_active = crate::nitro_effects_active(&sim.0);
-    let state = (sim.0.gear(), nitro_active);
-    if !nitro_active && *previous == Some(state) {
-        return;
-    }
-    *previous = Some(state);
+    let daylight = game_core::environment::daylight(sim.0.environment_time);
+    let night = (1.0 - daylight).clamp(0.0, 1.0);
     if let Some(mut mat) = materials.get_mut(&lamp.0) {
         let on = matches!(sim.0.gear(), Gear::High) || nitro_active;
-        mat.emissive = if on {
-            if nitro_active {
-                let pulse = 0.88 + 0.12 * (time.elapsed_secs() * 7.0).sin();
-                LinearRgba::new(2.0 * pulse, 0.55 * pulse, 0.10 * pulse, 1.0)
-            } else {
-                LinearRgba::new(1.2, 0.35, 0.08, 1.0)
-            }
+        let pulse = if nitro_active {
+            0.88 + 0.12 * (time.elapsed_secs() * 7.0).sin()
         } else {
-            LinearRgba::new(0.0, 0.0, 0.0, 1.0)
+            1.0
         };
+        let drive_gain = if on { 0.55 } else { 0.0 };
+        let glow = (0.04 + night * 1.35 + drive_gain) * pulse;
+        mat.emissive = LinearRgba::new(glow * 1.45, glow * 0.07, glow * 0.025, 1.0);
+    }
+    if let Some(mut mat) = materials.get_mut(&headlights.0) {
+        let glow = 0.10 + night * 1.65;
+        mat.emissive = LinearRgba::new(glow, glow * 0.91, glow * 0.68, 1.0);
     }
 }
 

@@ -6,10 +6,18 @@
     <title>Fun to Drive</title>
     <style>
       html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
-        overscroll-behavior: none; background: #0d0e13; }
-      /* winit writes inline width/height on the canvas; !important wins and
-         stretches the render to fill the browser window */
-      canvas { display: block; width: 100vw !important; height: 100vh !important; }
+        overscroll-behavior: none; }
+      html { background: #080914; }
+      body { background:
+        radial-gradient(ellipse at 24% 8%, rgba(69,75,117,.28) 0, rgba(25,27,51,.16) 30%, transparent 58%),
+        radial-gradient(ellipse at 78% 28%, rgba(82,52,76,.16) 0, transparent 42%),
+        linear-gradient(180deg, #171a30 0%, #0d1020 48%, #070811 100%); }
+      /* Keep the toy's authored 16:10 composition on every display. Extra
+         ultrawide space becomes more of the surrounding dorm room rather
+         than stretching the car, screen, or controls. */
+      canvas { display: block; position: fixed; left: 50%; top: 50%;
+        width: min(100vw, 160vh) !important; height: min(100vh, 62.5vw) !important;
+        transform: translate(-50%, -50%); }
       #loading {
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: #9aa3b2;
@@ -54,12 +62,17 @@
         left: max(18px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); }
       #touch-driving .steer .touch-button { width: clamp(70px, 13vw, 112px); height: clamp(72px, 22vh, 118px); border-radius: 18px; font-size: 28px; }
       #touch-driving .actions { position: absolute; right: max(18px, env(safe-area-inset-right));
-        bottom: max(18px, env(safe-area-inset-bottom)); display: grid;
-        grid-template-columns: repeat(3, clamp(62px, 10vw, 92px)); gap: 10px; align-items: end; }
+        bottom: max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column;
+        width: clamp(156px, 23vw, 212px); gap: 9px; }
+      #touch-driving .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+      #touch-driving .drive-actions { display: grid; grid-template-columns: 1.08fr .92fr;
+        gap: 9px; align-items: end; }
       #touch-driving .actions .touch-button { height: clamp(54px, 15vh, 82px); border-radius: 50%; }
+      #touch-driving .quick-actions .touch-button { height: clamp(46px, 12vh, 66px);
+        border-radius: 14px; font-size: clamp(10px, 1.6vw, 14px); }
       #touch-driving .actions #touch-brake { height: clamp(72px, 21vh, 112px); }
       #touch-driving .actions #touch-shift { height: clamp(94px, 27vh, 140px); border-radius: 18px;
-        grid-row: span 2; line-height: 1.55; }
+        line-height: 1.55; }
       #touch-jump.ready { color: #ffb5e0; border-color: rgba(255,82,181,.72);
         box-shadow: 0 0 18px rgba(255,42,155,.22); }
       #touch-screen-tap { position: absolute; left: 23%; top: 16%; width: 54%; height: 48%;
@@ -77,7 +90,7 @@
       @media (pointer: fine) { #touch-toggle { opacity: .48; } }
       @media (orientation: portrait) {
         #touch-driving .steer .touch-button { width: 72px; height: 88px; }
-        #touch-driving .actions { grid-template-columns: repeat(3, 62px); }
+        #touch-driving .actions { width: 140px; }
         #touch-menu { flex-wrap: wrap; width: min(92vw, 360px); justify-content: center; }
         body.touch-enabled #rotate-device { display: flex; }
       }
@@ -105,10 +118,14 @@
         <button id="touch-right" class="touch-button" aria-label="Steer right">▶</button>
       </div>
       <div class="actions">
-        <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear">↑ HIGH<br>SHIFT<br>↓ LOW</button>
-        <button id="touch-nitro" class="touch-button">BOOST</button>
-        <button id="touch-jump" class="touch-button">JUMP</button>
-        <button id="touch-brake" class="touch-button">BRAKE</button>
+        <div class="quick-actions">
+          <button id="touch-nitro" class="touch-button">COLD-AIR</button>
+          <button id="touch-jump" class="touch-button">JUMP KICK</button>
+        </div>
+        <div class="drive-actions">
+          <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear">↑ HIGH<br>SHIFT<br>↓ LOW</button>
+          <button id="touch-brake" class="touch-button">BRAKE</button>
+        </div>
       </div>
     </div>
     <div id="touch-ui" class="touch-layer">
@@ -131,7 +148,7 @@
       <div class="wheel"></div>
       <div id="loading-text">spinning up the drum...</div>
       <div class="hint">first load prepares the game — later loads are cached</div>
-      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y nitro &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
+      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y cold-air &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
       <div class="hint">slower GPU? append <code>?quality=low</code> to disable bloom and reduce toy-view resolution</div>
     </div>
     <script>
@@ -226,7 +243,9 @@
         document.querySelectorAll('[data-difficulty]').forEach(button => button.addEventListener('pointerdown', event => {
           event.preventDefault(); state.difficulty_index = Number(button.dataset.difficulty); pulse('difficulty_seq');
         }));
-        byId('touch-start').addEventListener('pointerdown', event => { event.preventDefault(); pulse('confirm_seq'); });
+        byId('touch-start').addEventListener('pointerdown', event => {
+          event.preventDefault(); window.__ftdEnterFullscreen?.(); pulse('confirm_seq');
+        });
         byId('touch-crt').addEventListener('pointerdown', event => { event.preventDefault(); pulse('crt_seq'); });
         byId('touch-submit').addEventListener('pointerdown', event => { event.preventDefault(); pulse('submit_seq'); });
         byId('touch-again').addEventListener('pointerdown', event => { event.preventDefault(); pulse('restart_seq'); });
@@ -292,6 +311,14 @@
         const button = document.getElementById('fullscreen-toggle');
         const root = document.documentElement;
         const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+        const enterFullscreen = async () => {
+          if (fullscreenElement()) return;
+          const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+          if (!enter) return;
+          try { await enter.call(root, { navigationUI: 'hide' }); }
+          catch (_) { try { await enter.call(root); } catch (_) {} }
+        };
+        window.__ftdEnterFullscreen = enterFullscreen;
         const syncButton = () => {
           const active = Boolean(fullscreenElement());
           const label = active ? 'Exit fullscreen' : 'Enter fullscreen';
@@ -305,8 +332,7 @@
               const exit = document.exitFullscreen || document.webkitExitFullscreen;
               await exit.call(document);
             } else {
-              const enter = root.requestFullscreen || root.webkitRequestFullscreen;
-              await enter.call(root, { navigationUI: 'hide' });
+              await enterFullscreen();
             }
           } catch (error) {
             button.title = `Fullscreen unavailable: ${error.message}`;
@@ -314,6 +340,11 @@
         });
         document.addEventListener('fullscreenchange', syncButton);
         document.addEventListener('webkitfullscreenchange', syncButton);
+        window.addEventListener('keydown', event => {
+          if (event.key === 'Enter' && window.__FTD_STATE__?.end_mode === 'difficulty_select') {
+            enterFullscreen();
+          }
+        }, { capture: true });
         syncButton();
       })();
     </script>

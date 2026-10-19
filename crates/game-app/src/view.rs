@@ -110,10 +110,22 @@ struct PalmPart;
 struct CarPart;
 
 #[derive(Component)]
+struct PlayerRearLight;
+
+#[derive(Component)]
 struct PlayerCarRoot;
 
 #[derive(Component)]
 struct PlayerCarShadow;
+
+#[derive(Component)]
+struct WallClimbSurface;
+
+#[derive(Component)]
+struct WallClimbSeam(u8);
+
+#[derive(Component)]
+struct WallClimbWindow(u8);
 
 #[derive(Component)]
 struct NitroExhaust {
@@ -532,7 +544,7 @@ fn spawn_instruments(commands: &mut Commands) {
         CooldownFill,
     ));
     commands.spawn((
-        Text2d::new("BOOST"),
+        Text2d::new("THRUST"),
         TextFont {
             font_size: FontSize::Px(11.0),
             ..default()
@@ -868,6 +880,31 @@ pub fn setup(mut commands: Commands) {
         let _ = side;
     }
 
+    // Terminal Roadster set piece: a building facade unfolds from the
+    // horizon after time expires, then scrolls under the suction-equipped car.
+    commands.spawn((
+        Sprite::from_color(Color::srgb(0.075, 0.090, 0.125), Vec2::ONE),
+        Transform::from_xyz(0.0, VIEW_TOP, 0.32),
+        Visibility::Hidden,
+        WallClimbSurface,
+    ));
+    for index in 0..5u8 {
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.18, 0.22, 0.29), Vec2::new(3.0, 644.0)),
+            Transform::from_xyz(0.0, 0.0, 0.34),
+            Visibility::Hidden,
+            WallClimbSeam(index),
+        ));
+    }
+    for index in 0..24u8 {
+        commands.spawn((
+            Sprite::from_color(Color::srgb(0.36, 0.70, 0.92), Vec2::new(54.0, 16.0)),
+            Transform::from_xyz(0.0, 0.0, 0.35),
+            Visibility::Hidden,
+            WallClimbWindow(index),
+        ));
+    }
+
     // ---- palms (pooled, ride the loop) ----
     for _ in 0..PALM_POOL {
         // trunk + fronds
@@ -927,6 +964,10 @@ pub fn setup(mut commands: Commands) {
     }
 
     // ---- the fixed player car "decal" (composite) ----
+    // A tiny rear/top hybrid of the new Roadster: silver wedge, black glass
+    // canopy, full-width red light blade, four outlets, huge dark wheels, and
+    // a raised wing. Those high-contrast cues survive the toy screen's low
+    // resolution and the optional CRT pass better than fine body detailing.
     commands.spawn((
         Sprite::from_color(Color::srgba(0.0, 0.0, 0.0, 0.28), Vec2::new(92.0, 12.0)),
         Transform::from_xyz(0.0, CAR_Y - 18.0, 0.30),
@@ -939,33 +980,69 @@ pub fn setup(mut commands: Commands) {
             PlayerCarRoot,
         ))
         .with_children(|car| {
+            // Raised wing behind the rear deck.
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.055, 0.065, 0.080), Vec2::new(96.0, 4.0)),
+                Transform::from_xyz(0.0, -21.0, 0.02),
+                CarPart,
+            ));
+            for x in [-32.0f32, 32.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.08, 0.09, 0.11), Vec2::new(4.0, 8.0)),
+                    Transform::from_xyz(x, -17.0, 0.01),
+                    CarPart,
+                ));
+            }
+            // Oversized wheels frame the low wedge.
+            for x in [-43.0f32, 43.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.025, 0.030, 0.040), Vec2::new(17.0, 24.0)),
+                    Transform::from_xyz(x, -2.0, -0.04),
+                    CarPart,
+                ));
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.28, 0.31, 0.34), Vec2::new(7.0, 13.0)),
+                    Transform::from_xyz(x, -2.0, -0.03),
+                    CarPart,
+                ));
+            }
+            // Black diffuser and silver body layers create the stepped rear.
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.035, 0.045, 0.060), Vec2::new(84.0, 10.0)),
+                Transform::from_xyz(0.0, -14.0, 0.00),
+                CarPart,
+            ));
             car.spawn((
                 Sprite::from_color(
-                    Color::srgb(0.86, 0.10, 0.08),
-                    Vec2::new(PLAYER_CAR_WIDTH_PX - 4.0, 30.0),
+                    Color::srgb(0.78, 0.82, 0.84),
+                    Vec2::new(PLAYER_CAR_WIDTH_PX - 8.0, 23.0),
                 ),
-                Transform::from_xyz(0.0, -4.0, 0.0),
+                Transform::from_xyz(0.0, -2.5, 0.02),
                 CarPart,
             ));
             car.spawn((
-                Sprite::from_color(Color::srgb(0.90, 0.16, 0.10), Vec2::new(78.0, 12.0)),
-                Transform::from_xyz(0.0, 10.0, 0.0),
+                Sprite::from_color(Color::srgb(0.91, 0.93, 0.92), Vec2::new(73.0, 14.0)),
+                Transform::from_xyz(0.0, 10.0, 0.03),
+                CarPart,
+            ));
+            // Panoramic black canopy and the signature razor rear light bar.
+            car.spawn((
+                Sprite::from_color(Color::srgb(0.035, 0.060, 0.085), Vec2::new(43.0, 14.0)),
+                Transform::from_xyz(0.0, 8.0, 0.05),
                 CarPart,
             ));
             car.spawn((
-                Sprite::from_color(Color::srgb(0.12, 0.16, 0.28), Vec2::new(40.0, 14.0)),
-                Transform::from_xyz(0.0, 2.0, 0.1),
+                Sprite::from_color(Color::srgb(1.0, 0.035, 0.025), Vec2::new(78.0, 3.0)),
+                Transform::from_xyz(0.0, -9.0, 0.07),
                 CarPart,
+                PlayerRearLight,
             ));
-            car.spawn((
-                Sprite::from_color(Color::srgb(0.05, 0.05, 0.06), Vec2::new(96.0, 8.0)),
-                Transform::from_xyz(0.0, 17.0, -0.1),
-                CarPart,
-            ));
-            for wx in [-36.0f32, 36.0] {
+            // Four dark round-ish jet/exhaust openings are readable as four
+            // square pixels at this scale and echo the reference rear fascia.
+            for x in [-24.0f32, -8.0, 8.0, 24.0] {
                 car.spawn((
-                    Sprite::from_color(Color::srgb(0.07, 0.07, 0.08), Vec2::new(18.0, 14.0)),
-                    Transform::from_xyz(wx, -14.0, -0.05),
+                    Sprite::from_color(Color::srgb(0.01, 0.015, 0.020), Vec2::new(7.0, 5.0)),
+                    Transform::from_xyz(x, -14.0, 0.08),
                     CarPart,
                 ));
             }
@@ -985,7 +1062,7 @@ pub fn setup(mut commands: Commands) {
         }
     }
 
-    // Three-cell nitro meter, rendered into the toy screen. It must be filled
+    // Three-cell cold-air meter, rendered into the toy screen. It must be filled
     // completely before use; firing consumes all three cells at once.
     commands.spawn((
         Sprite::from_color(Color::srgba(1.0, 0.78, 0.12, 0.0), Vec2::new(228.0, 42.0)),
@@ -998,9 +1075,9 @@ pub fn setup(mut commands: Commands) {
         HudPanel,
     ));
     commands.spawn((
-        Text2d::new("NITRO Y"),
+        Text2d::new("COLD-AIR Y"),
         TextFont {
-            font_size: FontSize::Px(16.0),
+            font_size: FontSize::Px(12.0),
             ..default()
         },
         TextColor(Color::srgb(1.0, 0.86, 0.34)),
@@ -1737,29 +1814,166 @@ fn jump_pose(progress: f32) -> JumpPose {
     }
 }
 
+fn cold_air_hop_pose(progress: f32) -> JumpPose {
+    if !(0.0..1.0).contains(&progress) {
+        return jump_pose(0.0);
+    }
+    let height_unit = (std::f32::consts::PI * progress).sin().max(0.0);
+    JumpPose {
+        height: 42.0 * height_unit,
+        longitudinal_spin: 0.0,
+        scale: Vec3::new(1.0 - 0.025 * height_unit, 1.0 + 0.045 * height_unit, 1.0),
+        shadow_scale: 1.0 - 0.28 * height_unit,
+        shadow_alpha: 0.28 * (1.0 - 0.48 * height_unit),
+    }
+}
+
+fn launch_drop_pose(progress: f32) -> (f32, f32) {
+    let descent = smoothstep((progress / 0.82).clamp(0.0, 1.0));
+    let height = (VIEW_TOP + 82.0 - CAR_Y) * (1.0 - descent);
+    let jet = 1.0 - smoothstep(((progress - 0.68) / 0.28).clamp(0.0, 1.0));
+    (height, jet)
+}
+
 #[allow(clippy::type_complexity)]
 fn sync_jump_car(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
+    finish: Res<crate::FinishSequence>,
+    launch: Res<crate::LaunchSequence>,
     mut car: Query<&mut Transform, With<PlayerCarRoot>>,
     mut shadow: Query<
         (&mut Transform, &mut Sprite),
         (With<PlayerCarShadow>, Without<PlayerCarRoot>),
     >,
 ) {
-    let pose = jump_pose(sim.0.jump_progress(&tuning.0));
+    let pose = if sim.0.jump_active() {
+        jump_pose(sim.0.jump_progress(&tuning.0))
+    } else {
+        cold_air_hop_pose(sim.0.cold_air_hop_progress(&tuning.0))
+    };
+    let finish_progress = finish.progress();
+    let climb = smoothstep(((finish_progress - 0.40) / 0.60).clamp(0.0, 1.0));
+    let (launch_height, _) = if launch.active {
+        launch_drop_pose(launch.progress())
+    } else {
+        (0.0, 0.0)
+    };
     if let Ok(mut transform) = car.single_mut() {
-        transform.translation = Vec3::new(0.0, CAR_Y + pose.height, 0.5);
+        let finish_height = (205.0 - CAR_Y) * climb;
+        transform.translation = Vec3::new(
+            0.0,
+            CAR_Y + pose.height + finish_height + launch_height,
+            0.5,
+        );
         // The sprite faces up-screen, so its local Y vector runs from rear to
         // nose. Rotate around that longitudinal axis for a barrel-style Jump
         // Kick; rotating around Z would merely spin the car flat on-screen.
         transform.rotation = Quat::from_axis_angle(Vec3::Y, pose.longitudinal_spin);
-        transform.scale = pose.scale;
+        transform.scale = pose.scale * (1.0 - 0.18 * climb);
     }
     if let Ok((mut transform, mut sprite)) = shadow.single_mut() {
         transform.scale = Vec3::new(pose.shadow_scale, pose.shadow_scale, 1.0);
-        sprite.color = Color::srgba(0.0, 0.0, 0.0, pose.shadow_alpha);
+        let altitude_fade = (1.0 - launch_height / 520.0).clamp(0.0, 1.0);
+        sprite.color = Color::srgba(
+            0.0,
+            0.0,
+            0.0,
+            pose.shadow_alpha * (1.0 - climb) * altitude_fade,
+        );
     }
+}
+
+fn smoothstep(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_wall_climb(
+    finish: Res<crate::FinishSequence>,
+    mut surface: Query<
+        (&mut Transform, &mut Sprite, &mut Visibility),
+        (
+            With<WallClimbSurface>,
+            Without<WallClimbSeam>,
+            Without<WallClimbWindow>,
+        ),
+    >,
+    mut seams: Query<
+        (&WallClimbSeam, &mut Transform, &mut Visibility),
+        (Without<WallClimbSurface>, Without<WallClimbWindow>),
+    >,
+    mut windows: Query<
+        (
+            &WallClimbWindow,
+            &mut Transform,
+            &mut Sprite,
+            &mut Visibility,
+        ),
+        (Without<WallClimbSurface>, Without<WallClimbSeam>),
+    >,
+) {
+    let progress = finish.progress();
+    if !finish.active {
+        for (_, _, mut visibility) in &mut surface {
+            *visibility = Visibility::Hidden;
+        }
+        for (_, _, mut visibility) in &mut seams {
+            *visibility = Visibility::Hidden;
+        }
+        for (_, _, _, mut visibility) in &mut windows {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    }
+
+    // The lower edge sweeps from the horizon to the player, reading as the
+    // roadway pitching toward a full vertical plane rather than a hard cut.
+    let reveal = smoothstep((progress / 0.43).clamp(0.0, 1.0));
+    let wall_bottom = HORIZON_Y + (-322.0 - HORIZON_Y) * reveal;
+    let wall_top = HORIZON_Y + (VIEW_TOP - HORIZON_Y) * reveal;
+    let wall_height = wall_top - wall_bottom;
+    for (mut transform, mut sprite, mut visibility) in &mut surface {
+        transform.translation.y = wall_bottom + wall_height * 0.5;
+        sprite.custom_size = Some(Vec2::new(960.0, wall_height.max(1.0)));
+        *visibility = Visibility::Visible;
+    }
+
+    let scroll = smoothstep(((progress - 0.38) / 0.62).clamp(0.0, 1.0)) * 180.0;
+    for (seam, mut transform, mut visibility) in &mut seams {
+        transform.translation.x = -384.0 + seam.0 as f32 * 192.0;
+        transform.translation.y = wall_bottom + wall_height * 0.5;
+        transform.scale.y = wall_height / 644.0;
+        *visibility = Visibility::Visible;
+    }
+    for (window, mut transform, mut sprite, mut visibility) in &mut windows {
+        let column = (window.0 % 6) as f32;
+        let row = (window.0 / 6) as f32;
+        transform.translation.x = -390.0 + column * 156.0;
+        transform.translation.y = 260.0 - row * 145.0 - (scroll % 145.0);
+        let shown = transform.translation.y > wall_bottom + 12.0
+            && transform.translation.y < wall_top - 8.0;
+        *visibility = if shown {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        let pulse = 0.72 + 0.18 * ((window.0 as f32 * 1.7 + progress * 5.0).sin());
+        sprite.color = Color::srgb(0.26 * pulse, 0.64 * pulse, 0.92 * pulse);
+    }
+}
+
+fn sync_player_rear_light(sim: Res<Sim>, mut light: Query<&mut Sprite, With<PlayerRearLight>>) {
+    let daylight = game_core::environment::daylight(sim.0.environment_time);
+    let night = (1.0 - daylight).clamp(0.0, 1.0);
+    let Ok(mut sprite) = light.single_mut() else {
+        return;
+    };
+    // The whole diffuser remains visible by day and crosses the HDR threshold
+    // at night, so CRT bloom reads as one uninterrupted blade rather than two
+    // conventional tail lamps.
+    sprite.color = Color::linear_rgb(0.58 + night * 1.85, 0.008 + night * 0.018, 0.005);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1825,19 +2039,26 @@ fn sync_nitro_visual_intensity(
 fn sync_nitro_exhaust(
     sim: Res<Sim>,
     visuals: Res<NitroVisuals>,
+    launch: Res<crate::LaunchSequence>,
     time: Res<Time>,
     mut jets: Query<(&NitroExhaust, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
-    if visuals.intensity <= 0.01 || sim.0.jump_active() {
+    let (launch_height, launch_jet) = if launch.active {
+        launch_drop_pose(launch.progress())
+    } else {
+        (0.0, 0.0)
+    };
+    let intensity = visuals.intensity.max(launch_jet);
+    if intensity <= 0.01 || sim.0.jump_active() {
         for (_, _, _, mut visibility) in &mut jets {
             *visibility = Visibility::Hidden;
         }
         return;
     }
     for (jet, mut transform, mut sprite, mut visibility) in &mut jets {
-        let shape = exhaust_shape(jet.layer, jet.side, time.elapsed_secs(), visuals.intensity);
+        let shape = exhaust_shape(jet.layer, jet.side, time.elapsed_secs(), intensity);
         transform.translation.x = jet.side * 27.0;
-        transform.translation.y = shape.center_y;
+        transform.translation.y = shape.center_y + launch_height;
         transform.rotation = Quat::from_rotation_z(shape.sway * jet.side);
         sprite.custom_size = Some(shape.size);
         sprite.color = match jet.layer {
@@ -2127,15 +2348,15 @@ fn sync_hud(
         } else if view.mode == crate::toy_view::ViewMode::Toy {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS drive | Q low / E high | Y nitro | R restart | T flat | L toy look"
+                    "ARROWS drive | Q low / E high | Y cold-air | R restart | T flat | L toy look"
                 }
-                Phase::Running => "Y nitro | T flat view | L toy look",
+                Phase::Running => "Y cold-air | T flat view | L toy look",
                 Phase::GameOver { .. } => "",
             }
         } else {
             match &sim.0.phase {
                 Phase::Ready => {
-                    "ARROWS steer | Q/E gear | Y nitro | B/SPACE jump | R restart | T toy"
+                    "ARROWS steer | Q/E gear | Y cold-air | B/SPACE jump | R restart | T toy"
                 }
                 Phase::Running | Phase::GameOver { .. } => "",
             }
@@ -3001,6 +3222,7 @@ pub fn add_view_systems(app: &mut App) {
             sync_nitro_pickup,
             sync_jump_pickup,
             sync_jump_car,
+            sync_player_rear_light,
             sync_nitro_exhaust,
             sync_nitro_speed_lines,
             sync_flash,
@@ -3014,6 +3236,7 @@ pub fn add_view_systems(app: &mut App) {
         )
             .in_set(ViewSet::Presentation),
     );
+    app.add_systems(Update, sync_wall_climb.in_set(ViewSet::Presentation));
 }
 
 #[cfg(test)]
@@ -3293,6 +3516,38 @@ mod tests {
         assert_eq!(end.height, 0.0);
         assert_eq!(end.longitudinal_spin, 0.0);
         assert_eq!(end.scale, Vec3::ONE);
+    }
+
+    #[test]
+    fn cold_air_crest_hop_is_shorter_and_does_not_barrel_roll() {
+        let crest = cold_air_hop_pose(0.5);
+        assert!(crest.height > 40.0);
+        assert!(crest.height < jump_pose(0.5).height * 0.5);
+        assert_eq!(crest.longitudinal_spin, 0.0);
+        assert!(crest.shadow_scale < 1.0);
+        assert_eq!(cold_air_hop_pose(1.0), jump_pose(0.0));
+    }
+
+    #[test]
+    fn launch_drop_lands_before_its_twin_jets_taper_out() {
+        let (start_height, start_jet) = launch_drop_pose(0.0);
+        let (landing_height, landing_jet) = launch_drop_pose(0.82);
+        let (end_height, end_jet) = launch_drop_pose(1.0);
+        assert!(start_height > VIEW_TOP - CAR_Y);
+        assert_eq!(start_jet, 1.0);
+        assert_eq!(landing_height, 0.0);
+        assert!(landing_jet > 0.0);
+        assert_eq!(end_height, 0.0);
+        assert_eq!(end_jet, 0.0);
+    }
+
+    #[test]
+    fn smoothstep_clamps_and_eases_wall_transition() {
+        assert_eq!(smoothstep(-1.0), 0.0);
+        assert_eq!(smoothstep(0.0), 0.0);
+        assert!((smoothstep(0.5) - 0.5).abs() < 1e-6);
+        assert_eq!(smoothstep(1.0), 1.0);
+        assert_eq!(smoothstep(2.0), 1.0);
     }
 
     #[test]

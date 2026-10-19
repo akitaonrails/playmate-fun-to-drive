@@ -86,6 +86,8 @@ pub struct StepEvents {
     pub jump_collected: bool,
     pub jump_started: bool,
     pub jump_landed: bool,
+    pub cold_air_hop_started: bool,
+    pub cold_air_hop_landed: bool,
     pub high_rejected: bool,
     pub gear_changed: Option<GearChange>,
 }
@@ -242,6 +244,9 @@ pub struct Game {
     /// Single stored Jump Kick and its deterministic per-cycle pickup.
     pub jump_charge: bool,
     pub jump_t: f32,
+    /// Short automatic crest hop while the cold-air thruster is active.
+    pub cold_air_hop_t: f32,
+    cold_air_hop_lockout_t: f32,
     pub next_jump_distance: Option<f32>,
     pub next_jump_lane: f32,
     jump_pickup_cycle: u64,
@@ -301,6 +306,8 @@ impl Game {
             nitro_pickup_index: 0,
             jump_charge: false,
             jump_t: 0.0,
+            cold_air_hop_t: 0.0,
+            cold_air_hop_lockout_t: 0.0,
             next_jump_distance: None,
             next_jump_lane: 0.0,
             jump_pickup_cycle: 0,
@@ -470,6 +477,18 @@ impl Game {
         }
     }
 
+    pub fn cold_air_hop_active(&self) -> bool {
+        self.cold_air_hop_t > 0.0
+    }
+
+    pub fn cold_air_hop_progress(&self, t: &Tuning) -> f32 {
+        if self.cold_air_hop_t <= 0.0 {
+            0.0
+        } else {
+            (1.0 - self.cold_air_hop_t / t.cold_air_hop_duration_secs).clamp(0.0, 1.0)
+        }
+    }
+
     pub fn jump_pickup_ahead(&self) -> Option<f32> {
         (!self.jump_charge)
             .then_some(self.next_jump_distance?)
@@ -502,10 +521,18 @@ impl Game {
         hash ^= hash >> 30;
         hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
         hash ^= hash >> 27;
-        if hash % 100 >= u64::from(t.jump_spawn_chance_percent) {
+        let easy_intro = self.difficulty == Difficulty::Easy && cycle == 0;
+        if !easy_intro && hash % 100 >= u64::from(t.jump_spawn_chance_percent) {
             return None;
         }
-        let phase = 0.28 + ((hash.rotate_left(17) % 47) as f32 / 100.0);
+        let phase = if easy_intro {
+            // Guarantee that Easy teaches the rare item during its first
+            // minute, even after accounting for the slower speed multiplier
+            // and the opening acceleration ramp.
+            0.14 + ((hash.rotate_left(17) % 18) as f32 / 100.0)
+        } else {
+            0.28 + ((hash.rotate_left(17) % 47) as f32 / 100.0)
+        };
         let distance = (cycle as f32 + phase) * DAY_SECS * t.scroll_speed_low;
         let lanes = [-t.jump_lane_offset, 0.0, t.jump_lane_offset];
         let lane = lanes[(hash.rotate_left(41) % lanes.len() as u64) as usize];
@@ -629,6 +656,8 @@ impl Game {
         self.next_nitro_lane = Self::nitro_lane(self.seed, 0, t);
         self.jump_charge = false;
         self.jump_t = 0.0;
+        self.cold_air_hop_t = 0.0;
+        self.cold_air_hop_lockout_t = 0.0;
         self.jump_start_distance = 0.0;
         self.schedule_jump_pickup_from(0, t);
         self.result = None;
@@ -708,11 +737,35 @@ impl Game {
             self.nitro_t = t.nitro_duration_secs;
             ev.nitro_started = true;
         }
-        if input.jump && self.jump_charge && self.jump_t <= 0.0 && self.bump_t <= 0.0 {
+        if input.jump
+            && self.jump_charge
+            && self.jump_t <= 0.0
+            && self.cold_air_hop_t <= 0.0
+            && self.bump_t <= 0.0
+        {
             self.jump_charge = false;
             self.jump_t = t.jump_duration_secs;
             self.jump_start_distance = self.distance;
             ev.jump_started = true;
+        }
+        let grade = self.road_grade();
+        let grade_ahead = self
+            .road
+            .grade_at(self.loop_pos() + t.cold_air_hop_lookahead_m);
+        if self.nitro_t > 0.0
+            && self.cold_air_hop_t <= 0.0
+            && self.cold_air_hop_lockout_t <= 0.0
+            && self.jump_t <= 0.0
+            && self.bump_t <= 0.0
+            && self.speed >= self.low_speed_target(t) * 0.8
+            && grade >= t.cold_air_hop_min_grade
+            && grade_ahead <= 0.0
+        {
+            self.cold_air_hop_t = t.cold_air_hop_duration_secs;
+            // A lockout longer than the airborne window prevents the same
+            // broad crest from launching the car twice at unusually low speed.
+            self.cold_air_hop_lockout_t = t.cold_air_hop_duration_secs + 0.8;
+            ev.cold_air_hop_started = true;
         }
 
         // Timer boundaries split one outer fixed step into constant-target
@@ -725,6 +778,7 @@ impl Game {
             let nitro_active = self.nitro_t > 0.0;
             let bump_active = self.bump_t > 0.0;
             let jump_active = self.jump_t > 0.0;
+            let cold_air_hop_active = self.cold_air_hop_t > 0.0;
             let mut interval = remaining;
             if nitro_active {
                 interval = interval.min(self.nitro_t);
@@ -735,6 +789,9 @@ impl Game {
             if jump_active {
                 interval = interval.min(self.jump_t);
             }
+            if cold_air_hop_active {
+                interval = interval.min(self.cold_air_hop_t);
+            }
 
             self.integrate_running_interval(
                 input,
@@ -744,6 +801,7 @@ impl Game {
                 nitro_active,
                 bump_active,
                 jump_active,
+                cold_air_hop_active,
                 &mut obstacle_collision,
                 &mut obstacle_bump_dir,
             );
@@ -771,8 +829,16 @@ impl Game {
                     self.resolve_jump_landing(t, &mut obstacle_collision, &mut obstacle_bump_dir);
                 }
             }
+            if cold_air_hop_active {
+                self.cold_air_hop_t = (self.cold_air_hop_t - interval).max(0.0);
+                if self.cold_air_hop_t <= 1e-5 {
+                    self.cold_air_hop_t = 0.0;
+                    ev.cold_air_hop_landed = true;
+                }
+            }
             remaining = (remaining - interval).max(0.0);
         }
+        self.cold_air_hop_lockout_t = (self.cold_air_hop_lockout_t - dt).max(0.0);
 
         // Preserve the outer fixed-step contract: all encounters are counted,
         // but collectively cause at most one physical obstacle impulse.
@@ -796,6 +862,7 @@ impl Game {
         nitro_active: bool,
         bump_active: bool,
         jump_active: bool,
+        cold_air_hop_active: bool,
         obstacle_collision: &mut bool,
         obstacle_bump_dir: &mut f32,
     ) {
@@ -854,6 +921,8 @@ impl Game {
         self.road_x += (curve_target - self.road_x) * drift;
         let steer_factor = if jump_active {
             t.jump_air_steer_factor
+        } else if cold_air_hop_active {
+            t.cold_air_hop_air_steer_factor
         } else {
             1.0
         };
@@ -920,7 +989,7 @@ impl Game {
                 continue;
             }
             let x_eff = self.hazard_x_at(h, 0.0, t) + self.road_x;
-            if jump_active {
+            if jump_active || cold_air_hop_active {
                 if h.kind == HazardKind::Oncoming {
                     self.cars_passed = self.cars_passed.saturating_add(crossings);
                 }
@@ -989,6 +1058,8 @@ impl Game {
         // the player back on the road instead of freezing a mid-air pose when
         // the countdown expires during a Jump Kick.
         self.jump_t = 0.0;
+        self.cold_air_hop_t = 0.0;
+        self.cold_air_hop_lockout_t = 0.0;
         self.phase = Phase::GameOver {
             reason: EndReason::Time,
         };
@@ -1084,6 +1155,23 @@ mod tests {
             (6..=18).contains(&present),
             "rare schedule count: {present}"
         );
+    }
+
+    #[test]
+    fn easy_guarantees_its_first_jump_pickup_inside_the_first_minute() {
+        let t = Tuning::default();
+        for seed in 0..128 {
+            let game = Game::new(seed, Difficulty::Easy, &t);
+            let distance = game
+                .next_jump_distance
+                .expect("Easy must always schedule a cycle-zero tutorial pickup");
+            let cruise_secs = distance / (t.scroll_speed_low * t.speed_easy_multiplier);
+            assert!(
+                cruise_secs < 45.0,
+                "seed {seed} scheduled at {cruise_secs}s"
+            );
+            assert_eq!(game.jump_pickup_cycle, 0);
+        }
     }
 
     #[test]
@@ -1396,6 +1484,56 @@ mod tests {
             downhill.speed - uphill.speed < 1.0,
             "hills should stay subtle"
         );
+    }
+
+    #[test]
+    fn active_cold_air_launches_once_over_a_crest() {
+        let t = Tuning::default();
+        let mut road = RoadLoop::generate(&mut crate::Rng::new(912));
+        road.hazards.clear();
+        let crest = (0..crate::road::CURVE_SAMPLES * 4)
+            .map(|i| road.length * i as f32 / (crate::road::CURVE_SAMPLES * 4) as f32)
+            .find(|position| {
+                road.grade_at(*position) >= t.cold_air_hop_min_grade
+                    && road.grade_at(*position + t.cold_air_hop_lookahead_m) <= 0.0
+            })
+            .expect("generated rolling road should contain a launchable crest");
+        let mut game = Game::with_road(912, road, Difficulty::Hard, &t);
+        game.start_run(&t);
+        game.distance = crest;
+        game.speed = t.scroll_speed_low;
+        game.nitro_t = 2.0;
+
+        let event = game.step(&idle(), DT, &t);
+        assert!(event.cold_air_hop_started);
+        assert!(game.cold_air_hop_active());
+        assert!(game.cold_air_hop_progress(&t) > 0.0);
+
+        let mut starts = 1;
+        for _ in 0..120 {
+            starts += usize::from(game.step(&idle(), DT, &t).cold_air_hop_started);
+        }
+        assert_eq!(starts, 1, "one broad crest must not retrigger the launch");
+    }
+
+    #[test]
+    fn crest_does_not_launch_without_cold_air() {
+        let t = Tuning::default();
+        let mut road = RoadLoop::generate(&mut crate::Rng::new(913));
+        road.hazards.clear();
+        let crest = (0..crate::road::CURVE_SAMPLES * 4)
+            .map(|i| road.length * i as f32 / (crate::road::CURVE_SAMPLES * 4) as f32)
+            .find(|position| {
+                road.grade_at(*position) >= t.cold_air_hop_min_grade
+                    && road.grade_at(*position + t.cold_air_hop_lookahead_m) <= 0.0
+            })
+            .unwrap();
+        let mut game = Game::with_road(913, road, Difficulty::Hard, &t);
+        game.start_run(&t);
+        game.distance = crest;
+        game.speed = t.scroll_speed_low;
+        assert!(!game.step(&idle(), DT, &t).cold_air_hop_started);
+        assert!(!game.cold_air_hop_active());
     }
 
     #[test]
@@ -2705,6 +2843,9 @@ mod tests {
     #[test]
     fn harder_difficulties_enable_more_lane_changes_in_the_horizon_band() {
         let t = Tuning::default();
+        assert_eq!(t.traffic_easy.chance_percent, 14);
+        assert_eq!(t.traffic_medium.chance_percent, 25);
+        assert_eq!(t.traffic_hard.chance_percent, 35);
         let mut totals = [0usize; 3];
         for seed in 1..=24 {
             for (index, difficulty) in Difficulty::ALL.into_iter().enumerate() {

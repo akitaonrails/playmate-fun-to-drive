@@ -8,7 +8,7 @@ milestone (docs/PLAN.md).
 ## [0.5.0] — 2026-10-18
 
 - Added optional multi-touch mobile controls with safe-area-aware steering,
-  brake, gear swipe, nitro, Jump Kick, pause, difficulty/CRT menus, initials,
+  brake, gear swipe, cold-air, Jump Kick, pause, difficulty/CRT menus, initials,
   and restart controls. Touch mode persists locally and portrait devices get a
   clear landscape-orientation prompt.
 - Added the rare once-per-day/night-cycle Jump Kick collectible. B/gamepad B
@@ -30,6 +30,36 @@ milestone (docs/PLAN.md).
   gated descending rumble, replacing the strange sustained low drone.
 - Kept touch controls functional when browser storage is unavailable; the
   toggle falls back to session-only state instead of aborting the adapter.
+- Redesigned both player-car representations around the new Tesla Roadster's
+  recognizable low silver wedge, black canopy, full-width rear light blade,
+  four outlets, oversized wheels, and raised wing while retaining the game's
+  pixel-art and low-poly visual language.
+- Nudged distant traffic lane-change frequency from 12/22/32% to 14/25/35%
+  across Easy/Medium/Hard, without moving the near-player lane lockout.
+- Made the in-game Roadster's complete rear diffuser blade illuminate at night;
+  the toy-top model now faces the camera at a front three-quarter hero angle
+  and reproduces the paired lamps plus thin white reveal-style light strip.
+- Renamed the player-facing boost system to COLD-AIR for the Roadster's
+  cold-air thrusters; internal telemetry keys remain stable for QA tooling.
+- Increased the road's rolling elevation and gently strengthened uphill drag;
+  an active COLD-AIR boost now gives the Roadster a short automatic hop when it
+  crests a rise, without consuming or interfering with the Jump Kick item.
+- Added a post-countdown Roadster finale: the road rises into a full vertical
+  building facade and the top-down car climbs it using its suction system
+  before the score and three-letter name entry appear.
+- Added a run-opening sky drop with two layered cold-air jet streams; the
+  simulation remains still until the Roadster lands, then begins normal
+  automatic acceleration in LOW gear.
+- Guaranteed an early Jump Kick pickup in Easy mode within the first minute,
+  while leaving later spawns and Medium/Hard rarity unchanged.
+- Reorganized the mobile driving overlay so dedicated COLD-AIR and JUMP KICK
+  buttons sit together above the right-thumb gear swipe and brake area.
+- Preserved the authored 16:10 composition on ultrawide monitors and phones;
+  extra horizontal space now extends the moody dorm-room backdrop instead of
+  stretching the toy, car, or game screen.
+- Made the first touch START or keyboard Enter confirmation request fullscreen
+  automatically, while retaining the fullscreen toggle for entering or exiting
+  later; browser gesture rules still apply to gamepad-only starts.
 
 ## [0.4.0] — 2026-10-18
 

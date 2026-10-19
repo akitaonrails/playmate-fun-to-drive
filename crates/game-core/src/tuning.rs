@@ -71,6 +71,11 @@ pub struct Tuning {
     pub jump_speed_multiplier: f32,
     pub jump_air_steer_factor: f32,
     pub jump_landing_window_m: f32,
+    /// Automatic, smaller hop when an active cold-air boost crests a hill.
+    pub cold_air_hop_duration_secs: f32,
+    pub cold_air_hop_lookahead_m: f32,
+    pub cold_air_hop_min_grade: f32,
+    pub cold_air_hop_air_steer_factor: f32,
     /// Difficulty-specific oncoming lane changes. Easy changes least often
     /// and across the longest/farthest horizon band; Hard is more active.
     pub traffic_easy: TrafficMotion,
@@ -131,8 +136,8 @@ impl Default for Tuning {
             gear_ramp_secs: 0.6,
             brake_ramp_secs: 1.05,
             curve_gain: 1.20,
-            slope_speed_gain: 1.6,
-            slope_speed_min_factor: 0.90,
+            slope_speed_gain: 1.75,
+            slope_speed_min_factor: 0.89,
             slope_speed_max_factor: 1.10,
             drift_rate: 0.75,
             curve_drift_speed_cap: 1.60,
@@ -159,15 +164,19 @@ impl Default for Tuning {
             jump_speed_multiplier: 1.12,
             jump_air_steer_factor: 0.60,
             jump_landing_window_m: 2.40,
+            cold_air_hop_duration_secs: 0.58,
+            cold_air_hop_lookahead_m: 7.5,
+            cold_air_hop_min_grade: 0.012,
+            cold_air_hop_air_steer_factor: 0.82,
             traffic_easy: TrafficMotion {
-                chance_percent: 12,
+                chance_percent: 14,
                 change_start_m: 42.0,
                 change_end_m: 22.0,
                 ..TrafficMotion::default()
             },
             traffic_medium: TrafficMotion::default(),
             traffic_hard: TrafficMotion {
-                chance_percent: 32,
+                chance_percent: 35,
                 change_start_m: 34.0,
                 change_end_m: 18.0,
                 ..TrafficMotion::default()
@@ -331,6 +340,18 @@ impl Tuning {
         }
         if !(0.5..=5.0).contains(&self.jump_landing_window_m) {
             return Err("jump_landing_window_m out of [0.5, 5]");
+        }
+        if !(0.3..=1.2).contains(&self.cold_air_hop_duration_secs) {
+            return Err("cold_air_hop_duration_secs out of [0.3, 1.2]");
+        }
+        if !(2.0..=20.0).contains(&self.cold_air_hop_lookahead_m) {
+            return Err("cold_air_hop_lookahead_m out of [2, 20]");
+        }
+        if !(0.003..=0.05).contains(&self.cold_air_hop_min_grade) {
+            return Err("cold_air_hop_min_grade out of [0.003, 0.05]");
+        }
+        if !(0.25..=1.0).contains(&self.cold_air_hop_air_steer_factor) {
+            return Err("cold_air_hop_air_steer_factor out of [0.25, 1]");
         }
         for traffic in [self.traffic_easy, self.traffic_medium, self.traffic_hard] {
             traffic.validate()?;
@@ -536,6 +557,10 @@ mod tests {
             },
             Tuning {
                 nitro_capacity: 0,
+                ..Tuning::default()
+            },
+            Tuning {
+                cold_air_hop_lookahead_m: 0.0,
                 ..Tuning::default()
             },
             Tuning {
