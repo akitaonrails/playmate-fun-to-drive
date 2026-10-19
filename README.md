@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
-    <img src="docs/screenshots/v060-gameplay.webp" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
+    <img src="docs/screenshots/v090-gameplay.webp" alt="Fun to Drive running inside its 3D dashboard toy in a rainy spring city" width="900">
   </a>
 </p>
 
@@ -18,13 +18,17 @@
 ## Gameplay
 
 <p align="center">
-  <a href="docs/media/playthrough-v060.mp4">
-    <img src="docs/media/playthrough-preview-v060.webp" alt="Animated preview of a Fun to Drive playthrough" width="720">
+  <a href="docs/media/playthrough-v090.mp4">
+    <img src="docs/media/playthrough-preview-v090.webp" alt="Animated preview of a Fun to Drive playthrough" width="720">
   </a>
 </p>
 
 <p align="center">
-  <strong><a href="docs/media/playthrough-v060.mp4">▶ Watch the full 2:10 playthrough with sound</a></strong>
+  <strong><a href="docs/media/playthrough-v090.mp4">▶ Watch the full 2:20 playthrough with sound</a></strong>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/v090-crt-detail.webp" alt="Close view of the rain, spring city, HUD, and CRT treatment" width="720">
 </p>
 
 A web/WASM recreation of the 80s/90s electromechanical dashboard driving

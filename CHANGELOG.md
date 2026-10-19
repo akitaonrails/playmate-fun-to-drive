@@ -16,6 +16,8 @@ milestone (docs/PLAN.md).
   for the intended music-to-engine balance.
 - Added restrained specular highlights to the steering wheel and shift knob so
   both controls remain readable in the moody dorm-room lighting.
+- Replaced the README screenshots, animated preview, and full playthrough with
+  the latest v0.9.0 captures.
 
 ## [0.8.0] — 2026-10-19
 
