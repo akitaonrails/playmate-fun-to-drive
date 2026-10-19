@@ -182,11 +182,17 @@ pub const SCREEN_W: f32 = 0.190;
 #[cfg_attr(not(test), expect(dead_code))]
 pub const SCREEN_H: f32 = 0.11875;
 
-// A gentle push-in keeps the game screen prominent without cropping the toy
-// at the narrowest supported 16:10 viewport. Keep the eye on the same
-// screen-centered sightline when tuning this position.
-const TOY_CAMERA_POSITION: Vec3 = Vec3::new(0.0, 0.183, 0.265);
+// Keep the eye on the authored screen-centered sightline while pushing toward
+// the toy. A single ratio makes the crop easy to retune without introducing
+// vertical drift: 0.90 retains a narrow room border, the full bezel, the dash
+// Roadster, and the upper wheel arc at the narrowest supported 16:10 viewport.
+const TOY_CAMERA_BASE_POSITION: Vec3 = Vec3::new(0.0, 0.183, 0.265);
 const TOY_CAMERA_TARGET: Vec3 = Vec3::new(0.0, 0.128, 0.02);
+const TOY_CAMERA_PUSH_IN_RATIO: f32 = 0.90;
+
+fn toy_camera_position() -> Vec3 {
+    TOY_CAMERA_TARGET + (TOY_CAMERA_BASE_POSITION - TOY_CAMERA_TARGET) * TOY_CAMERA_PUSH_IN_RATIO
+}
 
 fn smoothstep01(value: f32) -> f32 {
     let value = value.clamp(0.0, 1.0);
@@ -195,10 +201,11 @@ fn smoothstep01(value: f32) -> f32 {
 
 fn intro_camera_transform(progress: f32) -> Transform {
     let progress = progress.clamp(0.0, 1.0);
+    let final_position = toy_camera_position();
     let radius = INTRO_CAMERA_START_RADIUS
-        + (TOY_CAMERA_POSITION.z - TOY_CAMERA_TARGET.z - INTRO_CAMERA_START_RADIUS) * progress;
+        + (final_position.z - TOY_CAMERA_TARGET.z - INTRO_CAMERA_START_RADIUS) * progress;
     let angle = INTRO_CAMERA_START_ANGLE * (1.0 - progress);
-    let height = 0.34 + (TOY_CAMERA_POSITION.y - 0.34) * progress;
+    let height = 0.34 + (final_position.y - 0.34) * progress;
     let position = Vec3::new(
         TOY_CAMERA_TARGET.x + radius * angle.sin(),
         height,
@@ -1287,8 +1294,8 @@ mod tests {
         let start = intro_camera_transform(0.0);
         let middle = intro_camera_transform(0.5);
         let end = intro_camera_transform(1.0);
-        let final_view =
-            Transform::from_translation(TOY_CAMERA_POSITION).looking_at(TOY_CAMERA_TARGET, Vec3::Y);
+        let final_view = Transform::from_translation(toy_camera_position())
+            .looking_at(TOY_CAMERA_TARGET, Vec3::Y);
 
         assert!(
             start.translation.distance(TOY_CAMERA_TARGET)
@@ -1298,6 +1305,17 @@ mod tests {
         assert!(middle.translation.x < -0.1);
         assert!(end.translation.abs_diff_eq(final_view.translation, 1e-6));
         assert!(end.rotation.abs_diff_eq(final_view.rotation, 1e-6));
+    }
+
+    #[test]
+    fn authored_view_pushes_in_without_changing_the_screen_sightline() {
+        let base_delta = TOY_CAMERA_BASE_POSITION - TOY_CAMERA_TARGET;
+        let final_delta = toy_camera_position() - TOY_CAMERA_TARGET;
+
+        assert!((final_delta.length() / base_delta.length() - 0.90).abs() < 1e-6);
+        assert!(final_delta
+            .normalize()
+            .abs_diff_eq(base_delta.normalize(), 1e-6));
     }
 
     #[test]

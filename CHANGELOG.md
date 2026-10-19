@@ -5,6 +5,14 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.9.1] — 2026-10-19
+
+- Pushed the authored toy camera ten percent closer along its existing
+  screen-centered sightline, enlarging the play screen while retaining the
+  full bezel, dashboard Roadster, upper wheel arc, and a narrow room border.
+- Kept the startup orbit and CRT power-on calibrated to the same final camera
+  transform, with regression coverage for the push-in ratio and sightline.
+
 ## [0.9.0] — 2026-10-19
 
 - Rebuilt the timed-run finale: the scenery clears, the perspective road rises
