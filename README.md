@@ -4,13 +4,25 @@
 
 <p align="center">
   <a href="https://akitaonrails.github.io/playmate-fun-to-drive/">
-    <img src="docs/screenshots/v030-city-room.png" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
+    <img src="docs/screenshots/v051-gameplay.webp" alt="Fun to Drive running inside its 3D dashboard toy in a nighttime dorm room" width="900">
   </a>
 </p>
 
 <p align="center">
   <strong><a href="https://akitaonrails.github.io/playmate-fun-to-drive/">▶ Play in your browser</a></strong><br>
   The hosted game includes a fullscreen button in its upper-right corner.
+</p>
+
+## Gameplay
+
+<p align="center">
+  <a href="docs/media/playthrough.mp4">
+    <img src="docs/media/playthrough-preview.webp" alt="Animated preview of a Fun to Drive playthrough" width="720">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="docs/media/playthrough.mp4">▶ Watch the full 2:18 playthrough with sound</a></strong>
 </p>
 
 A web/WASM recreation of the 80s/90s electromechanical dashboard driving
