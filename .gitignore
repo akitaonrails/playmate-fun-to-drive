@@ -6,3 +6,4 @@ node_modules/
 crates/game-app/dist
 /release/
 .slim/deepwork/
+.stitch/

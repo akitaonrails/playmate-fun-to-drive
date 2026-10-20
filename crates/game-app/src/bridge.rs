@@ -242,7 +242,8 @@ mod tests {
         assert!(html.contains("setPointerCapture"));
         assert!(html.contains("'pointercancel', 'lostpointercapture'"));
         assert!(html.contains("env(safe-area-inset-left)"));
-        assert!(html.contains(">COLD-AIR</button>"));
+        assert!(html.contains("id=\"touch-nitro\""));
+        assert!(html.contains("COLD<br>AIR"));
         assert!(html.contains("__ftdCoarsePointer"));
         assert!(html.contains("id=\"touch-pause\""));
         assert!(html.contains("id=\"touch-restart\""));
@@ -254,6 +255,10 @@ mod tests {
         assert!(html.contains("large_seq"));
         assert!(html.contains("body.large-screen:not(.direct-game) canvas"));
         assert!(html.contains("transition: transform"));
+        assert!(html.contains("max-aspect-ratio: 1.5"));
+        assert!(html.contains("class=\"screen-hit\""));
+        assert!(html.contains("nitroButton.classList.toggle('ready'"));
+        assert!(html.contains("id=\"utility-rail\""));
     }
 
     #[test]
@@ -294,5 +299,19 @@ mod tests {
         assert!(html.contains("try { return localStorage.getItem(storageKey); } catch (_)"));
         assert!(html.contains("try { localStorage.setItem(storageKey"));
         assert!(html.contains("applyEnabled();"));
+    }
+
+    #[test]
+    fn installable_app_shell_loads_before_wasm() {
+        let html = include_str!("../index.html");
+        let manifest = html.find("rel=\"manifest\"").expect("web manifest");
+        let wasm = html
+            .find("data-trunk rel=\"rust\"")
+            .expect("trunk wasm link");
+        assert!(manifest < wasm);
+        assert!(html.contains("id=\"install-button\""));
+        assert!(html.contains("beforeinstallprompt"));
+        assert!(html.contains("navigator.serviceWorker.register('./sw.js')"));
+        assert!(html.contains("apple-mobile-web-app-capable"));
     }
 }

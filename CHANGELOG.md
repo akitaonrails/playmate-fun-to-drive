@@ -5,6 +5,21 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+- Rebuilt the mobile touch interface around a compact molded utility rail,
+  tactile steering rocker, gated gear lever, shaped brake, and distinct
+  COLD-AIR and Jump controls with live charge/readiness illumination.
+- Added a dedicated opened-foldable 4:3 landscape composition alongside the
+  conventional wide-phone layout, preserving the full toy LCD and preventing
+  the run menu and leaderboard from clipping against the screen bezel.
+- Made the controls drawn inside the game screen directly touchable for run
+  selection, CRT/large-view settings, score entry, submission, and new runs,
+  removing the duplicated menu bar outside the toy.
+- Added an installable Android/iOS web-app shell with landscape metadata,
+  a Roadster-centered launcher icon, offline shell caching, and
+  platform-appropriate install guidance exposed from the touch run menu.
+- Replaced the plain loading screen with a compact animated road-and-Roadster
+  boot console and strengthened production checks for the PWA assets.
+
 ## [0.10.1] — 2026-10-19
 
 - Made the hidden 88 mph time-machine pass a predictable secret reward on

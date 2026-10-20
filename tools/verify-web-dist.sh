@@ -22,8 +22,24 @@ if ! grep -q 'id="fullscreen-toggle"' "$INDEX"; then
   echo "fullscreen control was not included in the built page" >&2
   exit 1
 fi
+if ! grep -q 'id="install-button"' "$INDEX"; then
+  echo "install-app control was not included in the built page" >&2
+  exit 1
+fi
 if grep -Eq "(href|src)=[\"']/|from [\"']/|module_or_path: [\"']/" "$INDEX"; then
   echo "root-relative asset URL found; the bundle would break on a Pages project path" >&2
+  exit 1
+fi
+
+for pwa_file in manifest.webmanifest sw.js assets/pwa/icon-192.png assets/pwa/icon-512.png assets/pwa/icon-maskable-512.png
+do
+  if [[ ! -s "$DIST/$pwa_file" ]]; then
+    echo "missing installable-app asset: $pwa_file" >&2
+    exit 1
+  fi
+done
+if ! grep -q 'rel="manifest"' "$INDEX"; then
+  echo "web app manifest link missing from built page" >&2
   exit 1
 fi
 

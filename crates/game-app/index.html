@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="assets/pwa/icon-192.png" />
     <title>Fun to Drive</title>
     <style>
       html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
@@ -12,176 +17,201 @@
         radial-gradient(ellipse at 24% 8%, rgba(69,75,117,.28) 0, rgba(25,27,51,.16) 30%, transparent 58%),
         radial-gradient(ellipse at 78% 28%, rgba(82,52,76,.16) 0, transparent 42%),
         linear-gradient(180deg, #171a30 0%, #0d1020 48%, #070811 100%); }
-      /* Keep the toy's authored 16:10 composition on every display. Extra
-         ultrawide space becomes more of the surrounding dorm room rather
-         than stretching the car, screen, or controls. */
       canvas { display: block; position: fixed; left: 50%; top: 50%;
         width: min(100vw, 160vh) !important; height: min(100vh, 62.5vw) !important;
         transform: translate(-50%, -50%);
         transition: transform .55s cubic-bezier(.22,.8,.24,1), top .55s cubic-bezier(.22,.8,.24,1);
         will-change: transform, top; }
-      /* Touch play prioritizes the actual LCD. Enlarge the authored scene and
-         bias it downward so the toy shell may crop while the game stays large. */
-      body.touch-enabled canvas { top: 63%;
-        transform: translate(-50%, -50%) scale(1.18); }
-      /* Large screen is a presentation-only zoom: the authored camera and
-         gameplay coordinates stay unchanged while the LCD fills the viewport. */
+      body.touch-enabled canvas { top: 54%; transform: translate(-50%, -50%) scale(1.08); }
       body.large-screen:not(.direct-game) canvas { top: 66%;
         transform: translate(-50%, -50%) scale(1.42); }
-      body.touch-enabled.large-screen:not(.direct-game) canvas { top: 64%;
-        transform: translate(-50%, -50%) scale(1.48); }
-      #loading {
-        position: fixed; inset: 0; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; color: #9aa3b2;
-        font-family: monospace; gap: 14px; transition: opacity .5s;
+      body.touch-enabled.large-screen:not(.direct-game) canvas { top: 58%; transform: translate(-50%, -50%) scale(1.34); }
+      @media (orientation: landscape) and (min-aspect-ratio: 1.2) and (max-aspect-ratio: 1.5) {
+        body.touch-enabled canvas { top: 50%; transform: translate(-50%, -50%) scale(1); }
+        body.touch-enabled.large-screen:not(.direct-game) canvas { top: 54%; transform: translate(-50%, -50%) scale(1.22); }
       }
-      #loading .wheel {
-        width: 34px; height: 34px; border-radius: 50%;
-        border: 3px solid #2a2f3a; border-top-color: #c94f3d;
-        animation: spin 0.9s linear infinite;
+
+      #utility-rail { position: fixed; z-index: 32; top: max(8px, env(safe-area-inset-top)); left: 50%;
+        transform: translateX(-50%); display: flex; gap: 5px; padding: 5px 7px; border-radius: 0 0 15px 15px;
+        border: 1px solid rgba(126,239,255,.2); border-top: 0;
+        background: linear-gradient(180deg, rgba(8,12,22,.92), rgba(21,28,40,.78));
+        box-shadow: 0 6px 20px rgba(0,0,0,.35), inset 0 -1px rgba(255,255,255,.08); }
+      .utility-button { min-width: 44px; height: 34px; padding: 0 9px; border: 1px solid rgba(202,224,240,.22);
+        border-radius: 7px; color: #b9c9d8; background: linear-gradient(#252d3b,#101622); font: 700 10px/1 monospace;
+        letter-spacing: .05em; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.1), 0 2px 4px #0008; }
+      .utility-button:active { transform: translateY(1px); box-shadow: inset 0 2px 4px #000b; }
+      .utility-button:focus-visible { outline: 2px solid #7eefff; outline-offset: 2px; }
+      #touch-toggle[aria-pressed="true"] { color: #7fffd3; border-color: #51cfa8; }
+      .touch-utility { display: none; }
+      body.touch-enabled.mode-playing #touch-pause,
+      body.touch-enabled.mode-playing #touch-restart,
+      body.touch-enabled.mode-playing #touch-large-driving,
+      body.touch-enabled.mode-difficulty_select #install-button { display: block; }
+      #install-button { color: #ffe477; border-color: #a88e35; }
+      @media (orientation: landscape) and (min-aspect-ratio: 1.8) {
+        #utility-rail { left:max(8px, env(safe-area-inset-left)); right:auto;
+          top:max(8px, env(safe-area-inset-top)); transform:none; flex-direction:column;
+          border-radius:0 0 15px 15px; border-top:0; }
       }
-      #loading .hint { font-size: 12px; color: #5d6675; }
-      #fullscreen-toggle {
-        position: fixed; top: 14px; right: 14px; z-index: 20;
-        width: 44px; height: 44px; padding: 0;
-        border: 1px solid rgba(255,255,255,.3); border-radius: 7px;
-        background: rgba(8,10,15,.66); color: #e7d59b;
-        font: 25px/1 monospace; cursor: pointer; opacity: .68;
-        transition: opacity .15s, background .15s, transform .15s;
-      }
-      #touch-toggle {
-        position: fixed; top: max(14px, env(safe-area-inset-top));
-        left: max(14px, env(safe-area-inset-left)); z-index: 31;
-        min-width: 46px; height: 44px; padding: 0 10px;
-        border: 1px solid rgba(255,255,255,.28); border-radius: 8px;
-        background: rgba(8,10,15,.68); color: #f2b6da;
-        font: 700 12px/1 monospace; cursor: pointer; opacity: .74;
-      }
-      #touch-toggle[aria-pressed="true"] { color: #79ffd1; border-color: rgba(121,255,209,.55); }
+
       .touch-layer { position: fixed; inset: 0; z-index: 25; pointer-events: none; display: none; }
       body.touch-enabled .touch-layer.active { display: block; }
-      .touch-button, .touch-pad, .touch-menu-button, #touch-initials {
-        border: 1px solid rgba(210,235,255,.24); color: rgba(235,246,255,.62);
-        background: rgba(8,14,24,.13); backdrop-filter: blur(1.5px);
-        font: 700 14px/1 monospace; pointer-events: auto;
-      }
-      .touch-button, .touch-pad, .touch-menu-button, #touch-screen-tap, #touch-toggle {
+      .touch-button, .touch-pad, .screen-hit, #touch-initials { pointer-events: auto; font: 800 12px/1 monospace; }
+      .touch-button, .touch-pad, .screen-hit, #touch-screen-tap, .utility-button {
         -webkit-tap-highlight-color: transparent; touch-action: none;
         -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
       }
-      .touch-button:active, .touch-button.pressed, .touch-pad.active,
-      .touch-menu-button:active, .touch-menu-button.selected {
-        color: #fff; background: rgba(30,95,120,.30); border-color: rgba(126,239,255,.70);
-      }
-      #touch-driving .steer { position: absolute; display: flex; gap: 12px;
-        left: max(18px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); }
-      #touch-driving .steer .touch-button { width: clamp(70px, 13vw, 112px); height: clamp(72px, 22vh, 118px); border-radius: 18px; font-size: 28px; }
+      .touch-button, .touch-pad { color: rgba(225,241,250,.76); border: 1px solid rgba(191,225,241,.3);
+        background: linear-gradient(145deg, rgba(39,52,67,.52), rgba(8,14,24,.34));
+        box-shadow: inset 1px 1px rgba(255,255,255,.1), inset -2px -3px rgba(0,0,0,.22), 0 4px 10px #0004; }
+      .touch-button:active, .touch-button.pressed, .touch-pad.active { color:#fff; border-color:#7eefff;
+        background: linear-gradient(145deg, rgba(35,119,139,.52), rgba(6,29,45,.5)); transform: translateY(1px); }
+      #touch-driving .steer { position:absolute; display:grid; grid-template-columns:1fr 1fr; gap:2px;
+        left:max(14px, env(safe-area-inset-left)); bottom:max(14px, env(safe-area-inset-bottom));
+        width:clamp(145px,24vw,220px); padding:7px; border-radius:35px;
+        background:rgba(5,10,18,.32); border:1px solid rgba(180,220,240,.14); }
+      #touch-driving .steer .touch-button { height:clamp(68px,18vh,104px); font-size:25px; }
+      #touch-left { border-radius:30px 8px 8px 30px; clip-path:polygon(0 50%,26% 0,100% 8%,100% 92%,26% 100%); }
+      #touch-right { border-radius:8px 30px 30px 8px; clip-path:polygon(0 8%,74% 0,100% 50%,74% 100%,0 92%); }
       #touch-driving .actions { position: absolute; right: max(18px, env(safe-area-inset-right));
-        bottom: max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column;
-        width: clamp(156px, 23vw, 212px); gap: 9px; }
-      #touch-driving .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-      #touch-driving .drive-actions { display: grid; grid-template-columns: 1.08fr .92fr;
-        gap: 9px; align-items: end; }
-      #touch-driving .actions .touch-button { height: clamp(54px, 15vh, 82px); border-radius: 50%; }
-      #touch-driving .quick-actions .touch-button { height: clamp(46px, 12vh, 66px);
-        border-radius: 14px; font-size: clamp(10px, 1.6vw, 14px); }
-      #touch-driving .actions #touch-brake { height: clamp(72px, 21vh, 112px); }
-      #touch-driving .actions #touch-shift { height: clamp(94px, 27vh, 140px); border-radius: 18px;
-        line-height: 1.55; }
-      #touch-driving .session-actions { position: absolute;
-        top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-        display: flex; gap: 9px; pointer-events: auto; }
-      #touch-driving .session-actions .touch-button { min-width: 88px; height: 44px;
-        padding: 0 13px; border-radius: 10px; font-size: 12px;
-        background: rgba(6,12,22,.48); }
-      #touch-driving #touch-restart { color: rgba(255,210,150,.78);
-        border-color: rgba(255,185,105,.38); }
-      #touch-driving #touch-large-driving { color: rgba(165,238,255,.82);
-        border-color: rgba(126,220,255,.42); }
-      #touch-jump.ready { color: #ffb5e0; border-color: rgba(255,82,181,.72);
-        box-shadow: 0 0 18px rgba(255,42,155,.22); }
-      #touch-screen-tap { position: absolute; left: 23%; top: 16%; width: 54%; height: 48%;
-        pointer-events: auto; touch-action: none; background: transparent; border: 0; }
-      body.touch-enabled #touch-screen-tap { left: 18%; top: 23%; width: 64%; height: 57%; }
-      body.direct-game #touch-screen-tap { left: 12%; top: 8%; width: 76%; height: 65%; }
-      #touch-menu, #touch-name, #touch-leaderboard { display: none; position: absolute; left: 50%;
-        bottom: max(22px, env(safe-area-inset-bottom)); transform: translateX(-50%);
-        pointer-events: auto; padding: 10px; gap: 9px; border-radius: 12px;
-        background: rgba(4,9,18,.28); }
-      #touch-menu.active, #touch-name.active, #touch-leaderboard.active { display: flex; }
-      .touch-menu-button { min-width: 86px; min-height: 48px; border-radius: 8px; }
-      #touch-start, #touch-submit { color: #ffe477; border-color: rgba(255,224,94,.58); }
-      #touch-initials { width: 104px; min-height: 48px; border-radius: 8px; text-align: center;
-        text-transform: uppercase; font-size: 24px; background: rgba(4,9,18,.72); }
-      @media (pointer: fine) { #touch-toggle { opacity: .48; } }
+        bottom:max(14px, env(safe-area-inset-bottom)); display:flex; flex-direction:column;
+        width:clamp(156px,22vw,204px); gap:8px; }
+      #touch-driving .quick-actions { display:grid; grid-template-columns:1fr 1fr; gap:9px; align-items:end; }
+      #touch-driving .drive-actions { display:grid; grid-template-columns:.9fr 1.1fr; gap:9px; align-items:end; }
+      #touch-nitro { position:relative; aspect-ratio:1; border-radius:50%; color:#79e9ff; }
+      #touch-nitro::after { content:'•••'; position:absolute; left:0; right:0; bottom:8px; letter-spacing:3px; color:#42566a; }
+      #touch-nitro.charge-1::after { color:#ffe066; text-shadow:8px 0 #42566a,16px 0 #42566a; }
+      #touch-nitro.charge-2::after { color:#ffe066; text-shadow:8px 0 #ffe066,16px 0 #42566a; }
+      #touch-nitro.charge-3::after { color:#fff27f; text-shadow:0 0 8px #ffe447; }
+      #touch-nitro.ready { border-color:#ffea61; color:#fff7b0; animation:readyPulse 1.05s ease-in-out infinite; }
+      #touch-jump { aspect-ratio:1; color:#ffabd9; clip-path:polygon(25% 3%,75% 3%,98% 50%,75% 97%,25% 97%,2% 50%); }
+      #touch-jump.ready { color:#fff; border-color:#ff6fc1; animation:jumpReady .85s ease-in-out infinite; }
+      #touch-shift { position:relative; min-height:clamp(94px,24vh,132px); border-radius:18px; overflow:hidden; color:#a9bbca; }
+      #touch-shift::before { content:''; position:absolute; width:7px; height:60%; left:50%; top:20%; transform:translateX(-50%); border-radius:5px; background:#050810; box-shadow:inset 0 0 3px #000; }
+      #touch-shift::after { content:''; position:absolute; width:30px; height:30px; left:50%; bottom:12%; transform:translateX(-50%); border-radius:50%; background:radial-gradient(circle at 35% 28%,#b8c5cf,#384553 43%,#0d131c 75%); box-shadow:0 3px 7px #000; transition:bottom .16s; }
+      #touch-shift.gear-high::after { bottom:62%; }
+      .shift-high,.shift-low { position:absolute; left:13px; z-index:1; }
+      .shift-high { top:12px; } .shift-low { bottom:12px; }
+      #touch-brake { min-height:clamp(72px,18vh,104px); border-radius:14px 14px 28px 28px; clip-path:polygon(10% 0,90% 0,100% 78%,82% 100%,18% 100%,0 78%); color:#ffb58d; }
+      #touch-screen-tap { position:absolute; left:20%; top:18%; width:60%; height:58%; pointer-events:auto; background:transparent; border:0; }
+      body.direct-game #touch-screen-tap { left:12%; top:8%; width:76%; height:65%; }
+
+      .screen-touch-panel { display:none; position:absolute; left:50%; top:54%;
+        width:min(100vw,160vh); height:min(100vh,62.5vw); transform:translate(-50%,-50%) scale(1.08);
+        pointer-events:none; transition:transform .55s cubic-bezier(.22,.8,.24,1),top .55s cubic-bezier(.22,.8,.24,1); }
+      body.large-screen:not(.direct-game) .screen-touch-panel { top:58%; transform:translate(-50%,-50%) scale(1.34); }
+      .screen-touch-panel.active { display:block; }
+      .screen-hit { position:absolute; background:transparent; border:0; color:transparent; border-radius:10px; }
+      .screen-hit:focus-visible { outline:3px solid #7eefff; outline-offset:-3px; }
+      #touch-easy { left:21.6%; top:27%; width:11%; height:20%; }
+      #touch-medium { left:34%; top:27%; width:11%; height:20%; }
+      #touch-hard { left:46.2%; top:27%; width:11%; height:20%; }
+      #touch-crt { left:25%; top:51%; width:20%; height:8%; }
+      #touch-large { left:47%; top:51%; width:20%; height:8%; }
+      #touch-start { left:28.4%; top:62%; width:24.5%; height:8%; }
+      #touch-initials { position:absolute; left:42%; top:29%; width:16%; height:9%; border:1px solid #7eefff;
+        border-radius:8px; text-align:center; text-transform:uppercase; color:#fff; background:rgba(4,9,18,.78); font-size:22px; }
+      #touch-submit { left:39%; top:63%; width:22%; height:9%; }
+      #touch-again { left:39%; top:63%; width:22%; height:9%; }
+      @media (orientation: landscape) and (min-aspect-ratio:1.2) and (max-aspect-ratio:1.5) {
+        .screen-touch-panel { top:50%; transform:translate(-50%,-50%) scale(1); }
+        body.large-screen:not(.direct-game) .screen-touch-panel { top:54%; transform:translate(-50%,-50%) scale(1.22); }
+      }
       @media (orientation: portrait) {
         #touch-driving .steer .touch-button { width: 72px; height: 88px; }
         #touch-driving .actions { width: 140px; }
-        #touch-menu { flex-wrap: wrap; width: min(92vw, 360px); justify-content: center; }
         body.touch-enabled #rotate-device { display: flex; }
       }
       #rotate-device { display: none; position: fixed; inset: 0; z-index: 40;
         align-items: center; justify-content: center; pointer-events: none;
         color: #d8f8ff; background: rgba(3,7,14,.78); text-align: center;
         font: 700 16px/1.6 monospace; letter-spacing: .08em; }
-      #fullscreen-toggle:hover,
-      #fullscreen-toggle:focus-visible {
-        opacity: 1; background: rgba(24,28,38,.9); outline: 2px solid #e7d59b;
-        outline-offset: 2px;
-      }
-      #fullscreen-toggle:active { transform: scale(.94); }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      #install-help { position:fixed; inset:0; z-index:60; display:none; place-items:center; background:#030610cc; padding:20px; }
+      #install-help.open { display:grid; }
+      .install-card { max-width:360px; padding:24px; border:1px solid #66849a; border-radius:18px; color:#d8eef7;
+        background:linear-gradient(160deg,#1c2735,#080d17); box-shadow:0 20px 70px #000; font:14px/1.55 monospace; }
+      .install-card h2 { margin:0 0 10px; color:#ffe477; font-size:19px; }
+      .install-card .utility-button { margin-top:14px; width:100%; }
+
+      #loading { position:fixed; inset:0; z-index:80; display:grid; place-items:center; color:#cde8f2;
+        font-family:monospace; background:radial-gradient(circle at 50% 42%,#27334c 0,#0d1222 38%,#060811 75%); transition:opacity .5s; }
+      .boot-console { width:min(440px,84vw); padding:24px; text-align:center; border:1px solid #52677b; border-radius:20px;
+        background:linear-gradient(145deg,#1d2735,#080d16); box-shadow:0 24px 80px #000b,inset 0 1px #ffffff16; }
+      .boot-label { color:#ffdc6f; letter-spacing:.22em; font-weight:800; }
+      .boot-stage { position:relative; width:120px; height:120px; margin:18px auto; overflow:hidden; border-radius:26px; box-shadow:0 0 26px #38d9ff38; }
+      .boot-stage img { display:block; width:100%; height:100%; }
+      .boot-stage::after { content:''; position:absolute; left:0; right:0; top:-30%; height:26%; background:linear-gradient(transparent,#bff9ff55,transparent); animation:bootScan 1.25s linear infinite; }
+      .boot-progress { height:5px; margin:14px 0 10px; overflow:hidden; border-radius:9px; background:#03060b; }
+      .boot-progress::after { content:''; display:block; width:42%; height:100%; background:linear-gradient(90deg,#42e5d0,#ffe36d); box-shadow:0 0 12px #42e5d0; animation:loadSweep 1.4s ease-in-out infinite; }
+      #loading .hint { margin-top:8px; color:#6f8292; font-size:11px; }
+      .sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+      @keyframes readyPulse { 50% { box-shadow:0 0 24px #ffe33d99,inset 0 0 15px #ffe33d33; transform:scale(1.035); } }
+      @keyframes jumpReady { 50% { filter:drop-shadow(0 0 10px #ff4fb8); transform:scale(1.04); } }
+      @keyframes bootScan { to { top:110%; } }
+      @keyframes loadSweep { from { transform:translateX(-105%); } to { transform:translateX(245%); } }
+      @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.001ms!important; animation-iteration-count:1!important; scroll-behavior:auto!important; } }
     </style>
   </head>
   <body>
     <div id="rotate-device" role="status">ROTATE DEVICE<br>FOR LANDSCAPE DRIVING</div>
-    <button id="touch-toggle" type="button" aria-label="Toggle touch controls" aria-pressed="false">TOUCH</button>
-    <button id="fullscreen-toggle" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
+    <nav id="utility-rail" aria-label="Game display controls">
+      <button id="touch-toggle" class="utility-button" type="button" aria-label="Toggle touch controls" aria-pressed="false">TOUCH</button>
+      <button id="touch-pause" class="utility-button touch-utility" type="button" aria-label="Pause game">Ⅱ</button>
+      <button id="touch-restart" class="utility-button touch-utility" type="button" aria-label="Return to run selection">↺</button>
+      <button id="touch-large-driving" class="utility-button touch-utility" type="button" aria-label="Toggle large screen" aria-pressed="false">VIEW</button>
+      <button id="install-button" class="utility-button touch-utility" type="button" aria-label="Install game as an app" hidden>APP</button>
+      <button id="fullscreen-toggle" class="utility-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
+    </nav>
     <div id="touch-driving" class="touch-layer" aria-label="Touch driving controls">
       <button id="touch-screen-tap" aria-label="Tap game screen to pause or resume"></button>
-      <div class="session-actions" aria-label="Session controls">
-        <button id="touch-pause" class="touch-button" aria-label="Pause game">PAUSE</button>
-        <button id="touch-restart" class="touch-button" aria-label="Return to run selection">RESTART</button>
-        <button id="touch-large-driving" class="touch-button" aria-label="Toggle large screen" aria-pressed="false">VIEW LARGE</button>
-      </div>
       <div class="steer">
         <button id="touch-left" class="touch-button" aria-label="Steer left">◀</button>
         <button id="touch-right" class="touch-button" aria-label="Steer right">▶</button>
       </div>
       <div class="actions">
         <div class="quick-actions">
-          <button id="touch-nitro" class="touch-button">COLD-AIR</button>
-          <button id="touch-jump" class="touch-button">JUMP KICK</button>
+          <button id="touch-nitro" class="touch-button" aria-label="Cold-air thruster, empty">COLD<br>AIR</button>
+          <button id="touch-jump" class="touch-button" aria-label="Kick jump, unavailable">JUMP</button>
         </div>
         <div class="drive-actions">
-          <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear">↑ HIGH<br>SHIFT<br>↓ LOW</button>
+          <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear"><span class="shift-high">H</span><span class="shift-low">L</span><span class="sr-only">Swipe up for high gear or down for low gear</span></button>
           <button id="touch-brake" class="touch-button">BRAKE</button>
         </div>
       </div>
     </div>
     <div id="touch-ui" class="touch-layer">
-      <div id="touch-menu">
-        <button class="touch-menu-button" data-difficulty="0">EASY<br>2:00</button>
-        <button class="touch-menu-button" data-difficulty="1">MEDIUM<br>6:00</button>
-        <button class="touch-menu-button" data-difficulty="2">HARD<br>10:00</button>
-        <button id="touch-crt" class="touch-menu-button">CRT</button>
-        <button id="touch-large" class="touch-menu-button" aria-label="Toggle large screen" aria-pressed="false">LARGE OFF</button>
-        <button id="touch-start" class="touch-menu-button">START</button>
+      <div id="touch-menu" class="screen-touch-panel" role="group" aria-label="Run selection controls">
+        <button id="touch-easy" class="screen-hit" data-difficulty="0" aria-label="Select easy, two minutes">EASY</button>
+        <button id="touch-medium" class="screen-hit" data-difficulty="1" aria-label="Select medium, six minutes">MEDIUM</button>
+        <button id="touch-hard" class="screen-hit" data-difficulty="2" aria-label="Select hard, ten minutes">HARD</button>
+        <button id="touch-crt" class="screen-hit" aria-label="Toggle CRT effect">CRT</button>
+        <button id="touch-large" class="screen-hit" aria-label="Toggle large screen" aria-pressed="false">LARGE</button>
+        <button id="touch-start" class="screen-hit" aria-label="Start selected run">START</button>
       </div>
-      <div id="touch-name">
+      <div id="touch-name" class="screen-touch-panel" role="group" aria-label="Score entry controls">
         <input id="touch-initials" maxlength="3" inputmode="text" autocomplete="off" aria-label="Three letter nickname" placeholder="AAA">
-        <button id="touch-submit" class="touch-menu-button">SUBMIT</button>
+        <button id="touch-submit" class="screen-hit" aria-label="Submit score">SUBMIT</button>
       </div>
-      <div id="touch-leaderboard">
-        <button id="touch-again" class="touch-menu-button">NEW RUN</button>
+      <div id="touch-leaderboard" class="screen-touch-panel" role="group" aria-label="Leaderboard controls">
+        <button id="touch-again" class="screen-hit" aria-label="Start a new run">NEW RUN</button>
       </div>
     </div>
-    <div id="loading">
-      <div class="wheel"></div>
-      <div id="loading-text">spinning up the drum...</div>
-      <div class="hint">first load prepares the game — later loads are cached</div>
-      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y cold-air &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view &nbsp;|&nbsp; V large screen</div>
-      <div class="hint">mobile uses an optimized pixel budget automatically; append <code>?quality=high</code> to override</div>
+    <div id="install-help" role="dialog" aria-modal="true" aria-labelledby="install-title">
+      <div class="install-card">
+        <h2 id="install-title">Put Fun to Drive on your home screen</h2>
+        <p id="install-copy">Open your browser menu, choose <strong>Add to Home Screen</strong>, then launch it like an app in landscape.</p>
+        <button id="install-close" class="utility-button" type="button">CLOSE</button>
+      </div>
+    </div>
+    <div id="loading" role="status" aria-live="polite">
+      <div class="boot-console">
+        <div class="boot-label">FUN TO DRIVE</div>
+        <div class="boot-stage"><img src="assets/pwa/icon-192.png" alt="Silver Roadster racing toward the horizon"></div>
+        <div id="loading-text">WARMING UP THE CRT…</div>
+        <div class="boot-progress"></div>
+        <div class="hint">First lap prepares the toy. Future starts are cached.</div>
+        <div class="hint">Best played in landscape · touch, keyboard, or gamepad</div>
+      </div>
     </div>
     <script>
       // CPAL creates its Web Audio context during Bevy startup, often before
@@ -245,7 +275,7 @@
         const held = { left: new Set(), right: new Set(), brake: new Set() };
         const byId = id => document.getElementById(id);
         const pulse = key => { state[key] = (state[key] + 1) >>> 0; };
-        const touchControlSelector = '.touch-button, .touch-pad, .touch-menu-button, #touch-screen-tap, #touch-toggle';
+        const touchControlSelector = '.touch-button, .touch-pad, .screen-hit, .utility-button, #touch-screen-tap';
         document.addEventListener('contextmenu', event => {
           if (event.target instanceof Element && event.target.closest(touchControlSelector)) {
             event.preventDefault();
@@ -322,11 +352,42 @@
           state.initials = initials.value; pulse('initials_seq');
         });
         const toggle = byId('touch-toggle');
+        const installButton = byId('install-button');
+        const installHelp = byId('install-help');
+        let installPrompt = null;
+        const standalone = () => matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const syncInstallButton = () => {
+          const menuOpen = window.__FTD_STATE__?.end_mode === 'difficulty_select';
+          installButton.hidden = standalone() || !state.enabled || !menuOpen;
+        };
+        window.addEventListener('beforeinstallprompt', event => {
+          event.preventDefault(); installPrompt = event; syncInstallButton();
+        });
+        window.addEventListener('appinstalled', () => { installPrompt = null; syncInstallButton(); });
+        installButton.addEventListener('click', async () => {
+          if (installPrompt) {
+            installPrompt.prompt();
+            await installPrompt.userChoice.catch(() => null);
+            installPrompt = null; syncInstallButton();
+          } else {
+            byId('install-copy').innerHTML = ios
+              ? 'Tap the browser <strong>Share</strong> button, then choose <strong>Add to Home Screen</strong>.'
+              : 'Open your browser menu and choose <strong>Install app</strong> or <strong>Add to Home Screen</strong>.';
+            installHelp.classList.add('open');
+          }
+        });
+        byId('install-close').addEventListener('click', () => installHelp.classList.remove('open'));
+        installHelp.addEventListener('click', event => {
+          if (event.target === installHelp) installHelp.classList.remove('open');
+        });
         const applyEnabled = () => {
           document.body.classList.toggle('touch-enabled', state.enabled);
           toggle.setAttribute('aria-pressed', String(state.enabled));
           toggle.textContent = state.enabled ? 'TOUCH ON' : 'TOUCH OFF';
           if (!state.enabled) { for (const set of Object.values(held)) set.clear(); recompute(); }
+          syncInstallButton();
         };
         toggle.addEventListener('click', () => {
           state.enabled = !state.enabled;
@@ -342,15 +403,26 @@
           byId('touch-menu').classList.toggle('active', game.end_mode === 'difficulty_select');
           byId('touch-name').classList.toggle('active', game.end_mode === 'name_entry');
           byId('touch-leaderboard').classList.toggle('active', game.end_mode === 'leaderboard');
-          byId('touch-jump').classList.toggle('ready', Boolean(game.jump_charge));
-          byId('touch-pause').textContent = game.paused ? 'RESUME' : 'PAUSE';
+          for (const mode of ['playing','difficulty_select','name_entry','leaderboard']) {
+            document.body.classList.toggle(`mode-${mode}`, game.end_mode === mode);
+          }
+          const jumpReady = Boolean(game.jump_charge);
+          byId('touch-jump').classList.toggle('ready', jumpReady);
+          byId('touch-jump').setAttribute('aria-label', jumpReady ? 'Kick jump ready' : 'Kick jump unavailable');
+          const nitroCharges = Math.max(0, Math.min(3, Number(game.nitro) || 0));
+          const nitroButton = byId('touch-nitro');
+          for (let charge = 0; charge <= 3; charge++) nitroButton.classList.toggle(`charge-${charge}`, charge === nitroCharges);
+          const nitroReady = nitroCharges >= 3 && !(Number(game.nitro_cooldown) > 0) && !(Number(game.nitro_t) > 0);
+          nitroButton.classList.toggle('ready', nitroReady);
+          nitroButton.setAttribute('aria-label', `Cold-air thruster, ${nitroCharges} of 3${nitroReady ? ', ready' : ''}`);
+          byId('touch-pause').textContent = game.paused ? '▶' : 'Ⅱ';
           byId('touch-pause').setAttribute('aria-label', game.paused ? 'Resume game' : 'Pause game');
-          byId('touch-crt').textContent = game.crt_enabled ? 'CRT ON' : 'CRT OFF';
+          byId('touch-crt').setAttribute('aria-pressed', String(Boolean(game.crt_enabled)));
           const large = Boolean(game.large_screen);
-          byId('touch-large').textContent = large ? 'LARGE ON' : 'LARGE OFF';
-          byId('touch-large-driving').textContent = large ? 'VIEW NORMAL' : 'VIEW LARGE';
+          byId('touch-large-driving').textContent = large ? 'FIT' : 'VIEW';
           byId('touch-large').setAttribute('aria-pressed', String(large));
           byId('touch-large-driving').setAttribute('aria-pressed', String(large));
+          byId('touch-shift').classList.toggle('gear-high', game.gear === 'high');
           document.body.classList.toggle('large-screen', large);
           document.body.classList.toggle('direct-game', !game.toy);
           document.querySelectorAll('[data-difficulty]').forEach(button =>
@@ -358,9 +430,14 @@
           if (game.end_mode === 'name_entry' && document.activeElement !== initials && initials.value !== game.initials) {
             initials.value = game.initials || ''; state.initials = initials.value;
           }
+          syncInstallButton();
         };
         applyEnabled();
       })();
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+      }
 
       // harness markers: readiness + per-frame game state from wasm
       window.__FTD_READY__ = false;
@@ -368,16 +445,25 @@
       window.__ftdPublishState = (s) => {
         try { window.__FTD_STATE__ = JSON.parse(s); window.__ftdSyncTouchUi?.(window.__FTD_STATE__); } catch (e) {}
       };
+      const loadingStarted = performance.now();
+      const hideLoading = () => {
+        const loading = document.getElementById('loading');
+        if (!loading || loading.dataset.closing) return;
+        loading.dataset.closing = 'true';
+        loading.style.opacity = '0';
+        setTimeout(() => loading.remove(), 600);
+      };
       const look = () => {
         const c = document.querySelector('canvas');
-        if (c && c.width > 0) { window.__FTD_READY__ = true; return; }
+        if (c && c.width > 0) {
+          window.__FTD_READY__ = true;
+          setTimeout(hideLoading, Math.max(0, 900 - (performance.now() - loadingStarted)));
+          return;
+        }
         requestAnimationFrame(look);
       };
       requestAnimationFrame(look);
-      setTimeout(() => {
-        const l = document.getElementById('loading');
-        if (l) { l.style.opacity = '0'; setTimeout(() => l.remove(), 600); }
-      }, 1200);
+      setTimeout(hideLoading, 15000);
 
       // Fullscreen must be requested from a real user gesture. Keep this in
       // the host page rather than WASM so browser support stays independent
@@ -424,6 +510,8 @@
       })();
     </script>
     <link data-trunk rel="rust" href="Cargo.toml" data-bin="game-app" data-type="main" />
+    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="sw.js" />
     <link data-trunk rel="copy-dir" href="assets" />
   </body>
 </html>

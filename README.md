@@ -64,7 +64,8 @@ player's local system date, clock, and timezone.
 - Seasonal roadside scenery including sakura, summer forest, autumn foliage, bare winter trees, lamps, and billboards.
 - Randomized city and landscape backdrops including Tokyo neon, Paris silhouettes, Vegas-style lights, mountains, forests, and open road.
 - Rare background events: shooting stars, bird flocks, a hurricane with its own 16-bit wind bed that can lift traffic and trees, and a nighttime UFO abduction with a PSG tractor-beam warble.
-- Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and an animated large-screen mode for compact displays.
+- Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, tactile touch controls, and an animated large-screen mode for compact displays and opened foldables.
+- An installable Android/iOS web-app shell for launching directly from the home screen in landscape.
 - A hidden four-use COLD-AIR cadence can push through 88 mph and summon the blue-electric time machine; its progress is intentionally not shown.
 
 ## Controls
@@ -90,7 +91,12 @@ player's local system date, clock, and timezone.
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
 | Gamepad | Left stick steers, right stick peeks around the toy, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, L3+R3 toggles large-screen view, rumble on bumps |
-| Touch | Enable with the upper-left button; left thumb steers, right thumb shifts and brakes, COLD-AIR/JUMP KICK sit above the shift area, and PAUSE, RESTART, and VIEW LARGE controls sit at the top |
+| Touch | Enable from the compact top rail; tap the choices drawn on the toy screen directly, use the left-thumb steering rocker and right-thumb gear/brake cluster, and watch COLD-AIR/JUMP illuminate when ready |
+
+On Android, enable touch controls on the run-selection screen and use **APP**
+to accept the browser's install prompt. On iPhone or iPad, **APP** shows the
+Safari **Share → Add to Home Screen** steps. The installed game launches in
+landscape without needing to visit the browser first.
 
 ## Run it
 

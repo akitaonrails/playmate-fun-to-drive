@@ -1,0 +1,33 @@
+{
+  "name": "Fun to Drive",
+  "short_name": "Fun to Drive",
+  "description": "A tactile retro-futurist road challenge built into a tabletop driving toy.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#080914",
+  "theme_color": "#151923",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "./assets/pwa/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/pwa/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/pwa/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -249,6 +249,11 @@ struct CrtMenuText;
 #[derive(Component)]
 struct LargeMenuText;
 
+const DIFFICULTY_SAFE_HALF_WIDTH: f32 = 350.0;
+const DIFFICULTY_CARD_WIDTH: f32 = 130.0;
+const DIFFICULTY_CARD_X: [f32; 3] = [-270.0, -125.0, 20.0];
+const DIFFICULTY_BOARD_X: f32 = 220.0;
+
 #[derive(Resource, Default)]
 pub struct InstrumentVisuals {
     pub speed_kmh: f32,
@@ -284,6 +289,9 @@ enum EndTextKind {
 
 #[derive(Component)]
 struct EndOverlayText(EndTextKind);
+
+#[derive(Component)]
+struct EndActionText;
 
 /// Resolved visual weather weights are published for deterministic QA.
 #[derive(Resource, Default)]
@@ -677,7 +685,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
             parent.spawn((
                 Sprite::from_color(
                     Color::srgba(0.025, 0.07, 0.14, 0.98),
-                    Vec2::new(920.0, 510.0),
+                    Vec2::new(DIFFICULTY_SAFE_HALF_WIDTH * 2.0, 510.0),
                 ),
                 Transform::from_xyz(0.0, 0.0, 0.1),
             ));
@@ -688,17 +696,17 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.50, 0.95, 1.0)),
-                Transform::from_xyz(-145.0, 205.0, 0.3),
+                Transform::from_xyz(-110.0, 205.0, 0.3),
             ));
             for (index, x, title, duration) in [
-                (0, -355.0, "EASY", "2:00"),
-                (1, -155.0, "MEDIUM", "6:00"),
-                (2, 45.0, "HARD", "10:00"),
+                (0, DIFFICULTY_CARD_X[0], "EASY", "2:00"),
+                (1, DIFFICULTY_CARD_X[1], "MEDIUM", "6:00"),
+                (2, DIFFICULTY_CARD_X[2], "HARD", "10:00"),
             ] {
                 parent.spawn((
                     Sprite::from_color(
                         Color::srgba(0.06, 0.16, 0.27, 0.96),
-                        Vec2::new(180.0, 150.0),
+                        Vec2::new(DIFFICULTY_CARD_WIDTH, 150.0),
                     ),
                     Transform::from_xyz(x, 5.0, 0.2),
                     DifficultyCard(index),
@@ -717,31 +725,31 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
             parent.spawn((
                 Text2d::new("LOCAL TOP 5 — MEDIUM\n#  TAG  SCORE   CYC PASS BUMP\n1  ---  ------   --  ---  ---\n2  ---  ------   --  ---  ---\n3  ---  ------   --  ---  ---\n4  ---  ------   --  ---  ---\n5  ---  ------   --  ---  ---"),
                 TextFont {
-                    font_size: FontSize::Px(14.0),
+                    font_size: FontSize::Px(12.5),
                     ..default()
                 },
                 TextColor(Color::srgb(0.72, 0.90, 1.0)),
-                Transform::from_xyz(285.0, 22.0, 0.3),
+                Transform::from_xyz(DIFFICULTY_BOARD_X, 22.0, 0.3),
                 DifficultyLeaderboard,
             ));
             parent.spawn((
-                Text2d::new("CRT DISPLAY: ON   [ C / X ]"),
+                Text2d::new("CRT EFFECT: ON"),
                 TextFont {
                     font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 1.0, 0.74)),
-                Transform::from_xyz(-295.0, -112.0, 0.3),
+                Transform::from_xyz(-235.0, -112.0, 0.3),
                 CrtMenuText,
             ));
             parent.spawn((
-                Text2d::new("LARGE SCREEN: OFF   [ V / L3+R3 ]"),
+                Text2d::new("LARGE VIEW: OFF"),
                 TextFont {
                     font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.62, 0.38)),
-                Transform::from_xyz(15.0, -112.0, 0.3),
+                Transform::from_xyz(45.0, -112.0, 0.3),
                 LargeMenuText,
             ));
             parent.spawn((
@@ -751,7 +759,14 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.72, 0.90, 1.0)),
-                Transform::from_xyz(-145.0, -158.0, 0.3),
+                Transform::from_xyz(-110.0, -158.0, 0.3),
+            ));
+            parent.spawn((
+                Sprite::from_color(
+                    Color::srgba(0.07, 0.32, 0.42, 0.88),
+                    Vec2::new(270.0, 42.0),
+                ),
+                Transform::from_xyz(-110.0, -205.0, 0.2),
             ));
             parent.spawn((
                 Text2d::new("ENTER / A / START TO BEGIN"),
@@ -760,7 +775,7 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.88, 0.45)),
-                Transform::from_xyz(-145.0, -205.0, 0.3),
+                Transform::from_xyz(-110.0, -205.0, 0.3),
             ));
         });
 }
@@ -1544,9 +1559,9 @@ pub fn setup(mut commands: Commands) {
                 ),
                 (
                     EndTextKind::Footer,
-                    15.0,
+                    13.0,
                     Color::srgb(0.55, 0.82, 0.92),
-                    -218.0,
+                    -174.0,
                 ),
             ] {
                 parent.spawn((
@@ -1577,6 +1592,20 @@ pub fn setup(mut commands: Commands) {
                     EndOverlayText(EndTextKind::Initial(index)),
                 ));
             }
+            parent.spawn((
+                Sprite::from_color(Color::srgba(0.07, 0.48, 0.64, 0.92), Vec2::new(220.0, 44.0)),
+                Transform::from_xyz(0.0, -215.0, 0.2),
+            ));
+            parent.spawn((
+                Text2d::new("SUBMIT SCORE"),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.93, 0.60)),
+                Transform::from_xyz(0.0, -215.0, 0.3),
+                EndActionText,
+            ));
         });
 
     // M10 drum bands + recess shading (alpha driven by toy_look)
@@ -3151,6 +3180,7 @@ fn sync_end_overlay(
     leaderboard: Res<crate::LeaderboardState>,
     mut root: Query<&mut Visibility, With<EndOverlayRoot>>,
     mut texts: Query<(&EndOverlayText, &mut Text2d)>,
+    mut action: Query<&mut Text2d, (With<EndActionText>, Without<EndOverlayText>)>,
 ) {
     let visible = matches!(
         end.0.mode,
@@ -3175,6 +3205,13 @@ fn sync_end_overlay(
         )
     });
     let table = leaderboard_table(&leaderboard.entries, sim.0.difficulty());
+    if let Ok(mut text) = action.single_mut() {
+        text.0 = match end.0.mode {
+            crate::session::EndMode::NameEntry => "SUBMIT SCORE".to_string(),
+            crate::session::EndMode::Leaderboard => "NEW RUN".to_string(),
+            _ => String::new(),
+        };
+    }
     for (marker, mut text) in &mut texts {
         text.0 = match marker.0 {
             EndTextKind::Summary => format!(
@@ -4005,7 +4042,7 @@ fn sync_difficulty_overlay(
         } else {
             ("OFF", Color::srgb(1.0, 0.62, 0.38))
         };
-        text.0 = format!("CRT DISPLAY: {label}   [ C / X ]");
+        text.0 = format!("CRT EFFECT: {label}");
         color.0 = tint;
     }
     if let Ok((mut text, mut color)) = large.single_mut() {
@@ -4014,7 +4051,7 @@ fn sync_difficulty_overlay(
         } else {
             ("OFF", Color::srgb(1.0, 0.62, 0.38))
         };
-        text.0 = format!("LARGE SCREEN: {label}   [ V / L3+R3 ]");
+        text.0 = format!("LARGE VIEW: {label}");
         color.0 = tint;
     }
 }
@@ -4398,6 +4435,21 @@ mod tests {
         assert!(table.contains("1  EZY"));
         assert!(!table.contains("HRD"));
         assert_eq!(table.lines().count(), 7, "title + header + five ranks");
+    }
+
+    #[test]
+    fn difficulty_menu_stays_inside_the_lcd_safe_aperture() {
+        for x in DIFFICULTY_CARD_X {
+            assert!(
+                x.abs() + DIFFICULTY_CARD_WIDTH * 0.5 <= DIFFICULTY_SAFE_HALF_WIDTH,
+                "difficulty card at {x} escapes the LCD safe aperture"
+            );
+        }
+        // The compact monospace board is deliberately allocated 125 px on
+        // either side of its anchor, including its longest header.
+        let inside_safe_aperture =
+            |x: f32, half_width: f32| x + half_width <= DIFFICULTY_SAFE_HALF_WIDTH;
+        assert!(inside_safe_aperture(DIFFICULTY_BOARD_X, 125.0));
     }
 
     #[test]
