@@ -83,12 +83,13 @@ player's local system date, clock, and timezone.
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
 | V | Animate between the normal toy framing and large-screen view |
 | L3 + R3 | Toggle large-screen view with both stick buttons together |
+| Right stick | Temporarily orbit around the toy; release to glide back to the normal view |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
 | M | Mute / unmute audio |
 | [ / ] | Music volume down / up |
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
-| Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, L3+R3 toggles large-screen view, rumble on bumps |
+| Gamepad | Left stick steers, right stick peeks around the toy, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, L3+R3 toggles large-screen view, rumble on bumps |
 | Touch | Enable with the upper-left button; left thumb steers, right thumb shifts and brakes, COLD-AIR/JUMP KICK sit above the shift area, and PAUSE, RESTART, and VIEW LARGE controls sit at the top |
 
 ## Run it

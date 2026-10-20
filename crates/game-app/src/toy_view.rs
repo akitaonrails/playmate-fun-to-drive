@@ -28,6 +28,11 @@ const INTRO_TOTAL_SECS: f32 = INTRO_ORBIT_SECS + INTRO_CRT_POWER_SECS;
 const INTRO_CAMERA_START_ANGLE: f32 = -1.30;
 const INTRO_CAMERA_START_RADIUS: f32 = 0.78;
 const SCREEN_GLOW_INTENSITY: f32 = 88.0;
+const INSPECTION_ORBIT_DEADZONE: f32 = 0.18;
+const INSPECTION_ORBIT_MAX_YAW: f32 = 0.18;
+const INSPECTION_ORBIT_MAX_PITCH: f32 = 0.11;
+const INSPECTION_ORBIT_STIFFNESS: f32 = 34.0;
+const INSPECTION_ORBIT_DAMPING: f32 = 11.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -108,6 +113,16 @@ pub struct NitroPose {
     pub z: f32,
     pub pitch: f32,
     z_velocity: f32,
+    pitch_velocity: f32,
+}
+
+/// A temporary, spring-returning peek around the toy driven by the right
+/// analog stick. The deliberately narrow limits keep the play screen legible.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct InspectionOrbit {
+    yaw: f32,
+    pitch: f32,
+    yaw_velocity: f32,
     pitch_velocity: f32,
 }
 
@@ -214,6 +229,42 @@ fn intro_camera_transform(progress: f32) -> Transform {
         TOY_CAMERA_TARGET.z + radius * angle.cos(),
     );
     Transform::from_translation(position).looking_at(TOY_CAMERA_TARGET, Vec3::Y)
+}
+
+fn inspection_camera_transform(yaw: f32, pitch: f32) -> Transform {
+    let base = toy_camera_position() - TOY_CAMERA_TARGET;
+    let radius = base.length();
+    let elevation = (base.y / radius).asin() + pitch;
+    let horizontal = radius * elevation.cos();
+    let position = TOY_CAMERA_TARGET
+        + Vec3::new(
+            horizontal * yaw.sin(),
+            radius * elevation.sin(),
+            horizontal * yaw.cos(),
+        );
+    Transform::from_translation(position).looking_at(TOY_CAMERA_TARGET, Vec3::Y)
+}
+
+fn step_inspection_orbit(orbit: &mut InspectionOrbit, axes: Vec2, dt: f32) {
+    let x = game_core::input::apply_deadzone(axes.x, INSPECTION_ORBIT_DEADZONE);
+    let y = game_core::input::apply_deadzone(axes.y, INSPECTION_ORBIT_DEADZONE);
+    let dt = dt.min(0.05);
+    orbit.yaw = game_core::dynamics::spring_step(
+        orbit.yaw,
+        &mut orbit.yaw_velocity,
+        x * INSPECTION_ORBIT_MAX_YAW,
+        INSPECTION_ORBIT_STIFFNESS,
+        INSPECTION_ORBIT_DAMPING,
+        dt,
+    );
+    orbit.pitch = game_core::dynamics::spring_step(
+        orbit.pitch,
+        &mut orbit.pitch_velocity,
+        y * INSPECTION_ORBIT_MAX_PITCH,
+        INSPECTION_ORBIT_STIFFNESS,
+        INSPECTION_ORBIT_DAMPING,
+        dt,
+    );
 }
 
 #[derive(Resource)]
@@ -1120,6 +1171,35 @@ pub fn animate_startup_intro(
     }
 }
 
+/// Lets the right stick briefly inspect the toy from either side and from
+/// above/below. Releasing the stick springs back to the authored camera.
+pub fn update_inspection_orbit(
+    time: Res<Time>,
+    intro: Res<StartupIntro>,
+    pads: Query<&Gamepad>,
+    mut orbit: ResMut<InspectionOrbit>,
+    mut camera: Query<&mut Transform, With<ToyCamera>>,
+) {
+    if !intro.complete() {
+        *orbit = InspectionOrbit::default();
+        return;
+    }
+    let mut axes = Vec2::ZERO;
+    for pad in &pads {
+        let candidate = Vec2::new(
+            pad.get(GamepadAxis::RightStickX).unwrap_or_default(),
+            pad.get(GamepadAxis::RightStickY).unwrap_or_default(),
+        );
+        if candidate.length_squared() > axes.length_squared() {
+            axes = candidate;
+        }
+    }
+    step_inspection_orbit(&mut orbit, axes, time.delta_secs());
+    if let Ok(mut transform) = camera.single_mut() {
+        *transform = inspection_camera_transform(orbit.yaw, orbit.pitch);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn apply_body_dynamics(
     mut rig: ResMut<BodyRig>,
@@ -1318,6 +1398,38 @@ mod tests {
         assert!(final_delta
             .normalize()
             .abs_diff_eq(base_delta.normalize(), 1e-6));
+    }
+
+    #[test]
+    fn inspection_orbit_is_bounded_and_springs_back_to_the_authored_view() {
+        let mut orbit = InspectionOrbit::default();
+        for _ in 0..180 {
+            step_inspection_orbit(&mut orbit, Vec2::ONE, 1.0 / 60.0);
+        }
+        assert!(orbit.yaw > 0.17 && orbit.yaw <= INSPECTION_ORBIT_MAX_YAW + 1e-4);
+        assert!(orbit.pitch > 0.10 && orbit.pitch <= INSPECTION_ORBIT_MAX_PITCH + 1e-4);
+
+        let peek = inspection_camera_transform(orbit.yaw, orbit.pitch);
+        assert!(peek.translation.x > 0.03);
+        assert!(peek.translation.y > toy_camera_position().y);
+
+        for _ in 0..180 {
+            step_inspection_orbit(&mut orbit, Vec2::ZERO, 1.0 / 60.0);
+        }
+        assert!(orbit.yaw.abs() < 1e-4);
+        assert!(orbit.pitch.abs() < 1e-4);
+        let returned = inspection_camera_transform(orbit.yaw, orbit.pitch);
+        let authored = intro_camera_transform(1.0);
+        assert!(returned.translation.abs_diff_eq(authored.translation, 1e-4));
+        assert!(returned.rotation.abs_diff_eq(authored.rotation, 1e-4));
+    }
+
+    #[test]
+    fn inspection_orbit_deadzone_ignores_stick_noise() {
+        let mut orbit = InspectionOrbit::default();
+        step_inspection_orbit(&mut orbit, Vec2::splat(0.1), 1.0 / 60.0);
+        assert_eq!(orbit.yaw, 0.0);
+        assert_eq!(orbit.pitch, 0.0);
     }
 
     #[test]

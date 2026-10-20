@@ -614,7 +614,11 @@ fn main() {
             tick_visual_effects,
             (toy_view::spawn_toy, toy_view::paint_screen).chain(),
             toy_view::decorate_control_shines,
-            toy_view::animate_startup_intro,
+            (
+                toy_view::animate_startup_intro,
+                toy_view::update_inspection_orbit,
+            )
+                .chain(),
             toy_view::toggle_mode,
             (toy_view::apply_body_dynamics, toy_view::animate_parts).chain(),
             toy_view::turbo_lamp,
@@ -630,6 +634,7 @@ fn main() {
     app.init_resource::<toy_view::BodyRig>();
     app.init_resource::<toy_view::CrashPulse>();
     app.init_resource::<toy_view::NitroPose>();
+    app.init_resource::<toy_view::InspectionOrbit>();
 
     view::add_view_systems(&mut app);
     telemetry::add_systems(&mut app);

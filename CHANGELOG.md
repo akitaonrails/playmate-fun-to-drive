@@ -22,6 +22,9 @@ milestone (docs/PLAN.md).
   retaining its Web Audio unlock, soundtrack, crossfade, and lifecycle checks.
 - Added an edge-triggered `L3+R3` gamepad chord for toggling the persistent
   large-screen view without repeated toggles while both sticks are held.
+- Added a bounded right-stick camera orbit for inspecting the toy during menus
+  or play; releasing the stick smoothly springs back to the authored view while
+  the fixed dorm-room background and readable game screen remain centered.
 
 ## [0.9.2] — 2026-10-19
 
