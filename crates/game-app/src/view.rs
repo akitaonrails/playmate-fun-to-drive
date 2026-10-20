@@ -308,46 +308,67 @@ pub struct RoadVisibilityVisuals {
 #[derive(Resource, Default)]
 pub struct NitroVisuals {
     pub intensity: f32,
+    pub time_travel_active: bool,
 }
 
-/// Once-per-session state for the 88 mph time-machine easter egg.
+/// Presentation state for the hidden every-fourth-boost time-machine reward.
 #[derive(Resource, Default)]
 struct TimeTravelVisuals {
-    triggered: bool,
+    playing: bool,
     active_secs: f32,
     was_running: bool,
     last_distance: f32,
+    seen_sequence: u32,
+    preview_pending: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TimeTravelFrame {
+    running: bool,
+    paused: bool,
+    distance: f32,
+    displayed_mph: f32,
+    reward_sequence: u32,
+    force_preview: bool,
 }
 
 impl TimeTravelVisuals {
     fn active(&self) -> bool {
-        self.triggered && self.active_secs < TIME_TRAVEL_DURATION_SECS
+        self.playing && self.active_secs < TIME_TRAVEL_DURATION_SECS
     }
 
-    fn update(
-        &mut self,
-        running: bool,
-        paused: bool,
-        distance: f32,
-        displayed_mph: f32,
-        straightaway_ready: bool,
-        dt: f32,
-    ) {
+    fn update(&mut self, frame: TimeTravelFrame, dt: f32) {
+        let TimeTravelFrame {
+            running,
+            paused,
+            distance,
+            displayed_mph,
+            reward_sequence,
+            force_preview,
+        } = frame;
         let new_session = running && (!self.was_running || distance + 0.5 < self.last_distance);
         if new_session {
-            self.triggered = false;
+            self.playing = false;
             self.active_secs = TIME_TRAVEL_DURATION_SECS;
+            self.seen_sequence = reward_sequence;
+            self.preview_pending = force_preview;
         }
         if !running {
             self.was_running = false;
             return;
         }
         if !paused {
-            if !self.triggered && displayed_mph >= TIME_TRAVEL_SPEED_MPH && straightaway_ready {
-                self.triggered = true;
+            let earned_reward = reward_sequence > self.seen_sequence;
+            if self.preview_pending || (earned_reward && displayed_mph >= TIME_TRAVEL_SPEED_MPH) {
+                self.playing = true;
                 self.active_secs = 0.0;
+                self.seen_sequence = reward_sequence;
+                self.preview_pending = false;
             } else if self.active() {
                 self.active_secs = (self.active_secs + dt.max(0.0)).min(TIME_TRAVEL_DURATION_SECS);
+                if self.active_secs >= TIME_TRAVEL_DURATION_SECS {
+                    self.playing = false;
+                }
             }
         }
         self.was_running = true;
@@ -2383,8 +2404,9 @@ fn time_car_pose(progress: f32) -> TimeCarPose {
 fn sync_time_travel(
     time: Res<Time>,
     sim: Res<Sim>,
-    tuning: Res<TuningRes>,
+    preview: Res<crate::DevDeloreanPreview>,
     mut state: ResMut<TimeTravelVisuals>,
+    mut nitro_visuals: ResMut<NitroVisuals>,
     mut car: Query<(&mut Transform, &mut Visibility), With<TimeCarRoot>>,
     mut trails: Query<
         (&TimeTrail, &mut Transform, &mut Sprite, &mut Visibility),
@@ -2397,15 +2419,19 @@ fn sync_time_travel(
 ) {
     let running = matches!(sim.0.phase, Phase::Running);
     state.update(
-        running,
-        sim.0.paused,
-        sim.0.distance,
-        sim.0.speed * 3.6,
-        sim.0.straightaway_overdrive_ready(&tuning.0),
+        TimeTravelFrame {
+            running,
+            paused: sim.0.paused,
+            distance: sim.0.distance,
+            displayed_mph: sim.0.speed * 3.6,
+            reward_sequence: sim.0.time_travel_sequence(),
+            force_preview: preview.0,
+        },
         time.delta_secs(),
     );
 
     let active = running && state.active();
+    nitro_visuals.time_travel_active = active;
     let progress = if active {
         state.active_secs / TIME_TRAVEL_DURATION_SECS
     } else {
@@ -4086,6 +4112,21 @@ pub fn add_view_systems(app: &mut App) {
 mod tests {
     use super::*;
 
+    fn time_travel_frame(
+        distance: f32,
+        displayed_mph: f32,
+        reward_sequence: u32,
+    ) -> TimeTravelFrame {
+        TimeTravelFrame {
+            running: true,
+            paused: false,
+            distance,
+            displayed_mph,
+            reward_sequence,
+            force_preview: false,
+        }
+    }
+
     #[test]
     fn pause_overlay_only_appears_during_a_paused_run() {
         assert!(pause_overlay_visible(true, true));
@@ -4240,23 +4281,53 @@ mod tests {
     }
 
     #[test]
-    fn time_machine_triggers_once_per_session_only_on_a_ready_straight() {
+    fn time_machine_triggers_once_for_each_earned_four_boost_sequence() {
         let mut state = TimeTravelVisuals::default();
-        state.update(true, false, 10.0, 89.0, false, 0.1);
+        state.update(time_travel_frame(10.0, 89.0, 0), 0.1);
         assert!(!state.active());
-        state.update(true, false, 11.0, 87.9, true, 0.1);
+        state.update(time_travel_frame(11.0, 87.9, 1), 0.1);
         assert!(!state.active());
-        state.update(true, false, 12.0, 89.0, true, 0.1);
+        state.update(time_travel_frame(12.0, 89.0, 1), 0.1);
         assert!(state.active());
 
-        state.update(true, false, 20.0, 92.0, true, TIME_TRAVEL_DURATION_SECS);
+        state.update(time_travel_frame(20.0, 92.0, 1), TIME_TRAVEL_DURATION_SECS);
         assert!(!state.active());
-        state.update(true, false, 21.0, 95.0, true, 1.0);
-        assert!(!state.active(), "the same session must not retrigger");
+        state.update(time_travel_frame(21.0, 95.0, 1), 1.0);
+        assert!(
+            !state.active(),
+            "the same earned sequence must not retrigger"
+        );
+        state.update(time_travel_frame(22.0, 95.0, 2), 0.1);
+        assert!(state.active(), "the next four boosts earn another pass");
 
-        state.update(false, false, 21.0, 0.0, false, 0.1);
-        state.update(true, false, 0.0, 89.0, true, 0.1);
-        assert!(state.active(), "a fresh session may trigger again");
+        state.update(
+            TimeTravelFrame {
+                running: false,
+                ..time_travel_frame(22.0, 0.0, 2)
+            },
+            0.1,
+        );
+        state.update(time_travel_frame(0.0, 89.0, 0), 0.1);
+        assert!(!state.active(), "a fresh session resets the hidden cadence");
+    }
+
+    #[test]
+    fn dev_time_machine_preview_bypasses_the_hidden_reward_cadence() {
+        let mut state = TimeTravelVisuals::default();
+        let preview = TimeTravelFrame {
+            force_preview: true,
+            ..time_travel_frame(0.0, 0.0, 0)
+        };
+        state.update(preview, 0.1);
+        assert!(state.active());
+        state.update(
+            TimeTravelFrame {
+                distance: 1.0,
+                ..preview
+            },
+            TIME_TRAVEL_DURATION_SECS,
+        );
+        assert!(!state.active(), "the preview should still play only once");
     }
 
     #[test]

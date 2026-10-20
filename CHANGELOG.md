@@ -5,6 +5,12 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.10.1] — 2026-10-19
+
+- Made the hidden 88 mph time-machine pass a predictable secret reward on
+  every fourth successful COLD-AIR activation, resetting its invisible cadence
+  after each pass, plus a debug-build-only `?dev_delorean=1` preview.
+
 ## [0.10.0] — 2026-10-19
 
 - Added a persistent large-screen mode beside the CRT setting, with a smooth

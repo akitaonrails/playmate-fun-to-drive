@@ -243,6 +243,10 @@ pub struct Game {
     pub nitro_t: f32,
     /// Seconds before another charge may be activated.
     pub nitro_cooldown: f32,
+    /// Hidden four-use cadence for the time-machine easter egg.
+    cold_air_uses_toward_time_travel: u8,
+    time_travel_sequence: u32,
+    time_travel_boost: bool,
     /// Absolute course distance of the next pickup.
     pub next_nitro_distance: f32,
     /// Lane of the next pickup, relative to road center.
@@ -315,6 +319,9 @@ impl Game {
             nitro_charges: 0,
             nitro_t: 0.0,
             nitro_cooldown: 0.0,
+            cold_air_uses_toward_time_travel: 0,
+            time_travel_sequence: 0,
+            time_travel_boost: false,
             next_nitro_distance: t.nitro_pickup_first_m,
             next_nitro_lane: Self::nitro_lane(seed, 0, t),
             nitro_pickup_index: 0,
@@ -512,6 +519,12 @@ impl Game {
 
     pub fn nitro_active(&self) -> bool {
         self.nitro_t > 0.0
+    }
+
+    /// Monotonic within one run; advances on every fourth successful COLD-AIR
+    /// activation so presentation can play the hidden time-machine reward.
+    pub fn time_travel_sequence(&self) -> u32 {
+        self.time_travel_sequence
     }
 
     pub fn nitro_pickup_ahead(&self) -> f32 {
@@ -784,6 +797,9 @@ impl Game {
         self.nitro_charges = 0;
         self.nitro_t = 0.0;
         self.nitro_cooldown = 0.0;
+        self.cold_air_uses_toward_time_travel = 0;
+        self.time_travel_sequence = 0;
+        self.time_travel_boost = false;
         self.nitro_pickup_index = 0;
         self.next_nitro_distance = t.nitro_pickup_first_m;
         (self.next_nitro_distance, self.next_nitro_lane) = self.safe_pickup_placement(
@@ -882,6 +898,12 @@ impl Game {
         {
             self.nitro_charges = 0;
             self.nitro_t = t.nitro_duration_secs;
+            self.cold_air_uses_toward_time_travel += 1;
+            self.time_travel_boost = self.cold_air_uses_toward_time_travel >= 4;
+            if self.time_travel_boost {
+                self.cold_air_uses_toward_time_travel = 0;
+                self.time_travel_sequence = self.time_travel_sequence.saturating_add(1);
+            }
             ev.nitro_started = true;
         }
         if input.jump
@@ -963,6 +985,7 @@ impl Game {
                 self.nitro_t = (self.nitro_t - interval).max(0.0);
                 if self.nitro_t <= f32::EPSILON {
                     self.nitro_t = 0.0;
+                    self.time_travel_boost = false;
                     self.nitro_cooldown = t.nitro_cooldown_secs;
                 }
             } else if self.nitro_cooldown > 0.0 {
@@ -1048,6 +1071,12 @@ impl Game {
             target *= t.jump_speed_multiplier;
         }
         target *= self.slope_speed_factor(t);
+        if nitro_active && self.time_travel_boost && self.recovery == Recovery::Normal {
+            // The fourth boost must genuinely cross 88 on every difficulty,
+            // even on a gentle uphill. Player-imposed brake/off-road drag is
+            // applied below and can still spoil the attempt.
+            target = target.max(t.straightaway_high_speed_cap);
+        }
         if self.gear == Gear::High
             && self.recovery == Recovery::Normal
             && !nitro_active
@@ -1245,6 +1274,7 @@ impl Game {
         self.jump_t = 0.0;
         self.cold_air_hop_t = 0.0;
         self.cold_air_hop_lockout_t = 0.0;
+        self.time_travel_boost = false;
         self.phase = Phase::GameOver {
             reason: EndReason::Time,
         };
@@ -1273,6 +1303,7 @@ impl Game {
         // applies so a crash cannot be used to retrigger the boost early.
         if self.nitro_t > 0.0 {
             self.nitro_t = 0.0;
+            self.time_travel_boost = false;
             self.nitro_cooldown = self.nitro_cooldown.max(t.nitro_cooldown_secs);
             self.cold_air_hop_t = 0.0;
             self.cold_air_hop_lockout_t = 0.0;
@@ -2423,6 +2454,41 @@ mod tests {
     }
 
     #[test]
+    fn every_fourth_cold_air_activation_advances_the_hidden_time_travel_sequence() {
+        let t = Tuning::default();
+        let mut g = Game::with_road(
+            34,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Hard,
+            &t,
+        );
+        g.start_run(&t);
+
+        for use_number in 1..=8 {
+            g.nitro_t = 0.0;
+            g.nitro_cooldown = 0.0;
+            g.nitro_charges = t.nitro_capacity;
+            let events = g.step(
+                &InputState {
+                    nitro: true,
+                    ..idle()
+                },
+                DT,
+                &t,
+            );
+            assert!(events.nitro_started);
+            assert_eq!(g.time_travel_sequence(), use_number / 4);
+        }
+
+        g.start_run(&t);
+        assert_eq!(
+            g.time_travel_sequence(),
+            0,
+            "a fresh run resets the cadence"
+        );
+    }
+
+    #[test]
     fn restart_clears_nitro_and_restores_first_pickup() {
         let (mut g, t) = game(34);
         g.step(
@@ -2480,6 +2546,58 @@ mod tests {
             collected >= 4,
             "only {collected} pickups in one 100 s light cycle"
         );
+    }
+
+    #[test]
+    fn fourth_cold_air_boost_can_cross_88_even_when_normal_easy_boost_cannot() {
+        let mut t = Tuning {
+            speed_easy_multiplier: 0.60,
+            nitro_speed_multiplier: 1.05,
+            ..Tuning::default()
+        };
+        // Keep the reward floor itself at the production value.
+        t.straightaway_high_speed_cap = 89.5 / 3.6;
+        let mut g = Game::with_road(
+            35,
+            RoadLoop::straight(10_000.0, vec![]),
+            Difficulty::Easy,
+            &t,
+        );
+        g.start_run(&t);
+
+        for _ in 0..3 {
+            g.nitro_charges = t.nitro_capacity;
+            assert!(
+                g.step(
+                    &InputState {
+                        nitro: true,
+                        ..idle()
+                    },
+                    DT,
+                    &t,
+                )
+                .nitro_started
+            );
+            g.nitro_t = 0.0;
+            g.nitro_cooldown = 0.0;
+        }
+        g.speed = 0.0;
+        g.nitro_charges = t.nitro_capacity;
+        assert!(
+            g.step(
+                &InputState {
+                    nitro: true,
+                    ..idle()
+                },
+                DT,
+                &t,
+            )
+            .nitro_started
+        );
+        g.step(&idle(), t.nitro_duration_secs - DT, &t);
+
+        assert!(g.speed * 3.6 > 88.0);
+        assert_eq!(g.time_travel_sequence(), 1);
     }
 
     #[test]

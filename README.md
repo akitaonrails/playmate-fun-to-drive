@@ -65,7 +65,7 @@ player's local system date, clock, and timezone.
 - Randomized city and landscape backdrops including Tokyo neon, Paris silhouettes, Vegas-style lights, mountains, forests, and open road.
 - Rare background events: shooting stars, bird flocks, a hurricane with its own 16-bit wind bed that can lift traffic and trees, and a nighttime UFO abduction with a PSG tractor-beam warble.
 - Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and an animated large-screen mode for compact displays.
-- A hidden 88 mph straightaway event: hold a clean line beyond the normal 87 mph ceiling to summon a blue-electric time machine once per session.
+- A hidden four-use COLD-AIR cadence can push through 88 mph and summon the blue-electric time machine; its progress is intentionally not shown.
 
 ## Controls
 
@@ -136,6 +136,10 @@ or 100,000 passed/bumped cars) invalidate the stored board.
 Transition tests may additionally use `qa_start_environment_time=99` while QA
 mode is active. The value is constrained to the first 100-second cycle and is
 ignored during normal leaderboard runs.
+
+Debug builds can preview the time-machine pass directly with
+`?dev_delorean=1`. The flag starts a transient run at trigger speed and is
+compiled out of production builds.
 
 For weaker GPUs, append `?quality=low`. This reduces the offscreen game view
 from 960×600 to 720×450 and disables bloom without changing simulation logic.

@@ -32,6 +32,9 @@ const ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
 #[derive(Resource)]
 struct Sim(pub Game);
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct DevDeloreanPreview(pub(crate) bool);
+
 #[derive(Resource)]
 struct TuningRes(pub Tuning);
 
@@ -117,6 +120,13 @@ fn dev_ending_requested(value: Option<&str>) -> bool {
 }
 
 #[cfg(debug_assertions)]
+fn dev_delorean_requested(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("on")
+    })
+}
+
+#[cfg(debug_assertions)]
 fn dev_ending_game(tuning: &Tuning) -> Game {
     let mut rng = game_core::Rng::new(20261015);
     let road =
@@ -137,6 +147,20 @@ fn dev_ending_game(tuning: &Tuning) -> Game {
         tuning,
     );
     let _ = game.step(&InputState::default(), DEV_ENDING_RUN_SECS, tuning);
+    game
+}
+
+#[cfg(debug_assertions)]
+fn dev_delorean_game(mut game: Game, tuning: &Tuning) -> Game {
+    let _ = game.step(
+        &InputState {
+            reset: true,
+            ..default()
+        },
+        0.0,
+        tuning,
+    );
+    game.speed = 89.0 / 3.6;
     game
 }
 
@@ -471,6 +495,10 @@ fn main() {
     let dev_ending = dev_ending_requested(bridge::query_param("dev_ending").as_deref());
     #[cfg(not(debug_assertions))]
     let dev_ending = false;
+    #[cfg(debug_assertions)]
+    let dev_delorean = dev_delorean_requested(bridge::query_param("dev_delorean").as_deref());
+    #[cfg(not(debug_assertions))]
+    let dev_delorean = false;
     let coarse_pointer = bridge::coarse_pointer();
     let render_quality =
         RenderQuality::from_query(bridge::query_param("quality").as_deref(), coarse_pointer);
@@ -480,7 +508,7 @@ fn main() {
         .flatten()
         .as_deref()
         .and_then(session::validated_qa_environment_time);
-    let transient_run = qa_mode || dev_ending;
+    let transient_run = qa_mode || dev_ending || dev_delorean;
     let (leaderboard, persistent) = if transient_run {
         (Vec::new(), false)
     } else {
@@ -511,8 +539,14 @@ fn main() {
     } else {
         initial_game
     };
+    #[cfg(debug_assertions)]
+    let initial_game = if dev_delorean {
+        dev_delorean_game(initial_game, &tuning)
+    } else {
+        initial_game
+    };
     let mut initial_end = EndFlow::default();
-    if dev_ending {
+    if dev_ending || dev_delorean {
         initial_end.mode = EndMode::Playing;
     }
     let mut app = App::new();
@@ -565,6 +599,7 @@ fn main() {
         crt_enabled,
         large_screen,
     })
+    .insert_resource(DevDeloreanPreview(dev_delorean))
     // Seeded technical loop: mixed-radius corners, rolling elevation,
     // traffic, and collidable roadside scenery.
     .insert_resource(Sim(initial_game))
@@ -1268,6 +1303,26 @@ mod tests {
         assert!(!dev_ending_requested(None));
         assert!(!dev_ending_requested(Some("0")));
         assert!(!dev_ending_requested(Some("false")));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_delorean_flag_accepts_explicit_truthy_values_only() {
+        assert!(dev_delorean_requested(Some("1")));
+        assert!(dev_delorean_requested(Some("true")));
+        assert!(dev_delorean_requested(Some("ON")));
+        assert!(!dev_delorean_requested(None));
+        assert!(!dev_delorean_requested(Some("0")));
+        assert!(!dev_delorean_requested(Some("false")));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_delorean_game_starts_running_at_the_trigger_speed() {
+        let tuning = Tuning::default();
+        let game = dev_delorean_game(Game::new(7, Difficulty::Medium, &tuning), &tuning);
+        assert!(matches!(game.phase, game_core::Phase::Running));
+        assert!(game.speed * 3.6 >= 88.0);
     }
 
     #[cfg(debug_assertions)]
