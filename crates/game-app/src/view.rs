@@ -780,6 +780,14 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
         });
 }
 
+const PAUSE_RESUME_Y: f32 = -8.0;
+const PAUSE_RESTART_Y: f32 = -86.0;
+
+#[cfg(test)]
+fn pause_action_gap() -> f32 {
+    PAUSE_RESUME_Y - PAUSE_RESTART_Y
+}
+
 fn spawn_pause_overlay(commands: &mut Commands) {
     commands
         .spawn((
@@ -798,13 +806,13 @@ fn spawn_pause_overlay(commands: &mut Commands) {
             parent.spawn((
                 Sprite::from_color(
                     Color::srgba(0.025, 0.08, 0.14, 0.96),
-                    Vec2::new(620.0, 250.0),
+                    Vec2::new(620.0, 300.0),
                 ),
                 Transform::from_xyz(0.0, 0.0, 0.1),
             ));
             parent.spawn((
                 Sprite::from_color(Color::srgba(0.20, 0.90, 1.0, 0.92), Vec2::new(624.0, 4.0)),
-                Transform::from_xyz(0.0, 123.0, 0.2),
+                Transform::from_xyz(0.0, 148.0, 0.2),
             ));
             parent.spawn((
                 Text2d::new("PAUSED"),
@@ -813,17 +821,35 @@ fn spawn_pause_overlay(commands: &mut Commands) {
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.96, 1.0)),
-                Transform::from_xyz(0.0, 62.0, 0.3),
+                Transform::from_xyz(0.0, 88.0, 0.3),
             ));
             parent.spawn((
-                Text2d::new("START / P   RESUME\nSELECT / ESC   RESTART"),
+                Sprite::from_color(Color::srgba(0.05, 0.24, 0.31, 0.78), Vec2::new(420.0, 52.0)),
+                Transform::from_xyz(0.0, PAUSE_RESUME_Y, 0.2),
+            ));
+            parent.spawn((
+                Text2d::new("START / P    RESUME"),
                 TextFont {
                     font_size: FontSize::Px(22.0),
                     ..default()
                 },
                 TextColor(Color::srgb(1.0, 0.90, 0.56)),
                 TextLayout::justify(Justify::Center),
-                Transform::from_xyz(0.0, -39.0, 0.3),
+                Transform::from_xyz(0.0, PAUSE_RESUME_Y, 0.3),
+            ));
+            parent.spawn((
+                Sprite::from_color(Color::srgba(0.12, 0.10, 0.16, 0.78), Vec2::new(420.0, 52.0)),
+                Transform::from_xyz(0.0, PAUSE_RESTART_Y, 0.2),
+            ));
+            parent.spawn((
+                Text2d::new("SELECT / ESC    RESTART"),
+                TextFont {
+                    font_size: FontSize::Px(22.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.90, 0.56)),
+                TextLayout::justify(Justify::Center),
+                Transform::from_xyz(0.0, PAUSE_RESTART_Y, 0.3),
             ));
         });
 }
@@ -2664,6 +2690,7 @@ fn speed_line_geometry(
 fn sync_nitro_speed_lines(
     visuals: Res<NitroVisuals>,
     proj: Res<Proj>,
+    finish: Res<crate::FinishSequence>,
     time: Res<Time>,
     mut lines: Query<(
         &NitroSpeedLine,
@@ -2672,7 +2699,7 @@ fn sync_nitro_speed_lines(
         &mut Visibility,
     )>,
 ) {
-    if visuals.intensity <= 0.015 {
+    if finish_hides_projected_effects(finish.active) || visuals.intensity <= 0.015 {
         for (_, _, _, mut visibility) in &mut lines {
             *visibility = Visibility::Hidden;
         }
@@ -3726,9 +3753,15 @@ fn sync_road_visibility(
 fn sync_projected_headlights(
     visuals: Res<RoadVisibilityVisuals>,
     proj: Res<Proj>,
-    mut headlights: Query<(&HeadlightBand, &mut Transform, &mut Sprite)>,
+    finish: Res<crate::FinishSequence>,
+    mut headlights: Query<(&HeadlightBand, &mut Transform, &mut Sprite, &mut Visibility)>,
 ) {
-    for (band, mut transform, mut sprite) in &mut headlights {
+    for (band, mut transform, mut sprite, mut visibility) in &mut headlights {
+        if finish_hides_projected_effects(finish.active) {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        *visibility = Visibility::Visible;
         let y0 = proj.rows_y[band.row];
         let y1 = if band.row + 1 < ROWS {
             proj.rows_y[band.row + 1]
@@ -3746,6 +3779,10 @@ fn sync_projected_headlights(
         };
         sprite.color = Color::srgba(red, green, blue, visuals.headlights * strength * 0.055);
     }
+}
+
+fn finish_hides_projected_effects(finish_active: bool) -> bool {
+    finish_active
 }
 
 /// M10: scroll the drum bands with the drum and set overlay alpha by dial.
@@ -4169,6 +4206,7 @@ mod tests {
         assert!(pause_overlay_visible(true, true));
         assert!(!pause_overlay_visible(false, true));
         assert!(!pause_overlay_visible(true, false));
+        assert!(pause_action_gap() >= 70.0);
     }
 
     #[test]
@@ -4547,6 +4585,12 @@ mod tests {
         assert_eq!(far_weight, 0.0);
         assert_eq!(near_center.x, 0.0);
         assert_eq!(middle_center.x, 0.0);
+    }
+
+    #[test]
+    fn finish_hides_headlights_from_the_flat_road_projection() {
+        assert!(finish_hides_projected_effects(true));
+        assert!(!finish_hides_projected_effects(false));
     }
 
     #[test]

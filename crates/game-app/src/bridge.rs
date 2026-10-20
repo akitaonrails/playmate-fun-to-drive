@@ -259,6 +259,11 @@ mod tests {
         assert!(html.contains("class=\"screen-hit\""));
         assert!(html.contains("nitroButton.classList.toggle('ready'"));
         assert!(html.contains("id=\"utility-rail\""));
+        assert!(html.contains("id=\"touch-resume\""));
+        assert!(html.contains("id=\"touch-pause-restart\""));
+        assert!(html.contains("steer.addEventListener('pointermove', updateSteer)"));
+        assert!(html.contains("const steerValueAt = clientX"));
+        assert!(html.contains("<span class=\"utility-label\">PAUSE</span>"));
     }
 
     #[test]

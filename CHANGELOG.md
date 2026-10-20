@@ -5,6 +5,17 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+- Clarified the compact mobile utility rail with icon-and-label controls,
+  added more separation between special actions and the drivetrain controls,
+  and made the two pause-menu actions independently touchable.
+- Reworked touch steering into a continuous captured horizontal gesture with
+  an analog dead zone, frame-coalesced visual feedback, and no layout reads
+  during pointer movement; simplified ready-state glow animation for weaker
+  mobile GPUs.
+- Hid projected headlights and lingering boost lines when the finish road
+  rises, alongside the existing traffic, pickup, hazard, and roadside-prop
+  cleanup.
+
 ## [0.11.0] — 2026-10-20
 
 - Rebuilt the mobile touch interface around a compact molded utility rail,

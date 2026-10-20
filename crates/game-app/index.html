@@ -38,7 +38,9 @@
         box-shadow: 0 6px 20px rgba(0,0,0,.35), inset 0 -1px rgba(255,255,255,.08); }
       .utility-button { min-width: 44px; height: 34px; padding: 0 9px; border: 1px solid rgba(202,224,240,.22);
         border-radius: 7px; color: #b9c9d8; background: linear-gradient(#252d3b,#101622); font: 700 10px/1 monospace;
-        letter-spacing: .05em; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.1), 0 2px 4px #0008; }
+        letter-spacing: .05em; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.1), 0 2px 4px #0008;
+        contain:paint; backface-visibility:hidden; will-change:transform; }
+      .utility-button .utility-icon { font-size: 13px; margin-right: 4px; vertical-align: -1px; }
       .utility-button:active { transform: translateY(1px); box-shadow: inset 0 2px 4px #000b; }
       .utility-button:focus-visible { outline: 2px solid #7eefff; outline-offset: 2px; }
       #touch-toggle[aria-pressed="true"] { color: #7fffd3; border-color: #51cfa8; }
@@ -63,29 +65,41 @@
       }
       .touch-button, .touch-pad { color: rgba(225,241,250,.76); border: 1px solid rgba(191,225,241,.3);
         background: linear-gradient(145deg, rgba(39,52,67,.52), rgba(8,14,24,.34));
-        box-shadow: inset 1px 1px rgba(255,255,255,.1), inset -2px -3px rgba(0,0,0,.22), 0 4px 10px #0004; }
+        box-shadow: inset 1px 1px rgba(255,255,255,.1), inset -2px -3px rgba(0,0,0,.22), 0 4px 10px #0004;
+        contain:paint; backface-visibility:hidden; will-change:transform; }
       .touch-button:active, .touch-button.pressed, .touch-pad.active { color:#fff; border-color:#7eefff;
         background: linear-gradient(145deg, rgba(35,119,139,.52), rgba(6,29,45,.5)); transform: translateY(1px); }
-      #touch-driving .steer { position:absolute; display:grid; grid-template-columns:1fr 1fr; gap:2px;
+      #touch-driving .steer { --steer-offset:0px; position:absolute; display:grid; grid-template-columns:1fr 1fr; gap:2px;
         left:max(14px, env(safe-area-inset-left)); bottom:max(14px, env(safe-area-inset-bottom));
         width:clamp(145px,24vw,220px); padding:7px; border-radius:35px;
-        background:rgba(5,10,18,.32); border:1px solid rgba(180,220,240,.14); }
+        background:rgba(5,10,18,.32); border:1px solid rgba(180,220,240,.14); touch-action:none; }
+      #touch-driving .steer::after { content:''; position:absolute; pointer-events:none; width:24px; height:6px;
+        left:calc(50% - 12px); bottom:4px; border-radius:8px; background:#8befff;
+        box-shadow:0 0 10px #46dfff; opacity:.3;
+        transform:translateX(var(--steer-offset)); transition:opacity .12s; }
+      #touch-driving .steer.active::after { opacity:.9; }
       #touch-driving .steer .touch-button { height:clamp(68px,18vh,104px); font-size:25px; }
       #touch-left { border-radius:30px 8px 8px 30px; clip-path:polygon(0 50%,26% 0,100% 8%,100% 92%,26% 100%); }
       #touch-right { border-radius:8px 30px 30px 8px; clip-path:polygon(0 8%,74% 0,100% 50%,74% 100%,0 92%); }
       #touch-driving .actions { position: absolute; right: max(18px, env(safe-area-inset-right));
         bottom:max(14px, env(safe-area-inset-bottom)); display:flex; flex-direction:column;
-        width:clamp(156px,22vw,204px); gap:8px; }
+        width:clamp(156px,22vw,204px); gap:clamp(16px,3.5vh,26px); }
       #touch-driving .quick-actions { display:grid; grid-template-columns:1fr 1fr; gap:9px; align-items:end; }
-      #touch-driving .drive-actions { display:grid; grid-template-columns:.9fr 1.1fr; gap:9px; align-items:end; }
+      #touch-driving .drive-actions { position:relative; display:grid; grid-template-columns:.9fr 1.1fr; gap:9px; align-items:end; }
+      #touch-driving .drive-actions::before { content:''; position:absolute; left:8%; right:8%; top:-9px;
+        height:1px; background:linear-gradient(90deg,transparent,#9acde044,transparent); }
       #touch-nitro { position:relative; aspect-ratio:1; border-radius:50%; color:#79e9ff; }
+      #touch-nitro::before, #touch-jump::before { content:''; position:absolute; inset:4px; pointer-events:none;
+        opacity:0; background:radial-gradient(circle,rgba(255,246,129,.22),transparent 70%); will-change:opacity; }
       #touch-nitro::after { content:'•••'; position:absolute; left:0; right:0; bottom:8px; letter-spacing:3px; color:#42566a; }
       #touch-nitro.charge-1::after { color:#ffe066; text-shadow:8px 0 #42566a,16px 0 #42566a; }
       #touch-nitro.charge-2::after { color:#ffe066; text-shadow:8px 0 #ffe066,16px 0 #42566a; }
       #touch-nitro.charge-3::after { color:#fff27f; text-shadow:0 0 8px #ffe447; }
-      #touch-nitro.ready { border-color:#ffea61; color:#fff7b0; animation:readyPulse 1.05s ease-in-out infinite; }
-      #touch-jump { aspect-ratio:1; color:#ffabd9; clip-path:polygon(25% 3%,75% 3%,98% 50%,75% 97%,25% 97%,2% 50%); }
-      #touch-jump.ready { color:#fff; border-color:#ff6fc1; animation:jumpReady .85s ease-in-out infinite; }
+      #touch-nitro.ready { border-color:#ffea61; color:#fff7b0; }
+      #touch-nitro.ready::before, #touch-jump.ready::before { animation:readyHalo .95s ease-in-out infinite; }
+      #touch-jump { position:relative; aspect-ratio:1; color:#ffabd9; clip-path:polygon(25% 3%,75% 3%,98% 50%,75% 97%,25% 97%,2% 50%); }
+      #touch-jump::before { background:radial-gradient(circle,rgba(255,111,193,.3),transparent 72%); }
+      #touch-jump.ready { color:#fff; border-color:#ff6fc1; }
       #touch-shift { position:relative; min-height:clamp(94px,24vh,132px); border-radius:18px; overflow:hidden; color:#a9bbca; }
       #touch-shift::before { content:''; position:absolute; width:7px; height:60%; left:50%; top:20%; transform:translateX(-50%); border-radius:5px; background:#050810; box-shadow:inset 0 0 3px #000; }
       #touch-shift::after { content:''; position:absolute; width:30px; height:30px; left:50%; bottom:12%; transform:translateX(-50%); border-radius:50%; background:radial-gradient(circle at 35% 28%,#b8c5cf,#384553 43%,#0d131c 75%); box-shadow:0 3px 7px #000; transition:bottom .16s; }
@@ -113,6 +127,8 @@
         border-radius:8px; text-align:center; text-transform:uppercase; color:#fff; background:rgba(4,9,18,.78); font-size:22px; }
       #touch-submit { left:39%; top:63%; width:22%; height:9%; }
       #touch-again { left:39%; top:63%; width:22%; height:9%; }
+      #touch-resume { left:31%; top:44%; width:38%; height:10%; }
+      #touch-pause-restart { left:31%; top:57%; width:38%; height:10%; }
       @media (orientation: landscape) and (min-aspect-ratio:1.2) and (max-aspect-ratio:1.5) {
         .screen-touch-panel { top:50%; transform:translate(-50%,-50%) scale(1); }
         body.large-screen:not(.direct-game) .screen-touch-panel { top:54%; transform:translate(-50%,-50%) scale(1.22); }
@@ -145,8 +161,7 @@
       .boot-progress::after { content:''; display:block; width:42%; height:100%; background:linear-gradient(90deg,#42e5d0,#ffe36d); box-shadow:0 0 12px #42e5d0; animation:loadSweep 1.4s ease-in-out infinite; }
       #loading .hint { margin-top:8px; color:#6f8292; font-size:11px; }
       .sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
-      @keyframes readyPulse { 50% { box-shadow:0 0 24px #ffe33d99,inset 0 0 15px #ffe33d33; transform:scale(1.035); } }
-      @keyframes jumpReady { 50% { filter:drop-shadow(0 0 10px #ff4fb8); transform:scale(1.04); } }
+      @keyframes readyHalo { 50% { opacity:1; } }
       @keyframes bootScan { to { top:110%; } }
       @keyframes loadSweep { from { transform:translateX(-105%); } to { transform:translateX(245%); } }
       @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.001ms!important; animation-iteration-count:1!important; scroll-behavior:auto!important; } }
@@ -155,12 +170,12 @@
   <body>
     <div id="rotate-device" role="status">ROTATE DEVICE<br>FOR LANDSCAPE DRIVING</div>
     <nav id="utility-rail" aria-label="Game display controls">
-      <button id="touch-toggle" class="utility-button" type="button" aria-label="Toggle touch controls" aria-pressed="false">TOUCH</button>
-      <button id="touch-pause" class="utility-button touch-utility" type="button" aria-label="Pause game">Ⅱ</button>
-      <button id="touch-restart" class="utility-button touch-utility" type="button" aria-label="Return to run selection">↺</button>
-      <button id="touch-large-driving" class="utility-button touch-utility" type="button" aria-label="Toggle large screen" aria-pressed="false">VIEW</button>
-      <button id="install-button" class="utility-button touch-utility" type="button" aria-label="Install game as an app" hidden>APP</button>
-      <button id="fullscreen-toggle" class="utility-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
+      <button id="touch-toggle" class="utility-button" type="button" aria-label="Toggle touch controls" aria-pressed="false"><span class="utility-icon">◎</span><span class="utility-label">TOUCH</span></button>
+      <button id="touch-pause" class="utility-button touch-utility" type="button" aria-label="Pause game"><span class="utility-icon">Ⅱ</span><span class="utility-label">PAUSE</span></button>
+      <button id="touch-restart" class="utility-button touch-utility" type="button" aria-label="Return to run selection"><span class="utility-icon">↺</span><span class="utility-label">MENU</span></button>
+      <button id="touch-large-driving" class="utility-button touch-utility" type="button" aria-label="Toggle larger game view" aria-pressed="false"><span class="utility-icon">▣</span><span class="utility-label">ZOOM</span></button>
+      <button id="install-button" class="utility-button touch-utility" type="button" aria-label="Install game as an app" hidden><span class="utility-icon">↓</span><span class="utility-label">INSTALL</span></button>
+      <button id="fullscreen-toggle" class="utility-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen"><span class="utility-icon">⛶</span><span class="utility-label">FULL</span></button>
     </nav>
     <div id="touch-driving" class="touch-layer" aria-label="Touch driving controls">
       <button id="touch-screen-tap" aria-label="Tap game screen to pause or resume"></button>
@@ -177,6 +192,10 @@
           <button id="touch-shift" class="touch-pad" aria-label="Swipe up for high gear or down for low gear"><span class="shift-high">H</span><span class="shift-low">L</span><span class="sr-only">Swipe up for high gear or down for low gear</span></button>
           <button id="touch-brake" class="touch-button">BRAKE</button>
         </div>
+      </div>
+      <div id="touch-pause-menu" class="screen-touch-panel" role="group" aria-label="Paused game controls">
+        <button id="touch-resume" class="screen-hit" aria-label="Resume game">RESUME</button>
+        <button id="touch-pause-restart" class="screen-hit" aria-label="Restart from run selection">RESTART</button>
       </div>
     </div>
     <div id="touch-ui" class="touch-layer">
@@ -272,7 +291,8 @@
           pause_seq: 0, difficulty_seq: 0, difficulty_index: 1, confirm_seq: 0,
           crt_seq: 0, large_seq: 0, restart_seq: 0, initials_seq: 0, initials: '', submit_seq: 0
         };
-        const held = { left: new Set(), right: new Set(), brake: new Set() };
+        const held = { brake: new Set() };
+        const steeringPointers = new Map();
         const byId = id => document.getElementById(id);
         const pulse = key => { state[key] = (state[key] + 1) >>> 0; };
         const touchControlSelector = '.touch-button, .touch-pad, .screen-hit, .utility-button, #touch-screen-tap';
@@ -282,7 +302,9 @@
           }
         }, { capture: true });
         const recompute = () => {
-          state.steer = held.left.size === held.right.size ? 0 : (held.right.size ? 1 : -1);
+          state.steer = steeringPointers.size
+            ? [...steeringPointers.values()].reduce((sum, value) => sum + value, 0) / steeringPointers.size
+            : 0;
           state.brake = held.brake.size ? 1 : 0;
         };
         const hold = (id, bucket) => {
@@ -296,7 +318,44 @@
           });
           for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(name, release);
         };
-        hold('touch-left', 'left'); hold('touch-right', 'right'); hold('touch-brake', 'brake');
+        hold('touch-brake', 'brake');
+        const steer = document.querySelector('#touch-driving .steer');
+        let steerBounds = null;
+        let steerVisualFrame = 0;
+        const steerValueAt = clientX => {
+          const bounds = steerBounds || steer.getBoundingClientRect();
+          const raw = (clientX - (bounds.left + bounds.width / 2)) / (bounds.width * .42);
+          const clamped = Math.max(-1, Math.min(1, raw));
+          return Math.abs(clamped) < .08 ? 0 : Math.sign(clamped) * ((Math.abs(clamped) - .08) / .92);
+        };
+        const scheduleSteerVisual = () => {
+          if (steerVisualFrame) return;
+          steerVisualFrame = requestAnimationFrame(() => {
+            steerVisualFrame = 0;
+            const width = steerBounds?.width || 0;
+            steer.style.setProperty('--steer-offset', `${state.steer * width * .34}px`);
+            byId('touch-left').classList.toggle('pressed', state.steer < -.08);
+            byId('touch-right').classList.toggle('pressed', state.steer > .08);
+          });
+        };
+        const updateSteer = event => {
+          if (!steeringPointers.has(event.pointerId)) return;
+          const value = steerValueAt(event.clientX);
+          steeringPointers.set(event.pointerId, value); recompute();
+          scheduleSteerVisual();
+        };
+        steer.addEventListener('pointerdown', event => {
+          event.preventDefault(); steerBounds = steer.getBoundingClientRect(); steer.setPointerCapture(event.pointerId);
+          steeringPointers.set(event.pointerId, 0); steer.classList.add('active'); updateSteer(event);
+        });
+        steer.addEventListener('pointermove', updateSteer);
+        const releaseSteer = event => {
+          steeringPointers.delete(event.pointerId); recompute();
+          steer.classList.toggle('active', steeringPointers.size > 0);
+          if (!steeringPointers.size) steerBounds = null;
+          scheduleSteerVisual();
+        };
+        for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) steer.addEventListener(name, releaseSteer);
         for (const [id, key] of [['touch-nitro','nitro_seq'], ['touch-jump','jump_seq']]) {
           byId(id).addEventListener('pointerdown', event => { event.preventDefault(); pulse(key); });
         }
@@ -304,6 +363,12 @@
           event.preventDefault(); pulse('pause_seq');
         });
         byId('touch-restart').addEventListener('pointerdown', event => {
+          event.preventDefault(); pulse('restart_seq');
+        });
+        byId('touch-resume').addEventListener('pointerdown', event => {
+          event.preventDefault(); pulse('pause_seq');
+        });
+        byId('touch-pause-restart').addEventListener('pointerdown', event => {
           event.preventDefault(); pulse('restart_seq');
         });
         const shifts = new Map();
@@ -385,8 +450,13 @@
         const applyEnabled = () => {
           document.body.classList.toggle('touch-enabled', state.enabled);
           toggle.setAttribute('aria-pressed', String(state.enabled));
-          toggle.textContent = state.enabled ? 'TOUCH ON' : 'TOUCH OFF';
-          if (!state.enabled) { for (const set of Object.values(held)) set.clear(); recompute(); }
+          toggle.innerHTML = state.enabled
+            ? '<span class="utility-icon">◎</span><span class="utility-label">TOUCH ON</span>'
+            : '<span class="utility-icon">◎</span><span class="utility-label">TOUCH OFF</span>';
+          if (!state.enabled) {
+            for (const set of Object.values(held)) set.clear();
+            steeringPointers.clear(); recompute(); steer.style.setProperty('--steer-offset', '0px');
+          }
           syncInstallButton();
         };
         toggle.addEventListener('click', () => {
@@ -403,6 +473,7 @@
           byId('touch-menu').classList.toggle('active', game.end_mode === 'difficulty_select');
           byId('touch-name').classList.toggle('active', game.end_mode === 'name_entry');
           byId('touch-leaderboard').classList.toggle('active', game.end_mode === 'leaderboard');
+          byId('touch-pause-menu').classList.toggle('active', playing && Boolean(game.paused));
           for (const mode of ['playing','difficulty_select','name_entry','leaderboard']) {
             document.body.classList.toggle(`mode-${mode}`, game.end_mode === mode);
           }
@@ -415,11 +486,15 @@
           const nitroReady = nitroCharges >= 3 && !(Number(game.nitro_cooldown) > 0) && !(Number(game.nitro_t) > 0);
           nitroButton.classList.toggle('ready', nitroReady);
           nitroButton.setAttribute('aria-label', `Cold-air thruster, ${nitroCharges} of 3${nitroReady ? ', ready' : ''}`);
-          byId('touch-pause').textContent = game.paused ? '▶' : 'Ⅱ';
+          byId('touch-pause').innerHTML = game.paused
+            ? '<span class="utility-icon">▶</span><span class="utility-label">RESUME</span>'
+            : '<span class="utility-icon">Ⅱ</span><span class="utility-label">PAUSE</span>';
           byId('touch-pause').setAttribute('aria-label', game.paused ? 'Resume game' : 'Pause game');
           byId('touch-crt').setAttribute('aria-pressed', String(Boolean(game.crt_enabled)));
           const large = Boolean(game.large_screen);
-          byId('touch-large-driving').textContent = large ? 'FIT' : 'VIEW';
+          byId('touch-large-driving').innerHTML = large
+            ? '<span class="utility-icon">▣</span><span class="utility-label">FIT</span>'
+            : '<span class="utility-icon">▣</span><span class="utility-label">ZOOM</span>';
           byId('touch-large').setAttribute('aria-pressed', String(large));
           byId('touch-large-driving').setAttribute('aria-pressed', String(large));
           byId('touch-shift').classList.toggle('gear-high', game.gear === 'high');
@@ -483,7 +558,9 @@
         const syncButton = () => {
           const active = Boolean(fullscreenElement());
           const label = active ? 'Exit fullscreen' : 'Enter fullscreen';
-          button.textContent = active ? '×' : '⛶';
+          button.innerHTML = active
+            ? '<span class="utility-icon">×</span><span class="utility-label">EXIT</span>'
+            : '<span class="utility-icon">⛶</span><span class="utility-label">FULL</span>';
           button.setAttribute('aria-label', label);
           button.title = label;
         };
