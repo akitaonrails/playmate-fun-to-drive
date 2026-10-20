@@ -5,6 +5,8 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.11.0] — 2026-10-20
+
 - Rebuilt the mobile touch interface around a compact molded utility rail,
   tactile steering rocker, gated gear lever, shaped brake, and distinct
   COLD-AIR and Jump controls with live charge/readiness illumination.
