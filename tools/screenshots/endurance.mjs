@@ -12,7 +12,11 @@ const url = valueAfter(
   'http://127.0.0.1:4173/?quality=low&qa_session_secs=30&qa_start_environment_time=99.8',
 );
 
-const browser = await chromium.launch();
+// Exercise the complete Web Audio graph and telemetry without routing the
+// headless renderer's underrun-prone output to the developer's speakers. The
+// AudioContext still runs, so unlock, track selection, crossfade, and player
+// lifecycle assertions remain meaningful.
+const browser = await chromium.launch({ args: ['--mute-audio'] });
 // Keep the scene's 16:10 shape while reducing SwiftShader work on hosted CI.
 const page = await browser.newPage({ viewport: { width: 640, height: 400 } });
 const failures = [];

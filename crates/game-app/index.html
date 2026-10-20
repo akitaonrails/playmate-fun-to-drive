@@ -17,11 +17,19 @@
          than stretching the car, screen, or controls. */
       canvas { display: block; position: fixed; left: 50%; top: 50%;
         width: min(100vw, 160vh) !important; height: min(100vh, 62.5vw) !important;
-        transform: translate(-50%, -50%); }
+        transform: translate(-50%, -50%);
+        transition: transform .55s cubic-bezier(.22,.8,.24,1), top .55s cubic-bezier(.22,.8,.24,1);
+        will-change: transform, top; }
       /* Touch play prioritizes the actual LCD. Enlarge the authored scene and
          bias it downward so the toy shell may crop while the game stays large. */
       body.touch-enabled canvas { top: 63%;
         transform: translate(-50%, -50%) scale(1.18); }
+      /* Large screen is a presentation-only zoom: the authored camera and
+         gameplay coordinates stay unchanged while the LCD fills the viewport. */
+      body.large-screen:not(.direct-game) canvas { top: 66%;
+        transform: translate(-50%, -50%) scale(1.42); }
+      body.touch-enabled.large-screen:not(.direct-game) canvas { top: 64%;
+        transform: translate(-50%, -50%) scale(1.48); }
       #loading {
         position: fixed; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: #9aa3b2;
@@ -88,6 +96,8 @@
         background: rgba(6,12,22,.48); }
       #touch-driving #touch-restart { color: rgba(255,210,150,.78);
         border-color: rgba(255,185,105,.38); }
+      #touch-driving #touch-large-driving { color: rgba(165,238,255,.82);
+        border-color: rgba(126,220,255,.42); }
       #touch-jump.ready { color: #ffb5e0; border-color: rgba(255,82,181,.72);
         box-shadow: 0 0 18px rgba(255,42,155,.22); }
       #touch-screen-tap { position: absolute; left: 23%; top: 16%; width: 54%; height: 48%;
@@ -132,6 +142,7 @@
       <div class="session-actions" aria-label="Session controls">
         <button id="touch-pause" class="touch-button" aria-label="Pause game">PAUSE</button>
         <button id="touch-restart" class="touch-button" aria-label="Return to run selection">RESTART</button>
+        <button id="touch-large-driving" class="touch-button" aria-label="Toggle large screen" aria-pressed="false">VIEW LARGE</button>
       </div>
       <div class="steer">
         <button id="touch-left" class="touch-button" aria-label="Steer left">◀</button>
@@ -154,6 +165,7 @@
         <button class="touch-menu-button" data-difficulty="1">MEDIUM<br>6:00</button>
         <button class="touch-menu-button" data-difficulty="2">HARD<br>10:00</button>
         <button id="touch-crt" class="touch-menu-button">CRT</button>
+        <button id="touch-large" class="touch-menu-button" aria-label="Toggle large screen" aria-pressed="false">LARGE OFF</button>
         <button id="touch-start" class="touch-menu-button">START</button>
       </div>
       <div id="touch-name">
@@ -168,7 +180,7 @@
       <div class="wheel"></div>
       <div id="loading-text">spinning up the drum...</div>
       <div class="hint">first load prepares the game — later loads are cached</div>
-      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y cold-air &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view</div>
+      <div class="hint">controls: ARROWS steer/select &nbsp;|&nbsp; Q/E low/high &nbsp;|&nbsp; Y cold-air &nbsp;|&nbsp; B/SPACE jump &nbsp;|&nbsp; ENTER confirm &nbsp;|&nbsp; M mute &nbsp;|&nbsp; T toy view &nbsp;|&nbsp; V large screen</div>
       <div class="hint">mobile uses an optimized pixel budget automatically; append <code>?quality=high</code> to override</div>
     </div>
     <script>
@@ -228,7 +240,7 @@
             (storedTouch === null && matchMedia('(pointer: coarse)').matches),
           steer: 0, brake: 0, low_seq: 0, high_seq: 0, nitro_seq: 0, jump_seq: 0,
           pause_seq: 0, difficulty_seq: 0, difficulty_index: 1, confirm_seq: 0,
-          crt_seq: 0, restart_seq: 0, initials_seq: 0, initials: '', submit_seq: 0
+          crt_seq: 0, large_seq: 0, restart_seq: 0, initials_seq: 0, initials: '', submit_seq: 0
         };
         const held = { left: new Set(), right: new Set(), brake: new Set() };
         const byId = id => document.getElementById(id);
@@ -299,6 +311,9 @@
           event.preventDefault(); window.__ftdEnterFullscreen?.(); pulse('confirm_seq');
         });
         byId('touch-crt').addEventListener('pointerdown', event => { event.preventDefault(); pulse('crt_seq'); });
+        for (const id of ['touch-large', 'touch-large-driving']) {
+          byId(id).addEventListener('pointerdown', event => { event.preventDefault(); pulse('large_seq'); });
+        }
         byId('touch-submit').addEventListener('pointerdown', event => { event.preventDefault(); pulse('submit_seq'); });
         byId('touch-again').addEventListener('pointerdown', event => { event.preventDefault(); pulse('restart_seq'); });
         const initials = byId('touch-initials');
@@ -331,6 +346,12 @@
           byId('touch-pause').textContent = game.paused ? 'RESUME' : 'PAUSE';
           byId('touch-pause').setAttribute('aria-label', game.paused ? 'Resume game' : 'Pause game');
           byId('touch-crt').textContent = game.crt_enabled ? 'CRT ON' : 'CRT OFF';
+          const large = Boolean(game.large_screen);
+          byId('touch-large').textContent = large ? 'LARGE ON' : 'LARGE OFF';
+          byId('touch-large-driving').textContent = large ? 'VIEW NORMAL' : 'VIEW LARGE';
+          byId('touch-large').setAttribute('aria-pressed', String(large));
+          byId('touch-large-driving').setAttribute('aria-pressed', String(large));
+          document.body.classList.toggle('large-screen', large);
           document.body.classList.toggle('direct-game', !game.toy);
           document.querySelectorAll('[data-difficulty]').forEach(button =>
             button.classList.toggle('selected', Number(button.dataset.difficulty) === game.difficulty_index));

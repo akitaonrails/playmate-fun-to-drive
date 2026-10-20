@@ -5,6 +5,24 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.10.0] — 2026-10-19
+
+- Added a persistent large-screen mode beside the CRT setting, with a smooth
+  viewport-filling zoom, `V` shortcut, and dedicated menu and in-run touch
+  controls while keeping gameplay coordinates and the optimized toy mesh intact.
+- Added a dedicated 16-bit hurricane audio layer that swells and fades with the
+  rare on-screen storm instead of relying on the ordinary driving-wind loop.
+- Added a separate PSG-like UFO hover and tractor-beam layer, synchronized to
+  the saucer's rare nighttime approach, abduction, and departure.
+- Extended production-bundle verification to require both rare-event audio
+  assets, preventing silent hurricane or UFO effects from shipping unnoticed.
+- Strengthened both pickup halos and moved traffic colors to cream, red, amber,
+  and green so no blue traffic car can be mistaken for a cold-air pickup.
+- Muted only the headless endurance browser's physical audio output while
+  retaining its Web Audio unlock, soundtrack, crossfade, and lifecycle checks.
+- Added an edge-triggered `L3+R3` gamepad chord for toggling the persistent
+  large-screen view without repeated toggles while both sticks are held.
+
 ## [0.9.2] — 2026-10-19
 
 - Tightened the authored toy camera another four percent along the existing

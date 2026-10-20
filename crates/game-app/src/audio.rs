@@ -138,6 +138,8 @@ pub(crate) struct AudioState {
     pub(crate) engine_low: f32,
     pub(crate) engine_high: f32,
     pub(crate) wind: f32,
+    pub(crate) hurricane: f32,
+    pub(crate) ufo: f32,
     pub(crate) rain: f32,
     pub(crate) brake: f32,
     pub(crate) skid: f32,
@@ -165,6 +167,8 @@ impl AudioState {
             engine_low: 0.0,
             engine_high: 0.0,
             wind: 0.0,
+            hurricane: 0.0,
+            ufo: 0.0,
             rain: 0.0,
             brake: 0.0,
             skid: 0.0,
@@ -266,6 +270,8 @@ enum AudioLayer {
     EngineLow,
     EngineHigh,
     Wind,
+    Hurricane,
+    Ufo,
     Rain,
     Brake,
     Skid,
@@ -308,6 +314,8 @@ fn setup_audio(mut commands: Commands, assets: Res<AssetServer>) {
         (AudioLayer::EngineLow, load("engine_low")),
         (AudioLayer::EngineHigh, load("engine_high")),
         (AudioLayer::Wind, load("wind")),
+        (AudioLayer::Hurricane, load("hurricane")),
+        (AudioLayer::Ufo, load("ufo")),
         (AudioLayer::Rain, load("rain")),
         (AudioLayer::Brake, load("brake")),
         (AudioLayer::Skid, load("wet_skid")),
@@ -425,6 +433,8 @@ struct MixTargets {
     engine_low: f32,
     engine_high: f32,
     wind: f32,
+    hurricane: f32,
+    ufo: f32,
     rain: f32,
     brake: f32,
     skid: f32,
@@ -444,6 +454,8 @@ struct MixInput {
     gear: Gear,
     overrev: f32,
     rain: f32,
+    hurricane: f32,
+    ufo: f32,
     steer: f32,
     brake: f32,
     off_road: f32,
@@ -484,6 +496,8 @@ fn mix_targets(input: MixInput) -> MixTargets {
         engine_low,
         engine_high,
         wind: (0.015 + 0.115 * speed.powf(1.45)).min(0.15) * EFFECTS_GAIN,
+        hurricane: 0.21 * input.hurricane.clamp(0.0, 1.0) * EFFECTS_GAIN,
+        ufo: 0.17 * input.ufo.clamp(0.0, 1.0) * EFFECTS_GAIN,
         rain: 0.115 * input.rain.clamp(0.0, 1.0) * EFFECTS_GAIN,
         brake: 0.13 * input.brake.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
         skid: 0.14 * input.rain.clamp(0.0, 1.0) * slip * speed.min(1.0) * EFFECTS_GAIN,
@@ -523,6 +537,8 @@ fn update_mix(
         gear: sim.0.gear(),
         overrev: sim.0.low_overrev(&tuning.0),
         rain: weather.rain,
+        hurricane: hurricane_intensity(sim.0.rare_event()),
+        ufo: ufo_intensity(sim.0.rare_event()),
         steer: frame.state.steer,
         brake: frame.state.brake,
         off_road: sim.0.off_road_intensity(&tuning.0),
@@ -534,6 +550,8 @@ fn update_mix(
     state.engine_low += (target.engine_low - state.engine_low) * alpha;
     state.engine_high += (target.engine_high - state.engine_high) * alpha;
     state.wind += (target.wind - state.wind) * alpha;
+    state.hurricane += (target.hurricane - state.hurricane) * alpha;
+    state.ufo += (target.ufo - state.ufo) * alpha;
     state.rain += (target.rain - state.rain) * alpha;
     state.brake += (target.brake - state.brake) * alpha;
     state.skid += (target.skid - state.skid) * alpha;
@@ -551,6 +569,8 @@ fn update_mix(
             AudioLayer::EngineLow => state.engine_low,
             AudioLayer::EngineHigh => state.engine_high,
             AudioLayer::Wind => state.wind,
+            AudioLayer::Hurricane => state.hurricane,
+            AudioLayer::Ufo => state.ufo,
             AudioLayer::Rain => state.rain,
             AudioLayer::Brake => state.brake,
             AudioLayer::Skid => state.skid,
@@ -568,10 +588,33 @@ fn update_mix(
             AudioLayer::EngineLow => sink.set_speed(state.engine_pitch),
             AudioLayer::EngineHigh => sink.set_speed((state.engine_pitch * 1.03).min(1.52)),
             AudioLayer::Wind => sink.set_speed((0.82 + sim.0.speed / 80.0).min(1.18)),
+            AudioLayer::Hurricane => sink.set_speed(0.94),
+            AudioLayer::Ufo => sink.set_speed(1.0),
             AudioLayer::Gravel => sink.set_speed((0.88 + sim.0.speed / 120.0).clamp(0.88, 1.10)),
             _ => {}
         }
     }
+}
+
+fn hurricane_intensity(event: Option<game_core::RareEvent>) -> f32 {
+    let Some(event) = event.filter(|event| event.kind == game_core::RareEventKind::Hurricane)
+    else {
+        return 0.0;
+    };
+    let attack = (event.progress / 0.16).clamp(0.0, 1.0);
+    let release = ((1.0 - event.progress) / 0.24).clamp(0.0, 1.0);
+    attack.min(release)
+}
+
+fn ufo_intensity(event: Option<game_core::RareEvent>) -> f32 {
+    let Some(event) = event.filter(|event| event.kind == game_core::RareEventKind::Ufo) else {
+        return 0.0;
+    };
+    let attack = (event.progress / 0.18).clamp(0.0, 1.0);
+    let release = ((1.0 - event.progress) / 0.20).clamp(0.0, 1.0);
+    // The tractor beam is most prominent while the saucer pauses over traffic.
+    let beam = (1.0 - ((event.progress - 0.52) / 0.24).abs()).clamp(0.0, 1.0);
+    attack.min(release) * (0.72 + 0.28 * beam)
 }
 
 fn reap_faded_music(
@@ -715,6 +758,8 @@ mod tests {
             gear: Gear::Low,
             overrev: 0.0,
             rain: 0.0,
+            hurricane: 0.0,
+            ufo: 0.0,
             steer: 0.0,
             brake: 0.0,
             off_road: 0.0,
@@ -732,9 +777,39 @@ mod tests {
         });
         assert_eq!(targets.engine_low, 0.0);
         assert_eq!(targets.wind, 0.0);
+        assert_eq!(targets.hurricane, 0.0);
+        assert_eq!(targets.ufo, 0.0);
         assert_eq!(targets.rain, 0.0);
         assert_eq!(targets.brake, 0.0);
         assert_eq!(targets.music, [0.0; MUSIC_TRACKS]);
+    }
+
+    #[test]
+    fn rare_event_beds_follow_the_matching_event_and_fade_at_the_edges() {
+        let event = |kind, progress| {
+            Some(game_core::RareEvent {
+                kind,
+                slot: 7,
+                progress,
+            })
+        };
+        assert_eq!(hurricane_intensity(None), 0.0);
+        assert_eq!(
+            hurricane_intensity(event(game_core::RareEventKind::Ufo, 0.5)),
+            0.0
+        );
+        assert!(hurricane_intensity(event(game_core::RareEventKind::Hurricane, 0.5)) > 0.99);
+        assert!(hurricane_intensity(event(game_core::RareEventKind::Hurricane, 0.98)) < 0.1);
+
+        assert_eq!(ufo_intensity(None), 0.0);
+        assert_eq!(
+            ufo_intensity(event(game_core::RareEventKind::Hurricane, 0.5)),
+            0.0
+        );
+        let approach = ufo_intensity(event(game_core::RareEventKind::Ufo, 0.25));
+        let beam = ufo_intensity(event(game_core::RareEventKind::Ufo, 0.52));
+        assert!(beam > approach);
+        assert!(ufo_intensity(event(game_core::RareEventKind::Ufo, 0.98)) < 0.1);
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub struct TouchSnapshot {
     pub difficulty_index: i8,
     pub confirm_seq: u32,
     pub crt_seq: u32,
+    pub large_seq: u32,
     pub restart_seq: u32,
     pub initials_seq: u32,
     pub initials: String,
@@ -248,6 +249,11 @@ mod tests {
         assert!(html.contains("pulse('pause_seq')"));
         assert!(html.contains("pulse('restart_seq')"));
         assert!(html.contains("body.touch-enabled canvas"));
+        assert!(html.contains("id=\"touch-large\""));
+        assert!(html.contains("id=\"touch-large-driving\""));
+        assert!(html.contains("large_seq"));
+        assert!(html.contains("body.large-screen:not(.direct-game) canvas"));
+        assert!(html.contains("transition: transform"));
     }
 
     #[test]

@@ -37,6 +37,14 @@ do
   fi
 done
 
+for effect in hurricane ufo
+do
+  if [[ ! -s "$DIST/assets/audio/$effect.ogg" ]]; then
+    echo "missing rare-event audio asset: $effect.ogg" >&2
+    exit 1
+  fi
+done
+
 if [[ ! -s "$DIST/assets/shaders/crt_screen.wesl" ]]; then
   echo "missing CRT shader from production bundle" >&2
   exit 1

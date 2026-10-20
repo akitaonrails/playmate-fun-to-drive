@@ -46,6 +46,37 @@ noise "$work_dir/wind.wav" 6.0 pink -11
 sox -R "$work_dir/wind.wav" "$output_dir/wind.ogg" highpass 320 lowpass 3800 \
   tremolo 0.5 18 gain -n -8 fade t 0.006 6.0 0.006
 
+# Rare hurricane bed: a deeper rotating wind mass with an arcade-like pulsing
+# core. It is mixed separately from ordinary speed wind, so its five-second
+# fly-by can swell and recede with the on-screen funnel.
+noise "$work_dir/hurricane_body.wav" 4.0 brown -7
+noise "$work_dir/hurricane_air.wav" 4.0 pink -10
+tone "$work_dir/hurricane_core.wav" 4.0 sawtooth 46 -24
+sox -R "$work_dir/hurricane_body.wav" "$work_dir/hurricane_body_f.wav" \
+  highpass 55 lowpass 1350 tremolo 3.5 58
+sox -R "$work_dir/hurricane_air.wav" "$work_dir/hurricane_air_f.wav" \
+  highpass 480 lowpass 4100 tremolo 7 46
+sox -R -m "$work_dir/hurricane_body_f.wav" "$work_dir/hurricane_air_f.wav" \
+  "$work_dir/hurricane_core.wav" "$work_dir/hurricane_mix.wav" gain -n -7
+sox -R "$work_dir/hurricane_mix.wav" "$output_dir/hurricane.ogg" \
+  fade t 0.008 4.0 0.008
+
+# Nighttime UFO: detuned PSG voices orbit a soft electronic hum while a
+# tremolo pulse suggests the tractor beam. The loop remains tonal and playful
+# instead of borrowing the storm or engine noise vocabulary.
+tone "$work_dir/ufo_low.wav" 4.0 sine 118-132 -20
+tone "$work_dir/ufo_mid.wav" 4.0 square 236-264 -24
+tone "$work_dir/ufo_high.wav" 4.0 sine 710-530 -25
+noise "$work_dir/ufo_air.wav" 4.0 pink -23
+sox -R "$work_dir/ufo_low.wav" "$work_dir/ufo_low_f.wav" tremolo 5.5 52
+sox -R "$work_dir/ufo_mid.wav" "$work_dir/ufo_mid_f.wav" tremolo 8 66 lowpass 1900
+sox -R "$work_dir/ufo_high.wav" "$work_dir/ufo_high_f.wav" tremolo 12 75
+sox -R "$work_dir/ufo_air.wav" "$work_dir/ufo_air_f.wav" highpass 900 lowpass 3600 tremolo 9 70
+sox -R -m "$work_dir/ufo_low_f.wav" "$work_dir/ufo_mid_f.wav" \
+  "$work_dir/ufo_high_f.wav" "$work_dir/ufo_air_f.wav" \
+  "$work_dir/ufo_mix.wav" gain -n -8
+sox -R "$work_dir/ufo_mix.wav" "$output_dir/ufo.ogg" fade t 0.008 4.0 0.008
+
 # Rain should read as a soft sheet on glass/road, not bright radio static.
 # Layering filtered pink and brown noise gives it body; two slow, shallow
 # modulations avoid the old machine-gun tick pattern while retaining a little

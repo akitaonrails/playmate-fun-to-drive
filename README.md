@@ -63,8 +63,8 @@ player's local system date, clock, and timezone.
 - Clear, cloudy, rainy, and snowy conditions with wet-road sheen, precipitation audio, headlights, distance fog, and subtle weather grip changes.
 - Seasonal roadside scenery including sakura, summer forest, autumn foliage, bare winter trees, lamps, and billboards.
 - Randomized city and landscape backdrops including Tokyo neon, Paris silhouettes, Vegas-style lights, mountains, forests, and open road.
-- Rare background events: shooting stars, bird flocks, a hurricane that can lift traffic and trees, and a nighttime UFO abduction.
-- Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and responsive ultrawide/mobile presentation.
+- Rare background events: shooting stars, bird flocks, a hurricane with its own 16-bit wind bed that can lift traffic and trees, and a nighttime UFO abduction with a PSG tractor-beam warble.
+- Six original PSG-style tracks, 16-bit driving and weather effects, optional CRT treatment, touch controls, and an animated large-screen mode for compact displays.
 - A hidden 88 mph straightaway event: hold a clean line beyond the normal 87 mph ceiling to summon a blue-electric time machine once per session.
 
 ## Controls
@@ -81,13 +81,15 @@ player's local system date, clock, and timezone.
 | R | Restart the current run |
 | Escape / Select while paused | Return to difficulty selection and reset the run |
 | T | Toggle toy view (game view ⇄ toy-on-desk view) |
+| V | Animate between the normal toy framing and large-screen view |
+| L3 + R3 | Toggle large-screen view with both stick buttons together |
 | L | Cycle the rolling-tube look dial (0 / 0.5 / 1) |
 | M | Mute / unmute audio |
 | [ / ] | Music volume down / up |
 | - / = | Sound-effects volume down / up |
 | C or gamepad X (run menu) | Toggle the CRT display shader |
-| Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, rumble on bumps |
-| Touch | Enable with the upper-left button; left thumb steers, right thumb shifts and brakes, COLD-AIR/JUMP KICK sit above the shift area, and dedicated PAUSE/RESUME and RESTART buttons sit at the top |
+| Gamepad | Left stick steers, LT brakes, A/LB select LOW, X/RB select HIGH, A confirms menus, Y fires cold-air, B uses Jump Kick, L3+R3 toggles large-screen view, rumble on bumps |
+| Touch | Enable with the upper-left button; left thumb steers, right thumb shifts and brakes, COLD-AIR/JUMP KICK sit above the shift area, and PAUSE, RESTART, and VIEW LARGE controls sit at the top |
 
 ## Run it
 

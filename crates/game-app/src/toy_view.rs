@@ -19,6 +19,7 @@ use game_core::Gear;
 use crate::Sim;
 
 pub const CRT_STORAGE_KEY: &str = "fun-to-drive.crt.v1";
+pub const LARGE_SCREEN_STORAGE_KEY: &str = "fun-to-drive.large-screen.v1";
 const CRT_SHADER_PATH: &str = "shaders/crt_screen.wesl";
 const ROADSTER_FRONT_LAMP_X: [f32; 2] = [-0.008, 0.008];
 const INTRO_ORBIT_SECS: f32 = 5.2;

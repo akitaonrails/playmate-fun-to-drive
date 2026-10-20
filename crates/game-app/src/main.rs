@@ -238,6 +238,7 @@ pub(crate) struct LeaderboardState {
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct DisplaySettings {
     pub(crate) crt_enabled: bool,
+    pub(crate) large_screen: bool,
 }
 
 /// Nitro can remain numerically charged on the terminal fixed step, so every
@@ -300,6 +301,7 @@ pub(crate) struct TouchInput {
     difficulty: Option<usize>,
     confirm: bool,
     toggle_crt: bool,
+    toggle_large: bool,
     restart: bool,
     initials: Option<String>,
     submit: bool,
@@ -338,6 +340,7 @@ impl TouchInput {
             .filter(|index| *index < Difficulty::ALL.len());
         self.confirm = enabled && sequence_advanced(next.confirm_seq, self.previous.confirm_seq);
         self.toggle_crt = enabled && sequence_advanced(next.crt_seq, self.previous.crt_seq);
+        self.toggle_large = enabled && sequence_advanced(next.large_seq, self.previous.large_seq);
         self.restart = enabled && sequence_advanced(next.restart_seq, self.previous.restart_seq);
         let initials_changed =
             enabled && sequence_advanced(next.initials_seq, self.previous.initials_seq);
@@ -354,6 +357,7 @@ impl TouchInput {
                 || self.difficulty.is_some()
                 || self.confirm
                 || self.toggle_crt
+                || self.toggle_large
                 || self.restart
                 || self.initials.is_some()
                 || self.submit);
@@ -515,6 +519,8 @@ fn main() {
     let audio_muted = bridge::load_local(audio::STORAGE_KEY).0.as_deref() == Some("muted");
     let crt_setting = bridge::load_local(toy_view::CRT_STORAGE_KEY).0;
     let crt_enabled = initial_crt_enabled(crt_setting.as_deref(), coarse_pointer);
+    let large_setting = bridge::load_local(toy_view::LARGE_SCREEN_STORAGE_KEY).0;
+    let large_screen = initial_large_screen(large_setting.as_deref());
 
     app.add_plugins(
         DefaultPlugins
@@ -555,7 +561,10 @@ fn main() {
         persistent,
         qa_mode,
     })
-    .insert_resource(DisplaySettings { crt_enabled })
+    .insert_resource(DisplaySettings {
+        crt_enabled,
+        large_screen,
+    })
     // Seeded technical loop: mixed-radius corners, rolling elevation,
     // traffic, and collidable roadside scenery.
     .insert_resource(Sim(initial_game))
@@ -593,7 +602,12 @@ fn main() {
         Update,
         (sync_end_flow, tick_launch_sequence, tick_menu_idle).in_set(AppSet::Flow),
     )
-    .add_systems(Update, handle_end_input.in_set(AppSet::Controls))
+    .add_systems(
+        Update,
+        (toggle_large_screen, handle_end_input)
+            .chain()
+            .in_set(AppSet::Controls),
+    )
     .add_systems(
         Update,
         (
@@ -628,6 +642,53 @@ fn initial_crt_enabled(stored: Option<&str>, coarse_pointer: bool) -> bool {
         Some("off") => false,
         _ => !coarse_pointer,
     }
+}
+
+fn initial_large_screen(stored: Option<&str>) -> bool {
+    stored == Some("on")
+}
+
+fn toggle_large_screen(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    touch: Res<TouchInput>,
+    end: Res<EndSession>,
+    intro: Res<toy_view::StartupIntro>,
+    mut display: ResMut<DisplaySettings>,
+    mut audio_events: ResMut<audio::AudioEvents>,
+) {
+    if !intro.complete() {
+        return;
+    }
+    let keyboard_allowed = matches!(end.0.mode, EndMode::DifficultySelect | EndMode::Playing);
+    let gamepad_requested = keyboard_allowed
+        && pads.iter().any(|pad| {
+            large_screen_chord(
+                pad.pressed(GamepadButton::LeftThumb),
+                pad.pressed(GamepadButton::RightThumb),
+                pad.just_pressed(GamepadButton::LeftThumb),
+                pad.just_pressed(GamepadButton::RightThumb),
+            )
+        });
+    if !touch.toggle_large
+        && !(keyboard_allowed && keys.just_pressed(KeyCode::KeyV))
+        && !gamepad_requested
+    {
+        return;
+    }
+    display.large_screen = !display.large_screen;
+    let value = if display.large_screen { "on" } else { "off" };
+    let _ = bridge::save_local(toy_view::LARGE_SCREEN_STORAGE_KEY, value);
+    audio_events.emit(audio::AudioCue::MenuMove);
+}
+
+fn large_screen_chord(
+    left_pressed: bool,
+    right_pressed: bool,
+    left_just_pressed: bool,
+    right_just_pressed: bool,
+) -> bool {
+    left_pressed && right_pressed && (left_just_pressed || right_just_pressed)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1342,6 +1403,7 @@ mod tests {
             brake: 2.0,
             jump_seq: 1,
             high_seq: 3,
+            large_seq: 1,
             difficulty_seq: 2,
             difficulty_index: 2,
             ..default()
@@ -1349,12 +1411,12 @@ mod tests {
         touch.update(snapshot.clone());
         assert_eq!(touch.steer, 1.0);
         assert_eq!(touch.brake, 1.0);
-        assert!(touch.jump && touch.high);
+        assert!(touch.jump && touch.high && touch.toggle_large);
         assert_eq!(touch.difficulty, Some(2));
         assert!(touch.active_this_frame);
 
         touch.update(snapshot);
-        assert!(!touch.jump && !touch.high);
+        assert!(!touch.jump && !touch.high && !touch.toggle_large);
         assert_eq!(touch.difficulty, None);
     }
 
@@ -1448,6 +1510,23 @@ mod tests {
         assert!(initial_crt_enabled(None, false));
         assert!(initial_crt_enabled(Some("on"), true));
         assert!(!initial_crt_enabled(Some("off"), false));
+    }
+
+    #[test]
+    fn large_screen_defaults_off_but_respects_saved_choice() {
+        assert!(!initial_large_screen(None));
+        assert!(initial_large_screen(Some("on")));
+        assert!(!initial_large_screen(Some("off")));
+        assert!(!initial_large_screen(Some("invalid")));
+    }
+
+    #[test]
+    fn large_screen_gamepad_chord_is_edge_triggered_and_requires_both_sticks() {
+        assert!(large_screen_chord(true, true, true, false));
+        assert!(large_screen_chord(true, true, false, true));
+        assert!(!large_screen_chord(true, true, false, false));
+        assert!(!large_screen_chord(true, false, true, false));
+        assert!(!large_screen_chord(false, true, false, true));
     }
 
     #[test]

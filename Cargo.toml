@@ -4,7 +4,7 @@ members = ["crates/game-core", "crates/game-app"]
 
 [workspace.package]
 edition = "2021"
-version = "0.9.2"
+version = "0.10.0"
 license = "MIT"
 
 [workspace.dependencies]

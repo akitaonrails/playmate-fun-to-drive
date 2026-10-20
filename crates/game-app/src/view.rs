@@ -246,6 +246,8 @@ struct DifficultyCardText(usize);
 struct DifficultyLeaderboard;
 #[derive(Component)]
 struct CrtMenuText;
+#[derive(Component)]
+struct LargeMenuText;
 
 #[derive(Resource, Default)]
 pub struct InstrumentVisuals {
@@ -702,14 +704,24 @@ fn spawn_difficulty_overlay(commands: &mut Commands) {
                 DifficultyLeaderboard,
             ));
             parent.spawn((
-                Text2d::new("CRT DISPLAY: ON   [ C / X TO TOGGLE ]"),
+                Text2d::new("CRT DISPLAY: ON   [ C / X ]"),
                 TextFont {
-                    font_size: FontSize::Px(18.0),
+                    font_size: FontSize::Px(15.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 1.0, 0.74)),
-                Transform::from_xyz(-145.0, -112.0, 0.3),
+                Transform::from_xyz(-295.0, -112.0, 0.3),
                 CrtMenuText,
+            ));
+            parent.spawn((
+                Text2d::new("LARGE SCREEN: OFF   [ V / L3+R3 ]"),
+                TextFont {
+                    font_size: FontSize::Px(15.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.62, 0.38)),
+                Transform::from_xyz(15.0, -112.0, 0.3),
+                LargeMenuText,
             ));
             parent.spawn((
                 Text2d::new("<   ARROWS / LEFT STICK   >"),
@@ -2057,26 +2069,29 @@ fn sync_nitro_pickup(
     for (part, mut tf, mut sprite, mut vis) in parts.by_ref() {
         let (color, size, dy, z) = match part.0 {
             0 => (
-                Color::srgba(0.10, 0.90, 1.0, 0.12 + pulse * 0.18),
-                Vec2::new((58.0 * item_scale).max(5.0), (66.0 * item_scale).max(6.0)),
+                Color::linear_rgba(0.06, 1.65, 2.50, 0.22 + pulse * 0.28),
+                Vec2::new(
+                    ((74.0 + pulse * 10.0) * item_scale).max(12.0),
+                    ((84.0 + pulse * 12.0) * item_scale).max(14.0),
+                ),
                 0.0,
                 -2.35,
             ),
             1 => (
-                Color::srgb(0.08, 0.78, 0.98),
-                Vec2::new((30.0 * item_scale).max(3.0), (42.0 * item_scale).max(4.0)),
+                Color::linear_rgb(0.04, 1.30, 2.15),
+                Vec2::new((32.0 * item_scale).max(5.0), (45.0 * item_scale).max(7.0)),
                 0.0,
                 -2.3,
             ),
             2 => (
-                Color::srgb(0.82, 1.0, 1.0),
-                Vec2::new((14.0 * item_scale).max(2.0), (7.0 * item_scale).max(1.0)),
+                Color::linear_rgb(1.7, 2.1, 2.3),
+                Vec2::new((17.0 * item_scale).max(5.0), (8.0 * item_scale).max(2.0)),
                 23.0 * item_scale,
                 -2.28,
             ),
             _ => (
                 Color::srgb(1.0, 0.91, 0.42),
-                Vec2::new((10.0 * item_scale).max(2.0), (24.0 * item_scale).max(3.0)),
+                Vec2::new((10.0 * item_scale).max(3.0), (24.0 * item_scale).max(7.0)),
                 0.0,
                 -2.27,
             ),
@@ -2129,10 +2144,10 @@ fn sync_jump_pickup(
     for (part, mut transform, mut sprite, mut visibility) in parts.by_ref() {
         let (color, size, dx, dy, z) = match part.0 {
             0 => (
-                Color::srgba(1.0, 0.08, 0.72, 0.28 + pulse * 0.34),
+                Color::linear_rgba(2.2, 0.05, 1.35, 0.34 + pulse * 0.38),
                 Vec2::new(
-                    ((82.0 + pulse * 14.0) * item_scale).max(8.0),
-                    ((82.0 + pulse * 14.0) * item_scale).max(8.0),
+                    ((90.0 + pulse * 18.0) * item_scale).max(12.0),
+                    ((90.0 + pulse * 18.0) * item_scale).max(12.0),
                 ),
                 0.0,
                 0.0,
@@ -3318,13 +3333,17 @@ fn traffic_visibility(scale: f32, visibility: RoadVisibilityVisuals) -> (f32, f3
 }
 
 fn traffic_car_color(variant: usize, alpha: f32) -> Color {
-    let [r, g, b] = match variant % 4 {
+    let [r, g, b] = traffic_car_rgb(variant);
+    Color::srgba(r, g, b, alpha)
+}
+
+fn traffic_car_rgb(variant: usize) -> [f32; 3] {
+    match variant % 4 {
         0 => [0.93, 0.91, 0.85],
         1 => [0.90, 0.16, 0.12],
-        2 => [0.10, 0.65, 0.82],
-        _ => [0.72, 0.24, 0.78],
-    };
-    Color::srgba(r, g, b, alpha)
+        2 => [0.96, 0.52, 0.07],
+        _ => [0.22, 0.68, 0.25],
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -3890,12 +3909,32 @@ fn sync_difficulty_overlay(
     display: Res<crate::DisplaySettings>,
     mut root: Query<&mut Visibility, With<DifficultyOverlayRoot>>,
     mut cards: Query<(&DifficultyCard, &mut Sprite)>,
-    mut texts: Query<(&DifficultyCardText, &mut TextColor), Without<CrtMenuText>>,
-    mut board: Query<&mut Text2d, (With<DifficultyLeaderboard>, Without<CrtMenuText>)>,
+    mut texts: Query<
+        (&DifficultyCardText, &mut TextColor),
+        (Without<CrtMenuText>, Without<LargeMenuText>),
+    >,
+    mut board: Query<
+        &mut Text2d,
+        (
+            With<DifficultyLeaderboard>,
+            Without<CrtMenuText>,
+            Without<LargeMenuText>,
+        ),
+    >,
     mut crt: Query<
         (&mut Text2d, &mut TextColor),
         (
             With<CrtMenuText>,
+            Without<DifficultyLeaderboard>,
+            Without<DifficultyCardText>,
+            Without<LargeMenuText>,
+        ),
+    >,
+    mut large: Query<
+        (&mut Text2d, &mut TextColor),
+        (
+            With<LargeMenuText>,
+            Without<CrtMenuText>,
             Without<DifficultyLeaderboard>,
             Without<DifficultyCardText>,
         ),
@@ -3940,7 +3979,16 @@ fn sync_difficulty_overlay(
         } else {
             ("OFF", Color::srgb(1.0, 0.62, 0.38))
         };
-        text.0 = format!("CRT DISPLAY: {label}   [ C / X TO TOGGLE ]");
+        text.0 = format!("CRT DISPLAY: {label}   [ C / X ]");
+        color.0 = tint;
+    }
+    if let Ok((mut text, mut color)) = large.single_mut() {
+        let (label, tint) = if display.large_screen {
+            ("ON", Color::srgb(0.55, 1.0, 0.74))
+        } else {
+            ("OFF", Color::srgb(1.0, 0.62, 0.38))
+        };
+        text.0 = format!("LARGE SCREEN: {label}   [ V / L3+R3 ]");
         color.0 = tint;
     }
 }
@@ -4392,6 +4440,13 @@ mod tests {
             }
         }
         assert_eq!(traffic_car_color(0, 1.0), traffic_car_color(4, 1.0));
+        assert!(
+            (0..4).all(|variant| {
+                let [red, green, blue] = traffic_car_rgb(variant);
+                blue < red.max(green)
+            }),
+            "traffic colors must not share the cold-air pickup's blue-dominant silhouette"
+        );
     }
 
     #[test]
