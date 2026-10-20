@@ -5,6 +5,8 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.11.1] — 2026-10-20
+
 - Clarified the compact mobile utility rail with icon-and-label controls,
   added more separation between special actions and the drivetrain controls,
   and made the two pause-menu actions independently touchable.
