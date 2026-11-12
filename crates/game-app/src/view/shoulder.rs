@@ -7,6 +7,8 @@ use crate::Sim;
 use super::{Proj, WeatherVisuals, HALF_ROAD_PX};
 
 const ACCENT_POOL: usize = 28;
+/// Accents repeat over this stretch of road, independent of the loop length.
+const ACCENT_PERIOD_M: f32 = 210.0;
 
 #[derive(Component)]
 pub(super) struct ShoulderAccent(usize);
@@ -105,12 +107,11 @@ pub(super) fn sync(
         return;
     }
 
-    let loop_position = sim.0.loop_pos();
-    let loop_length = sim.0.road.length;
+    let travelled = sim.0.distance;
     for (accent, mut transform, mut sprite, mut visibility) in &mut accents {
         let index = accent.0;
-        let road_position = (index as f32 + 0.37) / ACCENT_POOL as f32 * loop_length;
-        let ahead = (road_position - loop_position).rem_euclid(loop_length);
+        let road_position = (index as f32 + 0.37) / ACCENT_POOL as f32 * ACCENT_PERIOD_M;
+        let ahead = (road_position - travelled).rem_euclid(ACCENT_PERIOD_M);
         let Some((y, scale, lateral)) = proj.project(ahead, sim.0.road_x) else {
             *visibility = Visibility::Hidden;
             continue;

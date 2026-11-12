@@ -216,6 +216,13 @@ pub struct Game {
     pub distance: f32,
     /// Road-center lateral offset at the car row, in half-widths. Car is at 0.
     pub road_x: f32,
+    /// Steering-driven lateral car velocity, half-widths/s (+ = car moving
+    /// right, so the road slides left). Excludes the corner slide.
+    pub steer_velocity: f32,
+    /// Outward corner slide, half-widths/s in road_x units. It builds like a
+    /// force while a corner lasts and bleeds off after it, so the car is
+    /// thrown wide on entry and still drifting for a moment on exit.
+    pub slide_velocity: f32,
     /// Authoritative competitive clock. Only advances while actively running.
     pub session_remaining: f32,
     /// Performance-driven environment clock; LOW speed advances at real time.
@@ -304,6 +311,8 @@ impl Game {
             speed: 0.0,
             distance: 0.0,
             road_x: 0.0,
+            steer_velocity: 0.0,
+            slide_velocity: 0.0,
             session_remaining: duration_secs,
             environment_time: 0.0,
             environment_origin: 0.0,
@@ -715,6 +724,15 @@ impl Game {
             && self.road.curve_at(self.loop_pos()).abs() <= tuning.straightaway_curve_threshold
     }
 
+    /// How hard the corner is throwing the car outward, in [0, 1] of the
+    /// worst-case slide. Drives tyre smoke and squeal.
+    pub fn corner_load(&self, tuning: &Tuning) -> f32 {
+        if self.phase != Phase::Running {
+            return 0.0;
+        }
+        (self.slide_velocity.abs() / tuning.worst_corner_slide()).clamp(0.0, 1.0)
+    }
+
     pub fn off_road_intensity(&self, tuning: &Tuning) -> f32 {
         ((self.road_x.abs() - tuning.off_road_limit)
             / (tuning.max_lateral_offset - tuning.off_road_limit))
@@ -783,6 +801,8 @@ impl Game {
         self.speed = 0.0;
         self.distance = 0.0;
         self.road_x = 0.0;
+        self.steer_velocity = 0.0;
+        self.slide_velocity = 0.0;
         self.session_remaining = self.session_duration;
         self.environment_time = 0.0;
         self.environment_origin = 0.0;
@@ -1123,12 +1143,17 @@ impl Game {
             .max(0.0) as u64;
         let pos = self.loop_pos();
 
-        // road lateral dynamics: road drifts toward the printed curve target;
-        // steering shifts the drum the other way (car "moves" relatively).
-        let curve_target = self.road.curve_at(pos) * t.curve_gain;
-        let drift_speed = (self.speed / t.scroll_speed_low).min(t.curve_drift_speed_cap);
-        let drift = 1.0 - (-dt * t.drift_rate * drift_speed).exp();
-        self.road_x += (curve_target - self.road_x) * drift;
+        // Lateral dynamics, arcade-racer style. Steering drives a lateral
+        // velocity that answers within a few frames; corners add an outward
+        // slide proportional to curvature and speed that builds on entry and
+        // bleeds off after the exit. Both are velocities, so nothing pulls
+        // the car back toward the centerline on a straight.
+        let speed_ratio = self.speed / t.scroll_speed_low;
+        let corner_slide =
+            self.road.curve_at(pos) * t.centrifugal_rate * speed_ratio.min(t.curve_drift_speed_cap);
+        let build = 1.0 - (-dt * t.slide_build_rate).exp();
+        self.slide_velocity += (corner_slide - self.slide_velocity) * build;
+        self.road_x += self.slide_velocity * dt;
         let steer_factor = if jump_active {
             t.jump_air_steer_factor
         } else if cold_air_hop_active {
@@ -1140,10 +1165,22 @@ impl Game {
         let rain = weather_kind_weight(weather, WeatherKind::Rain);
         let winter = season_weights(self.environment_time)[3];
         let weather_grip = precipitation_steer_factor(rain, winter, t);
-        self.road_x -= input.steer * t.steer_rate * steer_factor * weather_grip * dt;
-        self.road_x = self
+        let authority = t.steer_low_speed_authority
+            + (1.0 - t.steer_low_speed_authority) * speed_ratio.clamp(0.0, 1.0);
+        let steer_target =
+            input.steer.clamp(-1.0, 1.0) * t.steer_rate * steer_factor * weather_grip * authority;
+        let response = 1.0 - (-dt * t.steer_response).exp();
+        self.steer_velocity += (steer_target - self.steer_velocity) * response;
+        self.road_x -= self.steer_velocity * dt;
+        let clamped = self
             .road_x
             .clamp(-t.max_lateral_offset, t.max_lateral_offset);
+        if clamped != self.road_x {
+            // Pressed against the verge: no stored sideways momentum.
+            self.steer_velocity = 0.0;
+            self.slide_velocity = 0.0;
+            self.road_x = clamped;
+        }
 
         // One deterministic pickup at a time. The absolute-distance schedule
         // keeps appearances occasional and guarantees more than four per
@@ -1959,6 +1996,95 @@ mod tests {
         };
         run_seconds(&mut g, 0.25, &left, &t);
         assert!(g.road_x > x0, "steer left shifts road right");
+    }
+
+    fn cruising_on(road: RoadLoop, t: &Tuning) -> Game {
+        let mut g = Game::with_road(5, road, Difficulty::Hard, t);
+        g.start_run(t);
+        g.gear = Gear::High;
+        g.speed = t.scroll_speed_high;
+        g
+    }
+
+    #[test]
+    fn straights_leave_the_car_where_the_player_put_it() {
+        let t = Tuning::default();
+        let mut g = cruising_on(RoadLoop::straight(5_000.0, vec![]), &t);
+        let right = InputState {
+            steer: 1.0,
+            ..idle()
+        };
+        run_seconds(&mut g, 0.25, &right, &t);
+        run_seconds(&mut g, 0.4, &idle(), &t);
+        let parked = g.road_x;
+        assert!(
+            parked < -0.4,
+            "steering must actually move the car: {parked}"
+        );
+        run_seconds(&mut g, 3.0, &idle(), &t);
+        assert!(
+            (g.road_x - parked).abs() < 1e-3,
+            "no centering spring on a straight: {parked} -> {}",
+            g.road_x
+        );
+    }
+
+    #[test]
+    fn corner_slide_carries_momentum_after_the_corner() {
+        let t = Tuning::default();
+        let mut g = cruising_on(RoadLoop::straight(5_000.0, vec![]), &t);
+        g.slide_velocity = 1.0;
+        run_seconds(&mut g, 0.1, &idle(), &t);
+        assert!(
+            g.slide_velocity > 0.6,
+            "exit drift lingers: {}",
+            g.slide_velocity
+        );
+        assert!(g.corner_load(&t) > 0.0);
+        run_seconds(&mut g, 2.0, &idle(), &t);
+        assert!(g.slide_velocity < 0.01, "then grip returns");
+    }
+
+    #[test]
+    fn steering_answers_within_a_few_frames() {
+        let t = Tuning::default();
+        let mut g = cruising_on(RoadLoop::straight(5_000.0, vec![]), &t);
+        run_seconds(
+            &mut g,
+            0.15,
+            &InputState {
+                steer: 1.0,
+                ..idle()
+            },
+            &t,
+        );
+        assert!(
+            g.steer_velocity > t.steer_rate * 0.85,
+            "{}",
+            g.steer_velocity
+        );
+        run_seconds(&mut g, 0.2, &idle(), &t);
+        assert!(g.steer_velocity.abs() < t.steer_rate * 0.1);
+    }
+
+    #[test]
+    fn corners_keep_pushing_the_car_to_the_outside() {
+        let t = Tuning::default();
+        let mut road = RoadLoop::generate(&mut Rng::new(11));
+        road.hazards.clear();
+        let apex = (0..crate::road::CURVE_SAMPLES * 4)
+            .map(|i| road.length * i as f32 / (crate::road::CURVE_SAMPLES * 4) as f32)
+            .max_by(|a, b| road.curve_at(*a).abs().total_cmp(&road.curve_at(*b).abs()))
+            .unwrap();
+        let direction = road.curve_at(apex).signum();
+        let mut g = cruising_on(road, &t);
+        g.distance = apex - 2.0;
+        run_seconds(&mut g, 0.2, &idle(), &t);
+        let early = g.road_x * direction;
+        run_seconds(&mut g, 0.2, &idle(), &t);
+        let later = g.road_x * direction;
+        assert!(early > 0.1, "outward slide begins at once: {early}");
+        assert!(later > early + 0.1, "slide keeps building mid-corner");
     }
 
     #[test]
@@ -3007,9 +3133,9 @@ mod tests {
             game
         };
 
-        let cautious = run(0.22, 0.55);
-        let precise = run(0.32, 0.0);
-        let failed_risk = run(0.22, 0.0);
+        let cautious = run(0.10, 0.55);
+        let precise = run(0.24, 0.0);
+        let failed_risk = run(0.10, 0.0);
         assert_eq!((cautious.cars_passed, cautious.cars_bumped), (1, 0));
         assert_eq!((precise.cars_passed, precise.cars_bumped), (1, 0));
         assert_eq!((failed_risk.cars_passed, failed_risk.cars_bumped), (0, 1));
@@ -3433,9 +3559,15 @@ mod tests {
         let easy = traffic_count(Difficulty::Easy);
         let medium = traffic_count(Difficulty::Medium);
         let hard = traffic_count(Difficulty::Hard);
-        assert_eq!(medium, easy + usize::from(t.traffic_medium_extra));
-        assert_eq!(hard, easy + usize::from(t.traffic_hard_extra));
-        assert!(hard <= easy + 2, "difficulty increase must stay subtle");
+        // Extras are per reference 210 m stretch, so they scale with the loop.
+        let spans = Game::new(314, Difficulty::Easy, &t).road.length / 210.0;
+        let extra = |per_span: u8| (f32::from(per_span) * spans).round() as usize;
+        assert_eq!(medium, easy + extra(t.traffic_medium_extra));
+        assert_eq!(hard, easy + extra(t.traffic_hard_extra));
+        assert!(
+            (hard as f32) <= easy as f32 * 1.15,
+            "difficulty increase must stay subtle"
+        );
     }
 
     fn rare_help_test_game(seed: u64) -> (Game, Tuning, u64) {

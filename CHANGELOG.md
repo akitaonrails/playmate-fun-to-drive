@@ -5,6 +5,23 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+- Reworked steering into arcade-racer lateral dynamics: no centering pull on
+  straights, a faster steering response and keyboard ramp, and corners that
+  keep pushing the car outward with speed for as long as they last.
+- Redesigned the course as a ~1.2 km loop (was ~210 m) with sustained
+  corners: a long gentle sweeper, a tight bend, an S, and a long near
+  full-lock corner that must be held for 4+ seconds at HIGH. Traffic,
+  scenery, hills and difficulty extras scale with length to keep density.
+- Corners now throw the car outward like a real force: the slide builds on
+  entry, carries momentum past the exit, and is strong enough that the main
+  corners need sustained counter-steering. Hard corners squeal and smoke
+  the tyres, and the road visibly bends harder toward the horizon.
+- Cut the toy's steering roll and side-shift to a quarter of the previous release.
+- Added a turning pose to the player car (rear swings wide, inside flank and
+  front wheel appear, slight outward roll) and a horizon/cloud pan that
+  follows road curvature through corners.
+- Added an overhead desk-lamp spotlight so the toy shell reads brighter.
+
 ## [0.11.1] — 2026-10-20
 
 - Clarified the compact mobile utility rail with icon-and-label controls,

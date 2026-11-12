@@ -12,6 +12,15 @@ use super::{WeatherVisuals, HORIZON_Y};
 
 const SCENE_COUNT: usize = 8;
 const SCENE_BLEND_FRACTION: f32 = 0.12;
+/// Every scene is authored across this panorama width (= the game view), so
+/// panning wraps it seamlessly.
+const PANORAMA_WIDTH: f32 = 960.0;
+/// Horizon pan (px) per meter driven through a full-strength corner. The
+/// skyline slides against the turn, selling corners as real changes of
+/// heading rather than a road that merely wiggles.
+const PAN_PX_PER_CURVE_M: f32 = 3.5;
+/// Larger distance jumps are restarts or teleports, not driving.
+const PAN_MAX_STEP_M: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
@@ -38,6 +47,7 @@ pub(super) enum RoadsideTheme {
 #[derive(Component)]
 pub(super) struct BackdropPixel {
     kind: BackdropKind,
+    base_x: f32,
     base: Color,
     glow: bool,
     phase: f32,
@@ -166,6 +176,7 @@ fn pixel(
         Visibility::Hidden,
         BackdropPixel {
             kind,
+            base_x: x.round(),
             base: color,
             glow,
             phase: (x * 0.037 + y * 0.019).rem_euclid(std::f32::consts::TAU),
@@ -563,18 +574,48 @@ pub(super) fn spawn(commands: &mut Commands) {
     spawn_paris(commands);
 }
 
+/// Accumulated horizon pan, driven by curvature integrated over distance.
+#[derive(Resource, Default)]
+pub(super) struct BackdropPan {
+    offset: f32,
+    last_distance: f32,
+    /// Pan applied on the latest update (px), for other sky layers to follow.
+    pub(super) step_px: f32,
+}
+
+impl BackdropPan {
+    fn advance(&mut self, distance: f32, curve: f32) {
+        let step = distance - self.last_distance;
+        self.last_distance = distance;
+        self.step_px = if step > 0.0 && step < PAN_MAX_STEP_M {
+            -curve * step * PAN_PX_PER_CURVE_M
+        } else {
+            0.0
+        };
+        self.offset = (self.offset + self.step_px).rem_euclid(PANORAMA_WIDTH);
+    }
+}
+
+fn panned_x(base_x: f32, offset: f32) -> f32 {
+    let half = PANORAMA_WIDTH * 0.5;
+    ((base_x + offset + half).rem_euclid(PANORAMA_WIDTH) - half).round()
+}
+
 pub(super) fn sync(
     sim: Res<Sim>,
     scenery: Res<SceneryRun>,
     weather: Res<WeatherVisuals>,
     time: Res<Time>,
-    mut pixels: Query<(&BackdropPixel, &mut Sprite, &mut Visibility)>,
+    mut pan: ResMut<BackdropPan>,
+    mut pixels: Query<(&BackdropPixel, &mut Sprite, &mut Visibility, &mut Transform)>,
 ) {
+    pan.advance(sim.0.distance, sim.0.road.curve_at(sim.0.distance));
     let daylight = game_core::environment::daylight(sim.0.environment_time);
     let seasons = game_core::environment::season_weights(sim.0.environment_time);
     let weights = scene_weights(*scenery, sim.0.environment_time);
     let weather_visibility = 1.0 - weather.cloudy * 0.12 - weather.rain_visible * 0.28;
-    for (pixel, mut sprite, mut visibility) in &mut pixels {
+    for (pixel, mut sprite, mut visibility, mut transform) in &mut pixels {
+        transform.translation.x = panned_x(pixel.base_x, pan.offset);
         let weight = weights[pixel.kind as usize] * weather_visibility;
         if weight < 0.003 {
             *visibility = Visibility::Hidden;
@@ -620,6 +661,18 @@ mod tests {
         entropy: 42,
         serial: 0,
     };
+
+    #[test]
+    fn horizon_pans_against_the_corner_and_wraps() {
+        let mut pan = BackdropPan::default();
+        pan.advance(19.0, 1.0);
+        assert!(pan.offset > PANORAMA_WIDTH * 0.5, "right turn pans left");
+        let before = pan.offset;
+        pan.advance(0.0, 1.0); // restart: no jump
+        assert_eq!(pan.offset, before);
+        assert_eq!(panned_x(470.0, 20.0), -470.0);
+        assert_eq!(panned_x(-470.0, -20.0), 470.0);
+    }
 
     #[test]
     fn scene_weights_are_normalized_and_continuous_at_day_boundaries() {

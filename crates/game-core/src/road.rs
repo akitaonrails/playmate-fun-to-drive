@@ -4,7 +4,11 @@
 
 use crate::rng::Rng;
 
-pub const CURVE_SAMPLES: usize = 128;
+pub const CURVE_SAMPLES: usize = 512;
+/// Reference stretch that traffic, scenery and hill densities are tuned for.
+const DENSITY_SPAN_M: f32 = 210.0;
+/// The opening stretch stays free of traffic so a run starts fairly.
+const FAIR_START_M: f32 = 46.0;
 
 fn smoothstep(value: f32) -> f32 {
     let t = value.clamp(0.0, 1.0);
@@ -97,31 +101,39 @@ impl RoadLoop {
     /// Generate the same authored loop with a small difficulty-specific
     /// traffic increase. The bonus is deliberately bounded by tuning.
     pub fn generate_with_traffic_bonus(rng: &mut Rng, traffic_bonus: u8) -> Self {
-        let length = rng.range(180.0, 240.0);
+        // A long course gives corners room to be real turns: the main bends
+        // hold full lock for several seconds at HIGH speed.
+        let length = rng.range(1_100.0, 1_300.0);
+        let spans = length / DENSITY_SPAN_M;
         let direction = if rng.next_f32() < 0.5 { -1.0 } else { 1.0 };
         let curve = Self::technical_curve(direction);
 
         // Two low harmonics make broad, seamless rises and dips. Their
         // amplitude keeps grades around a few percent rather than mountains.
+        // Whole periods per loop keep the hills seamless at the joint.
         let elevation_phase = rng.next_f32() * std::f32::consts::TAU;
+        let hills = spans.round().max(1.0);
         let mut elevation = Vec::with_capacity(CURVE_SAMPLES);
         for n in 0..CURVE_SAMPLES {
             let t = n as f32 / CURVE_SAMPLES as f32;
             elevation.push(
-                0.94 * (std::f32::consts::TAU * t + elevation_phase).sin()
-                    + 0.31 * (std::f32::consts::TAU * 2.0 * t + elevation_phase * 0.47).sin(),
+                0.94 * (std::f32::consts::TAU * hills * t + elevation_phase).sin()
+                    + 0.31
+                        * (std::f32::consts::TAU * 2.0 * hills * t + elevation_phase * 0.47).sin(),
             );
         }
 
-        let traffic_count = rng.range(12.0, 17.0).round() as usize + usize::from(traffic_bonus);
-        let scenery_count = rng.range(8.0, 13.0).round() as usize;
+        let traffic_count = (rng.range(12.0, 17.0) * spans).round() as usize
+            + (f32::from(traffic_bonus) * spans).round() as usize;
+        let scenery_count = (rng.range(8.0, 13.0) * spans).round() as usize;
         let traffic_motion = TrafficMotion::default();
         debug_assert!(traffic_motion.validate().is_ok());
         let lanes = [-traffic_motion.lane_offset, 0.0, traffic_motion.lane_offset];
         let mut hazards = Vec::with_capacity(traffic_count + scenery_count);
         for k in 0..traffic_count {
-            // first hazard no earlier than 22% into the loop (fair start)
-            let t = 0.22 + 0.78 * (k as f32 + rng.range(0.25, 0.75)) / traffic_count as f32;
+            // first hazard no earlier than the fair-start stretch
+            let fair = FAIR_START_M / length;
+            let t = fair + (1.0 - fair) * (k as f32 + rng.range(0.25, 0.75)) / traffic_count as f32;
             let s = t * length;
             let lane = lanes[(rng.next_u64() % lanes.len() as u64) as usize];
             let x = (lane + rng.range(-0.05, 0.05)).clamp(-0.9, 0.9);
@@ -174,12 +186,13 @@ impl RoadLoop {
         hazard.x + (target - hazard.x) * smooth
     }
 
-    /// A designed arcade course: a fair opening straight followed by broad
-    /// sweepers, three sustained short-radius corners, and an opposing S-bend.
-    /// Curve magnitude represents inverse radius; segment length represents
-    /// sweep. Every corner has a deliberate eased entry, constant-radius body,
-    /// and eased exit so the road reads as one continuous ribbon rather than a
-    /// sequence of abruptly shifted straight sections.
+    /// A designed arcade course: a fair opening straight, a long gentle
+    /// sweeper, a tight hairpin-like bend, an opposing S, one long full-lock
+    /// corner, and a medium closing bend. Curve magnitude is inverse radius;
+    /// segment length is sweep. On a ~1.2 km loop the main corners hold their
+    /// radius for 80-130 m (3-6 s at HIGH), so the player has to keep steering
+    /// through them instead of flicking past. Every corner has an eased entry,
+    /// a constant-radius body and an eased exit.
     fn technical_curve(direction: f32) -> Vec<f32> {
         #[derive(Clone, Copy)]
         struct Corner {
@@ -191,51 +204,52 @@ impl RoadLoop {
         }
 
         let corners = [
-            // Long, readable opening sweeper.
+            // Long, gentle opening sweeper: a light, sustained hold.
             Corner {
-                start: 0.13,
-                full: 0.17,
-                release: 0.27,
-                end: 0.31,
-                curvature: 0.66 * direction,
+                start: 0.05,
+                full: 0.08,
+                release: 0.20,
+                end: 0.23,
+                curvature: 0.55 * direction,
             },
-            // A tighter opposing corner after only a short breath.
+            // Tight opposing bend after a short breath.
             Corner {
-                start: 0.32,
-                full: 0.35,
-                release: 0.42,
-                end: 0.46,
+                start: 0.27,
+                full: 0.29,
+                release: 0.36,
+                end: 0.38,
                 curvature: -direction,
             },
-            // Overlapping releases create one fluid left-right S transition.
+            // Opposing S-bend, linked through one short transition.
             Corner {
-                start: 0.49,
+                start: 0.41,
+                full: 0.43,
+                release: 0.48,
+                end: 0.50,
+                curvature: 0.85 * direction,
+            },
+            Corner {
+                start: 0.50,
                 full: 0.52,
-                release: 0.58,
-                end: 0.62,
-                curvature: 0.90 * direction,
+                release: 0.57,
+                end: 0.59,
+                curvature: -0.85 * direction,
             },
+            // The big one: a long, near full-lock corner.
             Corner {
-                start: 0.58,
-                full: 0.62,
-                release: 0.68,
-                end: 0.72,
-                curvature: -0.90 * direction,
+                start: 0.64,
+                full: 0.67,
+                release: 0.78,
+                end: 0.81,
+                curvature: 0.95 * direction,
             },
+            // Medium closing bend, then settle before the seam.
             Corner {
-                start: 0.75,
-                full: 0.78,
-                release: 0.85,
-                end: 0.88,
-                curvature: direction,
-            },
-            // Finish with a medium-radius bend and settle before the seam.
-            Corner {
-                start: 0.90,
-                full: 0.925,
-                release: 0.955,
-                end: 0.985,
-                curvature: -0.78 * direction,
+                start: 0.85,
+                full: 0.87,
+                release: 0.93,
+                end: 0.95,
+                curvature: -0.75 * direction,
             },
         ];
         let envelope = |t: f32, corner: Corner| {
@@ -409,22 +423,18 @@ mod tests {
     fn technical_track_has_straights_and_mixed_radius_corners() {
         let r = loop_from(5);
         let at = |t: f32| r.curve_at(t * r.length);
-        assert!(at(0.04).abs() < 0.1, "fair opening straight");
-        assert!((0.58..0.75).contains(&at(0.22).abs()), "broad sweeper");
-        assert!(at(0.36).abs() > 0.9, "first short-radius corner");
-        assert!(at(0.53).signum() != at(0.64).signum(), "opposing S-bend");
-        assert!(at(0.79).abs() > 0.9, "second short-radius corner");
+        assert!(at(0.02).abs() < 0.1, "fair opening straight");
+        assert!((0.5..0.6).contains(&at(0.14).abs()), "gentle sweeper");
+        assert!(at(0.32).abs() > 0.95, "tight corner");
+        assert!(at(0.45).signum() != at(0.54).signum(), "opposing S-bend");
+        assert!(at(0.72).abs() > 0.9, "long full-lock corner");
+        assert!(at(0.61).abs() < 0.1, "straight between corners");
         assert!((at(0.0) - at(1.0)).abs() < 1e-4, "seamless wrap");
 
-        let curved = r.curve.iter().filter(|value| value.abs() >= 0.55).count();
-        let sharp = r.curve.iter().filter(|value| value.abs() >= 0.85).count();
+        let curved = r.curve.iter().filter(|value| value.abs() >= 0.5).count();
         assert!(
             curved >= CURVE_SAMPLES / 2,
             "at least half the loop should be in a readable corner"
-        );
-        assert!(
-            sharp >= CURVE_SAMPLES / 4,
-            "tight corners should be frequent"
         );
         let largest_step = r
             .curve
@@ -432,7 +442,26 @@ mod tests {
             .zip(r.curve.iter().cycle().skip(1))
             .map(|(left, right)| (right - left).abs())
             .fold(0.0f32, f32::max);
-        assert!(largest_step < 0.55, "corner transitions must remain eased");
+        assert!(largest_step < 0.2, "corner transitions must remain eased");
+    }
+
+    #[test]
+    fn main_corners_are_sustained_turns() {
+        // At HIGH cruise (24 m/s) the biggest corner must hold near-full
+        // curvature for several seconds, not a fraction of one.
+        let r = loop_from(5);
+        let step = r.length / (CURVE_SAMPLES * 4) as f32;
+        let mut run = 0.0f32;
+        let mut longest = 0.0f32;
+        for i in 0..CURVE_SAMPLES * 4 {
+            if r.curve_at(i as f32 * step).abs() >= 0.85 {
+                run += step;
+                longest = longest.max(run);
+            } else {
+                run = 0.0;
+            }
+        }
+        assert!(longest / 24.0 > 4.0, "longest corner only {longest} m");
     }
 
     #[test]
@@ -448,7 +477,15 @@ mod tests {
     #[test]
     fn hazards_on_loop_and_spaced() {
         let r = loop_from(77);
-        assert!((20..=30).contains(&r.hazards.len()));
+        let per_span = r.hazards.len() as f32 / (r.length / DENSITY_SPAN_M);
+        assert!((20.0..=30.0).contains(&per_span), "density {per_span}");
+        let first_traffic = r
+            .hazards
+            .iter()
+            .filter(|h| h.kind == HazardKind::Oncoming)
+            .map(|h| h.s)
+            .fold(f32::INFINITY, f32::min);
+        assert!(first_traffic >= FAIR_START_M);
         for h in &r.hazards {
             assert!(h.s >= 0.0 && h.s < r.length);
             match h.kind {
@@ -487,7 +524,15 @@ mod tests {
             }
         }
         assert!(changed > 0, "seed should produce occasional lane changes");
-        assert!(changed < 8, "lane changes should remain occasional");
+        let traffic = r
+            .hazards
+            .iter()
+            .filter(|hazard| hazard.kind == HazardKind::Oncoming)
+            .count();
+        assert!(
+            changed * 2 < traffic,
+            "lane changes should remain occasional"
+        );
     }
 
     #[test]

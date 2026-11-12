@@ -459,8 +459,16 @@ struct MixInput {
     steer: f32,
     brake: f32,
     off_road: f32,
+    /// Corner slide strength in [0, 1]; a hard corner squeals even when dry.
+    corner_load: f32,
     nitro: bool,
     music_track: usize,
+}
+
+/// Tyre squeal from corner load: silent through gentle sweepers, rising once
+/// the corner is throwing the car out hard.
+fn corner_squeal(load: f32) -> f32 {
+    ((load - 0.35) / 0.65).clamp(0.0, 1.0).powf(0.8)
 }
 
 fn mix_targets(input: MixInput) -> MixTargets {
@@ -500,7 +508,10 @@ fn mix_targets(input: MixInput) -> MixTargets {
         ufo: 0.17 * input.ufo.clamp(0.0, 1.0) * EFFECTS_GAIN,
         rain: 0.115 * input.rain.clamp(0.0, 1.0) * EFFECTS_GAIN,
         brake: 0.13 * input.brake.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
-        skid: 0.14 * input.rain.clamp(0.0, 1.0) * slip * speed.min(1.0) * EFFECTS_GAIN,
+        skid: 0.14
+            * (input.rain.clamp(0.0, 1.0) * slip).max(corner_squeal(input.corner_load))
+            * speed.min(1.0)
+            * EFFECTS_GAIN,
         gravel: 0.13 * input.off_road.clamp(0.0, 1.0).powf(0.72) * speed.min(1.0) * EFFECTS_GAIN,
         overrev: 0.105 * input.overrev.clamp(0.0, 1.0) * EFFECTS_GAIN,
         nitro: if input.nitro {
@@ -542,6 +553,7 @@ fn update_mix(
         steer: frame.state.steer,
         brake: frame.state.brake,
         off_road: sim.0.off_road_intensity(&tuning.0),
+        corner_load: sim.0.corner_load(&tuning.0),
         nitro: crate::nitro_effects_active(&sim.0),
         music_track: (sim.0.environment_cycle_index() % MUSIC_TRACKS as u64) as usize,
     });
@@ -763,6 +775,7 @@ mod tests {
             steer: 0.0,
             brake: 0.0,
             off_road: 0.0,
+            corner_load: 0.0,
             nitro: false,
             music_track: 0,
         }
@@ -883,6 +896,20 @@ mod tests {
             wet.music[0] < dry.music[0],
             "nitro should gently duck music"
         );
+    }
+
+    #[test]
+    fn hard_corners_squeal_even_when_dry() {
+        let sweeper = mix_targets(MixInput {
+            corner_load: 0.3,
+            ..driving()
+        });
+        let hairpin = mix_targets(MixInput {
+            corner_load: 0.9,
+            ..driving()
+        });
+        assert_eq!(sweeper.skid, 0.0);
+        assert!(hairpin.skid > 0.0);
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub const S_FAR: f32 = 0.045; // scale at the horizon row
 // Converts integrated world-space curvature into normalized lateral road
 // displacement. Curvature is integrated twice below (heading, then position),
 // matching a real constant-radius arc under perspective.
-pub const CURVE_BEND: f32 = 0.0085;
+pub const CURVE_BEND: f32 = 0.013;
 const ELEVATION_PX_PER_M: f32 = 105.0;
 
 fn row_scale(i: usize) -> f32 {
@@ -137,8 +137,32 @@ struct JumpPickupPart(u8);
 #[derive(Component)]
 struct PalmPart;
 
+/// One layer of the player car decal. `yaw_px` is its sideways shift at a
+/// full right turn; layers at different depths shift by different amounts.
 #[derive(Component)]
-struct CarPart;
+struct CarPart {
+    base_x: f32,
+    yaw_px: f32,
+}
+
+/// Side panel (or its front wheel) revealed on the inside of a turn.
+#[derive(Component)]
+struct CarFlank {
+    side: f32,
+    wheel: bool,
+}
+
+/// Tyre smoke puff behind a rear wheel: `side` is -1/+1, `slot` staggers
+/// the puff cycle.
+#[derive(Component)]
+struct TyreSmoke {
+    side: f32,
+    slot: u8,
+}
+
+/// Smoothed steering pose of the player car, in [-1, 1] (+ = turning right).
+#[derive(Resource, Default)]
+struct CarTurn(f32);
 
 #[derive(Component)]
 struct PlayerRearLight;
@@ -861,6 +885,8 @@ pub fn setup(mut commands: Commands) {
     commands.init_resource::<RoadVisibilityVisuals>();
     commands.init_resource::<NitroVisuals>();
     commands.init_resource::<TimeTravelVisuals>();
+    commands.init_resource::<CarTurn>();
+    commands.init_resource::<backdrop::BackdropPan>();
     commands.init_resource::<InstrumentVisuals>();
     commands.spawn((Camera2d, crate::toy_view::GameCamera));
 
@@ -1204,37 +1230,68 @@ pub fn setup(mut commands: Commands) {
             PlayerCarRoot,
         ))
         .with_children(|car| {
+            // Every layer carries a yaw shift (px at full right turn). Rear
+            // layers swing to the outside of the turn, the cabin leans into
+            // it, and the inside flank is revealed — the classic arcade
+            // "turning frame" read from a fixed chase camera.
+            let part = |x: f32, yaw_px: f32| CarPart { base_x: x, yaw_px };
+            // Inside flank panels + front wheels, hidden until a turn opens them.
+            for side in [-1.0f32, 1.0] {
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.52, 0.56, 0.60), Vec2::new(1.0, 20.0)),
+                    Transform::from_xyz(side * 44.0, 0.0, -0.05),
+                    Visibility::Hidden,
+                    CarFlank { side, wheel: false },
+                ));
+                car.spawn((
+                    Sprite::from_color(Color::srgb(0.025, 0.030, 0.040), Vec2::new(1.0, 18.0)),
+                    Transform::from_xyz(side * 44.0, 1.0, -0.045),
+                    Visibility::Hidden,
+                    CarFlank { side, wheel: true },
+                ));
+            }
+            // Tyre smoke, shown only while a corner throws the car wide.
+            for side in [-1.0f32, 1.0] {
+                for slot in 0..TYRE_SMOKE_PUFFS {
+                    car.spawn((
+                        Sprite::from_color(Color::srgba(0.85, 0.86, 0.88, 0.0), Vec2::splat(10.0)),
+                        Transform::from_xyz(side * 43.0, -14.0, -0.08),
+                        Visibility::Hidden,
+                        TyreSmoke { side, slot },
+                    ));
+                }
+            }
             // Raised wing behind the rear deck.
             car.spawn((
                 Sprite::from_color(Color::srgb(0.055, 0.065, 0.080), Vec2::new(96.0, 4.0)),
                 Transform::from_xyz(0.0, -21.0, 0.02),
-                CarPart,
+                part(0.0, -11.0),
             ));
             for x in [-32.0f32, 32.0] {
                 car.spawn((
                     Sprite::from_color(Color::srgb(0.08, 0.09, 0.11), Vec2::new(4.0, 8.0)),
                     Transform::from_xyz(x, -17.0, 0.01),
-                    CarPart,
+                    part(x, -10.0),
                 ));
             }
             // Oversized wheels frame the low wedge.
-            for x in [-43.0f32, 43.0] {
+            for x in [-REAR_WHEEL_X, REAR_WHEEL_X] {
                 car.spawn((
                     Sprite::from_color(Color::srgb(0.025, 0.030, 0.040), Vec2::new(17.0, 24.0)),
                     Transform::from_xyz(x, -2.0, -0.04),
-                    CarPart,
+                    part(x, REAR_WHEEL_YAW_PX),
                 ));
                 car.spawn((
                     Sprite::from_color(Color::srgb(0.28, 0.31, 0.34), Vec2::new(7.0, 13.0)),
                     Transform::from_xyz(x, -2.0, -0.03),
-                    CarPart,
+                    part(x, REAR_WHEEL_YAW_PX),
                 ));
             }
             // Black diffuser and silver body layers create the stepped rear.
             car.spawn((
                 Sprite::from_color(Color::srgb(0.035, 0.045, 0.060), Vec2::new(84.0, 10.0)),
                 Transform::from_xyz(0.0, -14.0, 0.00),
-                CarPart,
+                part(0.0, -9.0),
             ));
             car.spawn((
                 Sprite::from_color(
@@ -1242,23 +1299,23 @@ pub fn setup(mut commands: Commands) {
                     Vec2::new(PLAYER_CAR_WIDTH_PX - 8.0, 23.0),
                 ),
                 Transform::from_xyz(0.0, -2.5, 0.02),
-                CarPart,
+                part(0.0, LOWER_BODY_YAW_PX),
             ));
             car.spawn((
                 Sprite::from_color(Color::srgb(0.91, 0.93, 0.92), Vec2::new(73.0, 14.0)),
                 Transform::from_xyz(0.0, 10.0, 0.03),
-                CarPart,
+                part(0.0, -1.0),
             ));
             // Panoramic black canopy and the signature razor rear light bar.
             car.spawn((
                 Sprite::from_color(Color::srgb(0.035, 0.060, 0.085), Vec2::new(43.0, 14.0)),
                 Transform::from_xyz(0.0, 8.0, 0.05),
-                CarPart,
+                part(0.0, 3.0),
             ));
             car.spawn((
                 Sprite::from_color(Color::srgb(1.0, 0.035, 0.025), Vec2::new(78.0, 3.0)),
                 Transform::from_xyz(0.0, -9.0, 0.07),
-                CarPart,
+                part(0.0, -9.0),
                 PlayerRearLight,
             ));
             // Four dark round-ish jet/exhaust openings are readable as four
@@ -1267,7 +1324,7 @@ pub fn setup(mut commands: Commands) {
                 car.spawn((
                     Sprite::from_color(Color::srgb(0.01, 0.015, 0.020), Vec2::new(7.0, 5.0)),
                     Transform::from_xyz(x, -14.0, 0.08),
-                    CarPart,
+                    part(x, -9.0),
                 ));
             }
         });
@@ -2364,10 +2421,121 @@ fn finish_pose(progress: f32) -> FinishPose {
     }
 }
 
+/// Rate (1/s) at which the decal's turning pose follows lateral velocity.
+const CAR_TURN_RESPONSE: f32 = 14.0;
+/// Car decal sway toward the turn (px) and outward body roll (rad) at full lock.
+const CAR_TURN_SWAY_PX: f32 = 5.0;
+const CAR_TURN_ROLL: f32 = 0.03;
+/// Inside flank width (px) revealed at full lock.
+const CAR_FLANK_PX: f32 = 22.0;
+/// Rear wheel center and the yaw shifts used by the decal layers that the
+/// smoke and flank attach to.
+const REAR_WHEEL_X: f32 = 43.0;
+const REAR_WHEEL_YAW_PX: f32 = -8.0;
+const LOWER_BODY_YAW_PX: f32 = -6.0;
+/// Smoke puffs per rear wheel and their cycle rate (1/s).
+const TYRE_SMOKE_PUFFS: u8 = 4;
+const TYRE_SMOKE_RATE: f32 = 2.6;
+/// Corner load below which tyres hold quietly.
+const TYRE_SMOKE_THRESHOLD: f32 = 0.3;
+
+fn car_turn_target(sim: &game_core::Game, tuning: &game_core::Tuning) -> f32 {
+    if matches!(sim.phase, Phase::Running) {
+        (sim.steer_velocity / tuning.steer_rate).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_car_turn(
+    time: Res<Time>,
+    sim: Res<Sim>,
+    tuning: Res<TuningRes>,
+    mut turn: ResMut<CarTurn>,
+    mut parts: Query<(&CarPart, &mut Transform)>,
+    mut flanks: Query<(&CarFlank, &mut Transform, &mut Sprite, &mut Visibility), Without<CarPart>>,
+    mut smoke: Query<
+        (&TyreSmoke, &mut Transform, &mut Sprite, &mut Visibility),
+        (Without<CarPart>, Without<CarFlank>),
+    >,
+) {
+    if !sim.0.paused {
+        let response = 1.0 - (-time.delta_secs() * CAR_TURN_RESPONSE).exp();
+        turn.0 += (car_turn_target(&sim.0, &tuning.0) - turn.0) * response;
+    }
+    let turn = turn.0;
+    sync_tyre_smoke(&time, &sim.0, &tuning.0, turn, &mut smoke);
+    for (part, mut transform) in &mut parts {
+        transform.translation.x = (part.base_x + part.yaw_px * turn).round();
+    }
+    let open = (CAR_FLANK_PX * turn.abs()).round();
+    for (flank, mut transform, mut sprite, mut visibility) in &mut flanks {
+        if open < 2.0 || turn.signum() != flank.side {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        // Starts at the shifted lower body's inside edge.
+        let edge = flank.side * (PLAYER_CAR_WIDTH_PX - 8.0) * 0.5 + LOWER_BODY_YAW_PX * turn;
+        let (width, center) = if flank.wheel {
+            let width = (open * 0.55).round().max(2.0);
+            (width, edge + flank.side * (open - width * 0.5))
+        } else {
+            (open, edge + flank.side * open * 0.5)
+        };
+        transform.translation.x = center.round();
+        if let Some(size) = sprite.custom_size.as_mut() {
+            size.x = width;
+        }
+        *visibility = Visibility::Visible;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_tyre_smoke(
+    time: &Time,
+    sim: &game_core::Game,
+    tuning: &game_core::Tuning,
+    turn: f32,
+    smoke: &mut Query<
+        (&TyreSmoke, &mut Transform, &mut Sprite, &mut Visibility),
+        (Without<CarPart>, Without<CarFlank>),
+    >,
+) {
+    let airborne = sim.jump_active() || sim.cold_air_hop_active();
+    let load = if airborne {
+        0.0
+    } else {
+        sim.corner_load(tuning)
+    };
+    let intensity = ((load - TYRE_SMOKE_THRESHOLD) / (1.0 - TYRE_SMOKE_THRESHOLD)).clamp(0.0, 1.0);
+    // A positive slide moves the road right, i.e. throws the car left.
+    let outer = -sim.slide_velocity.signum();
+    for (puff, mut transform, mut sprite, mut visibility) in smoke.iter_mut() {
+        let strength = intensity * if puff.side == outer { 1.0 } else { 0.45 };
+        if strength < 0.02 {
+            *visibility = Visibility::Hidden;
+            continue;
+        }
+        let phase = (time.elapsed_secs() * TYRE_SMOKE_RATE
+            + f32::from(puff.slot) / f32::from(TYRE_SMOKE_PUFFS)
+            + if puff.side > 0.0 { 0.13 } else { 0.0 })
+        .fract();
+        let wheel_x = puff.side * REAR_WHEEL_X + REAR_WHEEL_YAW_PX * turn;
+        transform.translation.x = (wheel_x + outer * phase * 18.0).round();
+        transform.translation.y = (-14.0 - phase * 22.0).round();
+        let size = (10.0 + phase * 18.0).round();
+        sprite.custom_size = Some(Vec2::splat(size));
+        sprite.color = Color::srgba(0.85, 0.86, 0.88, strength * (1.0 - phase) * 0.6);
+        *visibility = Visibility::Visible;
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn sync_jump_car(
     sim: Res<Sim>,
     tuning: Res<TuningRes>,
+    turn: Res<CarTurn>,
     finish: Res<crate::FinishSequence>,
     launch: Res<crate::LaunchSequence>,
     mut car: Query<(&mut Transform, &mut Visibility), With<PlayerCarRoot>>,
@@ -2388,9 +2556,14 @@ fn sync_jump_car(
         (0.0, 0.0)
     };
     if let Ok((mut transform, mut visibility)) = car.single_mut() {
-        transform.translation = Vec3::new(0.0, CAR_Y + pose.height + launch_height, 0.5);
-        // This is intentionally a simple 2D sprite spin in the screen plane.
-        transform.rotation = Quat::from_rotation_z(pose.sprite_spin);
+        transform.translation = Vec3::new(
+            (turn.0 * CAR_TURN_SWAY_PX).round(),
+            CAR_Y + pose.height + launch_height,
+            0.5,
+        );
+        // This is intentionally a simple 2D sprite spin in the screen plane;
+        // the steering roll leans the body to the outside of the turn.
+        transform.rotation = Quat::from_rotation_z(pose.sprite_spin + turn.0 * CAR_TURN_ROLL);
         transform.scale = Vec3::new(
             pose.scale.x,
             pose.scale.y * finale.rear_scale_y,
@@ -3510,6 +3683,7 @@ fn roadside_prop_palette(
 fn sync_environment(
     sim: Res<Sim>,
     time: Res<Time>,
+    pan: Res<backdrop::BackdropPan>,
     mut colors: ResMut<Palette>,
     mut visual_weather: ResMut<WeatherVisuals>,
     mut sky: Query<
@@ -3676,9 +3850,12 @@ fn sync_environment(
             0.88 + day * 0.10,
             (density * night_visibility).clamp(0.0, 0.9),
         );
-        tf.translation.x += (8.0 + (i % 4) as f32 * 2.5) * dt;
+        // Clouds drift on the wind and swing with the horizon through corners.
+        tf.translation.x += (8.0 + (i % 4) as f32 * 2.5) * dt + pan.step_px;
         if tf.translation.x > 530.0 {
-            tf.translation.x = -530.0;
+            tf.translation.x -= 1060.0;
+        } else if tf.translation.x < -530.0 {
+            tf.translation.x += 1060.0;
         }
     }
 
@@ -4161,7 +4338,7 @@ pub fn add_view_systems(app: &mut App) {
             sync_projected_headlights,
             sync_nitro_pickup,
             sync_jump_pickup,
-            sync_jump_car,
+            (sync_car_turn, sync_jump_car).chain(),
             sync_player_rear_light,
             sync_nitro_exhaust,
             sync_nitro_speed_lines,

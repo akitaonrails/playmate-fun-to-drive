@@ -87,6 +87,13 @@ exceeds the limit (off-road, with grace) or an oncoming hazard crosses the
 car band. Verified live: deterministic crash at the same meterage for the
 same seed+input (regression-friendly).
 
+**Revised (Unreleased)**: the "drift toward the printed amplitude" spring
+made straights pull the car back to center and corners feel like a fixed
+sideways offset. Lateral motion is now velocity-based, arcade-racer style:
+steering sets a lateral velocity with a ~70 ms response, corners add an
+outward slide proportional to curvature and speed, and nothing re-centers
+the car on a straight. Steering keeps a 20% margin over the worst slide.
+
 ## D8 — Score = mileage (toy-authentic; superseded by D11)
 
 Tomy's trip counter IS the score, so `score = distance (m)`; HIGH gear

@@ -125,7 +125,7 @@ mod tests {
             v = k.update(false, true, 1.0 / 60.0, &t); // 100 ms tap
         }
         assert!(
-            v > 0.5 && v < 0.65,
+            v > 0.75 && v < 0.9,
             "tap should be responsive but shaped: {v}"
         );
     }

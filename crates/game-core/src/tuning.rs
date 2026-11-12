@@ -36,20 +36,31 @@ pub struct Tuning {
     pub straightaway_speed_multiplier: f32,
     pub normal_high_speed_cap: f32,
     pub straightaway_high_speed_cap: f32,
-    /// How strongly the printed curve pulls the road aside at the car row.
-    pub curve_gain: f32,
     /// Fractional target-speed response per unit of road grade. Positive
     /// slopes slow the car; negative slopes give the same modest assistance.
     pub slope_speed_gain: f32,
     pub slope_speed_min_factor: f32,
     pub slope_speed_max_factor: f32,
-    /// Rate at which road_x chases the curve target (per second at LOW speed).
-    pub drift_rate: f32,
-    /// Maximum speed multiplier applied to curve drift. Without this cap a
+    /// Outward slide (half-widths/s) through a full-strength corner at LOW
+    /// speed. It scales with speed and is a velocity, not a spring: corners
+    /// keep pushing the car wide for as long as they last, and straights
+    /// never pull it back toward the centerline.
+    pub centrifugal_rate: f32,
+    /// How quickly the corner slide builds toward full strength and bleeds
+    /// off after the corner (1/s). Lower = more momentum carried.
+    pub slide_build_rate: f32,
+    /// Maximum speed multiplier applied to corner slide. Without this cap a
     /// nitro-speed sharp corner can overpower even full steering input.
     pub curve_drift_speed_cap: f32,
-    /// Drum shift velocity at full steering input (half-widths/s).
+    /// Lateral car velocity at full steering input (half-widths/s).
     pub steer_rate: f32,
+    /// How quickly lateral velocity reaches the steering target (1/s). High
+    /// enough to feel immediate, low enough that the car carries a little
+    /// weight into and out of each input.
+    pub steer_response: f32,
+    /// Fraction of steering authority available while nearly stationary; full
+    /// authority arrives at LOW cruising speed.
+    pub steer_low_speed_authority: f32,
     /// Subtle loss of steering authority during precipitation.
     pub rain_steer_factor: f32,
     pub snow_steer_factor: f32,
@@ -98,7 +109,7 @@ pub struct Tuning {
     pub traffic_easy: TrafficMotion,
     pub traffic_medium: TrafficMotion,
     pub traffic_hard: TrafficMotion,
-    /// Additional generated traffic cars relative to Easy.
+    /// Additional generated traffic cars relative to Easy, per 210 m of loop.
     pub traffic_medium_extra: u8,
     pub traffic_hard_extra: u8,
     /// Crash/bump response.
@@ -162,13 +173,15 @@ impl Default for Tuning {
             straightaway_speed_multiplier: 1.035,
             normal_high_speed_cap: 87.0 / 3.6,
             straightaway_high_speed_cap: 89.5 / 3.6,
-            curve_gain: 1.20,
             slope_speed_gain: 1.75,
             slope_speed_min_factor: 0.89,
             slope_speed_max_factor: 1.10,
-            drift_rate: 0.75,
-            curve_drift_speed_cap: 1.60,
-            steer_rate: 2.25,
+            centrifugal_rate: 1.30,
+            slide_build_rate: 3.0,
+            curve_drift_speed_cap: 2.20,
+            steer_rate: 3.5,
+            steer_response: 14.0,
+            steer_low_speed_authority: 0.35,
             rain_steer_factor: 0.94,
             snow_steer_factor: 0.90,
             off_road_limit: 1.02,
@@ -222,8 +235,8 @@ impl Default for Tuning {
             crash_flash_secs: 0.9,
             body_k: 55.0,
             body_c: 7.5,
-            body_roll_gain: 0.045,
-            body_shift_gain: 0.005,
+            body_roll_gain: 0.011,
+            body_shift_gain: 0.00125,
             body_pitch_gain: 0.045,
             heave_gain: 0.0022,
             heave_freq: 9.0,
@@ -234,14 +247,19 @@ impl Default for Tuning {
             crash_shake_gain: 0.020,
             crash_shake_roll: 0.13,
             pad_deadzone: 0.06,
-            kb_tap_intensity: 0.45,
-            kb_ramp_secs: 0.45,
+            kb_tap_intensity: 0.65,
+            kb_ramp_secs: 0.22,
             kb_release_decay: 12.0,
         }
     }
 }
 
 impl Tuning {
+    /// Corner slide speed (half-widths/s) at |curve| = 1 and capped speed.
+    pub fn worst_corner_slide(&self) -> f32 {
+        self.centrifugal_rate * self.curve_drift_speed_cap
+    }
+
     /// Sanity bounds — tuned values must stay playable; tested so a bad edit
     /// fails `make check` instead of shipping a regression.
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -300,9 +318,6 @@ impl Tuning {
         {
             return Err("high-speed caps must preserve the 87/88 mph progression");
         }
-        if !(0.0..=2.0).contains(&self.curve_gain) {
-            return Err("curve_gain out of [0, 2]");
-        }
         if !(0.0..=3.0).contains(&self.slope_speed_gain) {
             return Err("slope_speed_gain out of [0, 3]");
         }
@@ -312,8 +327,11 @@ impl Tuning {
         {
             return Err("slope speed factor bounds invalid");
         }
-        if !(0.05..=5.0).contains(&self.drift_rate) {
-            return Err("drift_rate out of [0.05, 5]");
+        if !(0.0..=2.0).contains(&self.centrifugal_rate) {
+            return Err("centrifugal_rate out of [0, 2]");
+        }
+        if !(1.0..=20.0).contains(&self.slide_build_rate) {
+            return Err("slide_build_rate out of [1, 20]");
         }
         if !(1.0..=3.0).contains(&self.curve_drift_speed_cap) {
             return Err("curve_drift_speed_cap out of [1, 3]");
@@ -321,14 +339,19 @@ impl Tuning {
         if !(0.3..=4.0).contains(&self.steer_rate) {
             return Err("steer_rate out of [0.3, 4]");
         }
+        if !(4.0..=40.0).contains(&self.steer_response) {
+            return Err("steer_response out of [4, 40]");
+        }
+        if !(0.0..=1.0).contains(&self.steer_low_speed_authority) {
+            return Err("steer_low_speed_authority out of [0, 1]");
+        }
         if !(0.80..=1.0).contains(&self.rain_steer_factor)
             || !(0.80..=self.rain_steer_factor).contains(&self.snow_steer_factor)
         {
             return Err("weather steering factors must be subtle and snow no grippier than rain");
         }
-        let worst_center_drift = self.drift_rate * self.curve_gain * self.curve_drift_speed_cap;
-        if self.steer_rate < worst_center_drift * 1.20 {
-            return Err("steering needs 20% authority over maximum center curve drift");
+        if self.steer_rate < self.worst_corner_slide() * 1.20 {
+            return Err("steering needs 20% authority over maximum corner slide");
         }
         if !(0.8..=1.3).contains(&self.off_road_limit) {
             return Err("off_road_limit out of [0.8, 1.3]");
@@ -541,8 +564,7 @@ mod tests {
     #[test]
     fn steering_keeps_margin_over_nitro_curve_drift() {
         let t = Tuning::default();
-        let worst_center_drift = t.drift_rate * t.curve_gain * t.curve_drift_speed_cap;
-        assert!(t.steer_rate >= worst_center_drift * 1.20);
+        assert!(t.steer_rate >= t.worst_corner_slide() * 1.20);
         assert!(
             t.curve_drift_speed_cap
                 < t.scroll_speed_high * t.nitro_speed_multiplier / t.scroll_speed_low,
@@ -581,7 +603,7 @@ mod tests {
     #[test]
     fn rejects_steering_weaker_than_drift() {
         let mut t = Tuning::default();
-        t.steer_rate = t.drift_rate * t.curve_gain;
+        t.steer_rate = t.worst_corner_slide();
         assert!(t.validate().is_err());
     }
 

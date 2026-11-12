@@ -374,6 +374,22 @@ pub fn setup(
         },
         Transform::from_xyz(0.30, 0.48, 0.24).looking_at(Vec3::new(-0.035, 0.065, 0.0), Vec3::Y),
     ));
+    // Desk-lamp key straight above the toy: a soft neutral pool on the top
+    // shell, dash and controls so the toy reads clearly instead of sinking
+    // into the room. It faces down, so it never washes out the front screen.
+    commands.spawn((
+        SpotLight {
+            color: Color::srgb(1.0, 0.93, 0.82),
+            intensity: 2_400.0,
+            range: 1.1,
+            radius: 0.10,
+            inner_angle: 0.26,
+            outer_angle: 0.62,
+            shadow_maps_enabled: quality.bloom,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.62, 0.06).looking_at(Vec3::new(0.0, 0.08, 0.0), Vec3::Y),
+    ));
     // Low cool rim separates the dark shell from the wall.
     commands.spawn((
         PointLight {
