@@ -5,6 +5,8 @@ milestone (docs/PLAN.md).
 
 ## Unreleased
 
+## [0.12.0] — 2026-11-12
+
 - Reworked steering into arcade-racer lateral dynamics: no centering pull on
   straights, a faster steering response and keyboard ramp, and corners that
   keep pushing the car outward with speed for as long as they last.
